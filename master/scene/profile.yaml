@@ -1,0 +1,55 @@
+scene:
+  - name: kitchenTable
+    type: table
+    position: [1.0, 2.0, 0.0]
+    description: "厨房桌子"
+    contains:
+      - apple
+      - pear
+      - banana
+      - knife
+
+  - name: customTable
+    type: table
+    position: [2.0, 1.0, 0.0]
+    description: "自定义桌子"
+    contains:
+      - basket
+      - plate
+      - cup
+
+  - name: servingTable
+    type: table
+    position: [3.0, 2.0, 0.0]
+    description: "服务桌"
+    contains:
+      - bowl
+      - fork
+      - spoon
+
+  - name: basket
+    type: container
+    position: [1.5, 1.5, 0.5]
+    description: "篮子"
+    contains:
+      - egg
+
+  - name: trashCan
+    type: container
+    position: [4.0, 3.0, 0.0]
+    description: "垃圾桶"
+
+  - name: entrance
+    type: location
+    position: [0.0, 0.0, 0.0]
+    description: "入口"
+
+  - name: livingRoom
+    type: location
+    position: [2.0, 3.0, 0.0]
+    description: "客厅"
+
+  - name: bedroom
+    type: location
+    position: [4.0, 1.0, 0.0]
+    description: "卧室"
