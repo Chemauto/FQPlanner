@@ -15,6 +15,9 @@ from slaver.tools.monitoring import AgentLogger, LogLevel, Monitor
 
 logger = getLogger(__name__)
 
+# VERSION MARKER - v2.1 with JSON tool call parsing
+print("[SLAVER AGENT] Loading slaver_agent.py v2.1 with JSON tool call parsing", flush=True)
+
 
 class MultiStepAgent:
     """
@@ -56,6 +59,7 @@ class MultiStepAgent:
         self.monitor = Monitor(self.model, self.logger)
         self.step_callbacks = step_callbacks if step_callbacks is not None else []
         self.step_callbacks.append(self.monitor.update_metrics)
+        self.last_tool_result = None  # Store the last tool execution result
 
     async def run(
         self,
@@ -103,7 +107,15 @@ class MultiStepAgent:
             )
             answer = await self.step(step)
             if answer == "final_answer":
-                return "Mission accomplished"
+                # Return the actual tool execution result if available, otherwise use default message
+                if self.last_tool_result:
+                    self.logger.log(
+                        f"Task completed with result: {self.last_tool_result}",
+                        level=LogLevel.INFO,
+                    )
+                    return self.last_tool_result
+                else:
+                    return "Mission accomplished"
 
             self.collaborator.record_agent_status(self.robot_name, answer)
             step.end_time = time.time()
@@ -155,8 +167,34 @@ class ToolCallingAgent(MultiStepAgent):
             ),
             level=LogLevel.INFO,
         )
+
+        # Log before MCP call
+        self.logger.log(f"[DEBUG] About to call MCP tool: {tool_name}", level=LogLevel.INFO)
+
         observation = await self.tool_executor(tool_name, json.loads(tool_arguments))
-        observation = observation.content[0].text
+
+        # Log the raw observation structure
+        self.logger.log(f"[DEBUG] Raw observation type: {type(observation)}", level=LogLevel.INFO)
+        self.logger.log(f"[DEBUG] Raw observation: {observation}", level=LogLevel.INFO)
+
+        # Handle different return formats from MCP
+        if hasattr(observation, 'content') and len(observation.content) > 0:
+            self.logger.log(f"[DEBUG] Observation.content type: {type(observation.content)}", level=LogLevel.INFO)
+            self.logger.log(f"[DEBUG] Observation.content[0] type: {type(observation.content[0])}", level=LogLevel.INFO)
+
+            if hasattr(observation.content[0], 'text'):
+                observation = observation.content[0].text
+                self.logger.log(f"[DEBUG] Extracted text from content[0].text", level=LogLevel.INFO)
+            else:
+                observation = str(observation.content[0])
+                self.logger.log(f"[DEBUG] Converted content[0] to string", level=LogLevel.INFO)
+        else:
+            observation = str(observation)
+            self.logger.log(f"[DEBUG] Converted observation to string", level=LogLevel.INFO)
+
+        # Store the last tool execution result
+        self.last_tool_result = observation
+
         self.logger.log(
             f"Observations: {observation.replace('[', '|')}",  # escape potential rich-tag-like components
             level=LogLevel.INFO,
@@ -217,18 +255,41 @@ class ToolCallingAgent(MultiStepAgent):
             title="Output message of the LLM:",
             level=LogLevel.DEBUG,
         )
+
+        # Initialize tool_name and tool_arguments
+        tool_name = None
+        tool_arguments = None
+
+        # Check if model returned native tool_calls format
         if model_message.tool_calls:
             tool_call = model_message.tool_calls[0]
             tool_name = tool_call.function.name
             tool_arguments = tool_call.function.arguments
+            self.logger.log(f"[STEP DEBUG] Got native tool_calls format: {tool_name}", level=LogLevel.INFO)
         else:
+            # Try to parse tool call from JSON content (fallback for models that return JSON)
+            if model_message.content:
+                try:
+                    parsed_content = json.loads(model_message.content)
+                    if isinstance(parsed_content, dict) and "name" in parsed_content:
+                        tool_name = parsed_content.get("name")
+                        tool_arguments = json.dumps(parsed_content.get("arguments", {}))
+                        self.logger.log(f"[STEP DEBUG] Parsed tool call from JSON content: {tool_name}", level=LogLevel.INFO)
+                except (json.JSONDecodeError, TypeError) as e:
+                    self.logger.log(f"[STEP DEBUG] Content is not valid JSON: {e}", level=LogLevel.DEBUG)
+
+        # If no tool call found, return final_answer
+        if not tool_name:
+            self.logger.log("[STEP DEBUG] No tool calls found, returning final_answer", level=LogLevel.INFO)
             return "final_answer"
 
         current_call = {"tool_name": tool_name, "tool_arguments": tool_arguments}
 
         if self.tool_call and self.tool_call[-1] == current_call:
+            self.logger.log("[STEP DEBUG] Duplicate tool call detected, returning final_answer", level=LogLevel.INFO)
             return "final_answer"
         else:
             self.tool_call.append(current_call)
 
+        self.logger.log(f"[STEP DEBUG] Calling _execute_tool_call for {tool_name}", level=LogLevel.INFO)
         return await self._execute_tool_call(tool_name, tool_arguments, memory_step)
