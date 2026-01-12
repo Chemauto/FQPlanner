@@ -55,42 +55,45 @@ scene:
 
 ## 3. 核心技能：`skill.py` 解析
 
-机器人的所有能力都定义在 `slaver/demo_robot_local/skill.py` 文件中。精简后的版本只包含导航功能。
+机器人的所有能力都定义在 `slaver/demo_robot_local/skill.py` 文件中。现在它包含两种移动相关的技能。
 
+### 技能1: `navigate_to_target` (导航到目标)
+用于移动到场景中预定义的、有名称的地标。
 ```python
-from mcp.server.fastmcp import FastMCP
-
-# 初始化一个名为 "robots" 的技能服务
-mcp = FastMCP("robots")
-
 @mcp.tool()
 async def navigate_to_target(target: str) -> tuple[str, dict]:
     """
-    导航到一个目标位置。
+    Navigate to a predefined target location. This is for moving to known landmarks.
     Args:
-        target: 导航目标的名称 (例如 "kitchenTable", "trashCan")。
+        target: The name of the navigation destination (eg., "kitchenTable", "trashCan").
     """
-    # 在真实机器人上，这里应包含实际的导航控制代码。
-    # 在当前模拟中，我们仅打印成功信息，并返回结果。
-    result = f"Navigation to {target} has been successfully performed."
-    print(result)
-    
-    # 返回的字典会更新机器人的内部状态，表示它现在位于新位置。
-    return result, {"position": f"{target}"}
-
-if __name__ == "__main__":
-    # 启动技能服务，等待 Master 的指令调用
-    mcp.run(transport="stdio")
+    # ... (实现细节)
 ```
 
-- `@mcp.tool()`: 这是一个装饰器，它将 `navigate_to_target` 函数注册为一个可被 Master 远程调用的“工具”或“技能”。
-- `target: str`: 函数的参数，即自然语言指令中解析出的目标位置名称（例如 `kitchenTable`）。
+### 技能2: `move` (精确移动)
+用于执行基于方向、速度和时间的精确相对移动。
+```python
+@mcp.tool()
+async def move(direction: float, speed: float, duration: float) -> tuple[str, dict]:
+    """
+    Move the robot in a specific direction for a certain duration. This is for precise, relative movements.
+    Args:
+        direction: The direction of movement in degrees (0-360), where 0 is forward.
+        speed: The speed of movement in meters per second.
+        duration: The duration of the movement in seconds.
+    """
+    # ... (实现细节)
+```
+-   **`@mcp.tool()`**: 这个装饰器将函数注册为一个可被 Master 远程调用的“技能”。
+-   **参数**: LLM 会从您的自然语言指令中解析出这些参数（如 `target`, `direction`, `speed`, `duration`）。
 
 ---
 
 ## 4. 运行与测试
 
 请按照 `README.md` 中的指示，通过手动或Web UI的方式启动 **Master**、**Slaver** 和 **Deploy** 服务。
+
+**重要提示**: 由于您更改了 `skill.py`，请务必**重启 Slaver 服务**以加载新的 `move` 技能。
 
 系统完全启动后，推荐使用根目录下的 `test_navigation.py` 脚本来测试导航功能。
 
@@ -122,27 +125,23 @@ if __name__ == "__main__":
 
 在**模式3**下，您可以尝试输入以下指令：
 
--   **基础导航**:
+-   **基础导航 (使用 `navigate_to_target`)**:
     -   `到垃圾桶`
     -   `去客厅`
     -   `navigate to bedroom`
-    -   `回到入口`
+
+-   **精确移动控制 (使用 `move`)**:
+    -   `让机器人向前移动1米` (LLM需要推断速度和时间)
+    -   `让机器人向右转90度` (LLM需要推断这是一个旋转动作)
+    -   `让机器人沿着正前方偏60度的方向以1米每秒的速度走2秒`
 
 -   **多点导航 (复合任务)**:
     -   `先到垃圾桶，然后去客厅，最后去卧室`
-    -   `依次访问厨房桌子、服务桌、自定义桌子`
-
--   **相对位置**:
-    -   `到垃圾桶前方`
-    -   `去厨房桌子旁边`
-
--   **中英文混合**:
-    -   `navigate to 垃圾桶`
 
 ### 4.4 如何观察执行结果
 
 -   **测试脚本终端**: 会实时显示任务发送的状态以及从 Master Agent 返回的`任务分解结果` (JSON格式)。
--   **Slaver 终端**: 当 Slaver 成功执行技能后，会打印出类似 `Navigation to bedroom has been successfully performed.` 的消息。
+-   **Slaver 终端**: 当 Slaver 成功执行技能后，会打印出类似 `Navigation to bedroom has been successfully performed.` 或 `Moved 2.00 meters at a 60.0 degree angle.` 的消息。
 -   **Master 终端**: 您可以观察到 Master 接收任务、进行任务规划的详细日志。
 
 **注意**: 如果您在 Slaver 终端没有看到技能执行的 `print` 输出，请检查 `slaver/run.py` 的配置。默认情况下，详细日志可能被重定向到了 `slaver/.log/agent.log` 文件中。您可以通过 `tail -f slaver/.log/agent.log` 命令来实时查看。
