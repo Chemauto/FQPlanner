@@ -19,9 +19,7 @@ cd RoboOS
 # 创建 Conda 环境并安装依赖
 conda create -n RoboOS python=3.10
 conda activate RoboOS
-# It is recommended to use a virtual environment:
 pip install -r requirements.txt
-# Install flag_scale from GitHub
 
 git clone https://github.com/FlagOpen/FlagScale 
 #已经安装就不需要再clone了
@@ -29,9 +27,6 @@ cd FlagScale
 git checkout 3fc2037f90917227bd4aebabd9d7b330523f437c
 #版本提前安装好了
 
-
-# Install in editable mode with PYTHONPATH
-PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation 
 
 ### 3. 运行系统
 
