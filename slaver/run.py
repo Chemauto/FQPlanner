@@ -119,19 +119,22 @@ class RobotManager:
             return
 
         os.makedirs("./.log", exist_ok=True)
-        
+
+        # Clear previous task status from Redis to avoid state pollution
+        self.collaborator.clear_agent_status(self.robot_name)
+
         # Use tool matcher to find relevant tools for the task
         task = task_data["task"]
         matched_tools = self.tool_matcher.match_tools(task)
-        
+
         # Filter tools based on matching results
         if matched_tools:
             matched_tool_names = [tool_name for tool_name, _ in matched_tools]
-            filtered_tools = [tool for tool in self.tools 
+            filtered_tools = [tool for tool in self.tools
                            if tool.get("function", {}).get("name") in matched_tool_names]
         else:
             filtered_tools = self.tools
-        
+
         agent = ToolCallingAgent(
             tools=filtered_tools,
             verbosity_level=2,
@@ -142,7 +145,7 @@ class RobotManager:
             collaborator=self.collaborator,
             tool_executor=self.session.call_tool,
         )
-        
+
         result = await agent.run(task)
         self._send_result(
             robot_name=self.robot_name,

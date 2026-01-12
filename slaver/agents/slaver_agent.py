@@ -164,6 +164,8 @@ class ToolCallingAgent(MultiStepAgent):
             ),
             level=LogLevel.INFO,
         )
+        # Log to file
+        self.logger.log2file(f"Calling tool: '{tool_name}' with arguments: {tool_arguments}", level=LogLevel.INFO)
 
         observation = await self.tool_executor(tool_name, json.loads(tool_arguments))
 
@@ -183,6 +185,8 @@ class ToolCallingAgent(MultiStepAgent):
             f"Observations: {observation.replace('[', '|')}",  # escape potential rich-tag-like components
             level=LogLevel.INFO,
         )
+        # Log to file
+        self.logger.log2file(f"Observations: {observation}", level=LogLevel.INFO)
 
         # Construct memory input
         memory_input = {

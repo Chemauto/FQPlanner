@@ -23,6 +23,7 @@ model:
     cloud_api_key: "EMPTY"
     # URL of the cloud server
     cloud_server: "http://localhost:4567/v1/"
+    #远程修改这里
     # Maximum number of chat messages to keep in memory
     max_chat_message: 50
 
