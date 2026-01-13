@@ -21,6 +21,7 @@ conda create -n RoboOS python=3.10
 conda activate RoboOS
 pip install -r requirements.txt
 #如果出现问题的话就先注释掉有问题的项目，或者先将pytorch版本改成2.5.1，
+#如果是50系显卡建议安装2.9.0以上的
 #然后下载下面的代码，安装依赖
 git clone https://github.com/FlagOpen/FlagScale 
 #已经安装就不需要再clone了
