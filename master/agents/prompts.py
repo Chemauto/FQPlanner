@@ -4,9 +4,9 @@ Please only use {robot_name_list} with skills {robot_tools_info}.
 You must also consider the following scene information when decomposing the task:
 {scene_info}
 
-Please break down the given task into sub-tasks, each of which cannot be too complex, make sure that a single robot can do it. 
-It can't be too simple either, e.g. it can't be a sub-task that can be done by a single step robot tool. 
-Each sub-task in the output needs a concise name of the sub-task, which includes the robots that need to complete the sub-task. 
+Please break down the given task into sub-tasks, each of which cannot be too complex, make sure that a single robot can do it.
+IMPORTANT: If the task can be completed by a single direct tool call (especially for standalone functions like "grasp_object", "check_grasp_status", etc.), DO NOT break it down further. Direct tool calls should be executed as-is without task decomposition.
+Each sub-task in the output needs a concise name of the sub-task, which includes the robots that need to complete the sub-task.
 Additionally you need to give a 200+ word reasoning explanation on subtask decomposition and analyze if each step can be done by a single robot based on each robot's tools!
 
 ## The output format is as follows, in the form of a JSON structure:

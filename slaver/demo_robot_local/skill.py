@@ -9,6 +9,7 @@ RoboOS 机器人技能统一入口 (Robot Skills Entry Point)
 模块列表：
     - base.py: 底盘控制模块（导航、移动）
     - arm.py: 机械臂控制模块（关节运动、复位）
+    - grasp.py: 抓取控制模块（通过开发板抓取物体）
     - example.py: 示例模块（添加新功能的参考模板）
 
 添加新功能：
@@ -28,6 +29,7 @@ from mcp.server.fastmcp import FastMCP
 # ==============================================================================
 from base import register_tools as register_base_tools
 from arm import register_tools as register_arm_tools, cleanup_arm, initialize_arm
+from grasp import register_tools as register_grasp_tools
 from example import register_tools as register_example_tools
 
 # ==============================================================================
@@ -67,10 +69,13 @@ def register_all_modules():
     print("=" * 60, file=sys.stderr)
 
     # 注册底盘控制模块
-    register_base_tools(mcp)
+    # register_base_tools(mcp)
 
     # 注册机械臂控制模块
-    register_arm_tools(mcp)
+    # register_arm_tools(mcp)
+
+    # 注册抓取控制模块
+    register_grasp_tools(mcp)
 
     # 注册示例模块（可选，实际使用时可以注释掉）
     # register_example_tools(mcp)

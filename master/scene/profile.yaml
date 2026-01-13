@@ -33,6 +33,7 @@ scene:
     description: "篮子"
     contains:
       - egg
+      - object  # 通用物体，用于抓取任务
 
   - name: trashCan
     type: container
