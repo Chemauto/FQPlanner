@@ -1,0 +1,26 @@
+{
+  "shoulder_pan": {
+    "min": -0.84,
+    "max": -0.57
+  },
+  "shoulder_lift": {
+    "min": -98.02,
+    "max": -97.93
+  },
+  "elbow_flex": {
+    "min": 92.88,
+    "max": 92.97
+  },
+  "wrist_flex": {
+    "min": -81.41,
+    "max": 70.59
+  },
+  "wrist_roll": {
+    "min": 1.14,
+    "max": 1.49
+  },
+  "gripper": {
+    "min": 11.94,
+    "max": 12.02
+  }
+}
