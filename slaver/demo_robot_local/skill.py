@@ -69,10 +69,10 @@ def register_all_modules():
     print("=" * 60, file=sys.stderr)
 
     # 注册底盘控制模块
-    # register_base_tools(mcp)
+    register_base_tools(mcp)
 
     # 注册机械臂控制模块
-    # register_arm_tools(mcp)
+    register_arm_tools(mcp)
 
     # 注册抓取控制模块
     register_grasp_tools(mcp)

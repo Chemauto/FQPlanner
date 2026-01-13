@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import sys
@@ -10,6 +11,9 @@ import time
 from contextlib import AsyncExitStack
 from datetime import datetime
 from typing import Dict, List, Optional
+
+# 配置日志级别，抑制MCP服务器的详细日志输出
+logging.getLogger("mcp").setLevel(logging.WARNING)
 
 # Add project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -226,8 +230,10 @@ class RobotManager:
             }
             for tool in response.tools
         ]
-        print("Connected to robot with tools:", str(self.tools))
-        
+        # 只打印工具名称列表，不打印详细描述
+        tool_names = [tool["function"]["name"] for tool in self.tools]
+        print(f"Connected to robot with {len(self.tools)} tools: {', '.join(tool_names)}")
+
         # Train the tool matcher with the available tools
         self.tool_matcher.fit(self.tools)
 

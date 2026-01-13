@@ -26,7 +26,7 @@ BOARD_CONFIG = {
     # Socket通信配置
     "socket_host": "192.168.0.155",  # 开发板IP地址
     "socket_port": 9999,  # Socket端口（与开发板服务器一致）
-    "socket_timeout": 5,  # 连接超时时间（秒）
+    "socket_timeout": 60,  # 连接超时时间（秒）- 增加到60秒以支持完整的抓取流程
 
     # 串口通信配置（备选方案）
     "serial_port": "/dev/ttyUSB0",

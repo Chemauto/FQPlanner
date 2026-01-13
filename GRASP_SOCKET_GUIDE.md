@@ -402,7 +402,7 @@ BOARD_CONFIG = {
     "connection_type": "socket",       # 使用 Socket
     "socket_host": "192.168.0.155",  # 开发板IP
     "socket_port": 9999,              # 端口
-    "socket_timeout": 5,               # 超时时间
+    "socket_timeout": 60,              # 超时时间（秒）- 根据抓取脚本执行时间调整
 }
 ```
 
