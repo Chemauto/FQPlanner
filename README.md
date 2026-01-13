@@ -62,15 +62,61 @@ PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation
     ```
 
 启动后，主 Web 界面将在 `http://127.0.0.1:8888` 上可用。
+也就是可以点击这个web UI界面，在里面进行输入
 
 
 ### 4. 发布任务
 
-系统运行后，你可以给机器人下达任务。
+**通过 Web 界面** (http://127.0.0.1:8888): 导航到 "Publish Task" 部分
 
-- **通过 Web 界面:** 导航到 "Publish Task" 部分。
-- **通过脚本:** 运行示例导航测试脚本。
-  ```bash
-  python test_navigation.py
-  ```
-  按照屏幕提示发送导航命令，例如“到垃圾桶前方”。
+**通过测试脚本:**
+```bash
+python test_robot.py
+```
+支持选择模块/测试模式/自定义任务
+
+### 5. 任务示例
+
+**底盘控制:**
+- "前往卧室" / "到客厅"
+- "先去厨房，然后去卧室"
+
+**机械臂控制:**
+- "机械臂复位"
+- "腕部向上转动10度"
+- "夹爪闭合到50"
+
+### 6. 查看日志
+
+```bash
+tail -f master/.logs/master_agent.log  # Master 日志
+tail -f slaver/.log/agent.log          # Slaver 日志
+```
+
+## 场景位置
+
+| 位置 | 坐标 |
+|------|------|
+| entrance (入口) | (0.0, 0.0, 0.0) |
+| livingRoom (客厅) | (2.0, 3.0, 0.0) |
+| bedroom (卧室) | (4.0, 1.0, 0.0) |
+| kitchenTable | (1.0, 2.0, 0.0) |
+| trashCan (垃圾桶) | (4.0, 3.0, 0.0) |
+
+## 扩展开发
+
+**添加新模块 (3步):**
+```bash
+# 1. 复制模板
+cd slaver/demo_robot_local && cp example.py my_module.py
+
+# 2. 编辑 my_module.py 实现功能
+
+# 3. 在 skill.py 注册
+from my_module import register_tools as register_my_tools
+```
+
+## 文档
+
+- [MODULE_DEVELOPMENT_GUIDE.md](MODULE_DEVELOPMENT_GUIDE.md) - 完整开发指南
+- [slaver/demo_robot_local/README_MODULES.md](slaver/demo_robot_local/README_MODULES.md) - 详细模块文档

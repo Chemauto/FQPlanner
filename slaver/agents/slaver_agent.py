@@ -178,28 +178,78 @@ class ToolCallingAgent(MultiStepAgent):
         else:
             observation = str(observation)
 
-        # Store the last tool execution result
-        self.last_tool_result = observation
+        # Attach current position information to the observation
+        position_info = await self._get_current_position_info()
+        if position_info:
+            enhanced_observation = f"{observation}\n\n[Current Position]\n{position_info}"
+        else:
+            enhanced_observation = observation
+
+        # Store the last tool execution result with position info
+        self.last_tool_result = enhanced_observation
 
         self.logger.log(
-            f"Observations: {observation.replace('[', '|')}",  # escape potential rich-tag-like components
+            f"Observations: {enhanced_observation.replace('[', '|')}",  # escape potential rich-tag-like components
             level=LogLevel.INFO,
         )
         # Log to file
-        self.logger.log2file(f"Observations: {observation}", level=LogLevel.INFO)
+        self.logger.log2file(f"Observations: {enhanced_observation}", level=LogLevel.INFO)
 
         # Construct memory input
         memory_input = {
             "tool_name": tool_name,
             "arguments": tool_arguments,
-            "result": observation,
+            "result": observation,  # Use original observation for memory prediction
         }
         try:
             await self.memory_predict(memory_input)
         except Exception as e:
             print(f"[Scene Update Error] `{e}`")
 
-        return observation
+        return enhanced_observation
+
+    async def _get_current_position_info(self) -> str:
+        """
+        Get current robot position information from collaborator.
+
+        Returns:
+            A formatted string with current position details, or None if unavailable.
+        """
+        try:
+            # Read robot info from collaborator
+            robot_info = self.collaborator.read_environment("robot")
+            if not robot_info:
+                return None
+
+            robot_info = json.loads(robot_info) if isinstance(robot_info, str) else robot_info
+            current_position = robot_info.get("position")
+
+            if not current_position:
+                return "Position: Unknown"
+
+            # Try to get position coordinates from scene
+            scene_obj = self.collaborator.read_environment(current_position)
+            if scene_obj:
+                scene_obj = json.loads(scene_obj) if isinstance(scene_obj, str) else scene_obj
+                position_coords = scene_obj.get("position", [])
+                description = scene_obj.get("description", "")
+
+                if position_coords and len(position_coords) >= 3:
+                    x, y, z = position_coords[0], position_coords[1], position_coords[2]
+                    if description:
+                        return f"Location: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
+                    else:
+                        return f"Location: {current_position}\nCoordinates: ({x}, {y}, {z})"
+                elif description:
+                    return f"Location: {current_position} ({description})\nCoordinates: Not available"
+                else:
+                    return f"Location: {current_position}\nCoordinates: Not available"
+            else:
+                return f"Location: {current_position}\nCoordinates: Not found in scene"
+
+        except Exception as e:
+            print(f"[Get Position Error] `{e}`")
+            return None
 
     async def memory_predict(self, memory_input: dict) -> str:
         """

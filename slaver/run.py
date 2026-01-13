@@ -211,7 +211,7 @@ class RobotManager:
 
         # init robot
         self.collaborator.record_environment(
-            "robot", json.dumps({"position": None, "holding": None, "status": "idle"})
+            "robot", json.dumps({"position": "entrance", "holding": None, "status": "idle"})
         )
 
         # List available tools

@@ -333,7 +333,7 @@ Rules:
             "n": 1,
             "temperature": 0,
             "top_p": 1.0,
-            "max_tokens": 8192,
+            "max_tokens": 4096,  # 调整为4096以适应小模型的上下文限制
         }
 
         if stop_sequences is not None:
