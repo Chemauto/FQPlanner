@@ -215,6 +215,7 @@ tzdata==2025.2
 urllib3==2.4.0
 uvicorn==0.34.2
 virtualenv==20.35.4
+vllm==0.13.0
 wandb==0.23.1
 wcwidth==0.2.14
 webencodings==0.5.1
