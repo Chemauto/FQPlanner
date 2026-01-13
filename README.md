@@ -35,23 +35,28 @@ PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation
 
 你可以手动运行系统，也可以使用部署界面。
 
-#### 手动启动 (在3个独立的终端中)
 
-1.  **启动 Master:**
-    ```bash
+#### 手动启动 (在3个独立的终端中)
+1.启动模型
     # 终端 1
     conda activate RoboOS
-    python master/run.py
-    ```
-2.  **启动 Slaver:**
+    bash Modeldeploy/start_server.sh
+
+2.  **启动 Master:**
     ```bash
     # 终端 2
     conda activate RoboOS
-    python slaver/run.py
+    python master/run.py
     ```
-3.  **启动 Web UI:**
+3.  **启动 Slaver:**
     ```bash
     # 终端 3
+    conda activate RoboOS
+    python slaver/run.py
+    ```
+4.  **启动 Web UI:**
+    ```bash
+    # 终端 4
     conda activate RoboOS
     python deploy/run.py
     ```
