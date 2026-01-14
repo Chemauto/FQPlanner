@@ -217,6 +217,10 @@ class ToolCallingAgent(MultiStepAgent):
         # Store the last tool execution result with position info
         self.last_tool_result = enhanced_observation
 
+        # Log success message
+        success_message = f"Tool '{tool_name}' has been successfully performed"
+        self.logger.log2file(success_message, level=LogLevel.INFO)
+
         self.logger.log(
             f"Observations: {enhanced_observation.replace('[', '|')}",  # escape potential rich-tag-like components
             level=LogLevel.INFO,
@@ -354,12 +358,24 @@ class ToolCallingAgent(MultiStepAgent):
             stop_sequences=["Observation:"],
         )
         memory_step.model_output_message = model_message
+
+        # Prepare log content - avoid logging full API response object
+        if model_message.content:
+            log_content = model_message.content
+        elif model_message.tool_calls:
+            # For tool_calls, log only the tool call info, not the full API response
+            tool_call_info = []
+            for tc in model_message.tool_calls:
+                tool_call_info.append({
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments
+                })
+            log_content = json.dumps(tool_call_info, ensure_ascii=False)
+        else:
+            log_content = str(model_message.raw)
+
         self.logger.log_markdown(
-            content=(
-                model_message.content
-                if model_message.content
-                else str(model_message.raw)
-            ),
+            content=log_content,
             title="Output message of the LLM:",
             level=LogLevel.DEBUG,
         )

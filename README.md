@@ -27,14 +27,18 @@ conda activate RoboOS
 pip install -r requirements.txt
 #如果出现问题的话就先注释掉有问题的项目，或者先将pytorch版本改成2.5.1，
 #如果是50系显卡建议安装2.9.0以上的
+#如果还有问题
+#则用require.txt代替requirements.txt
+
 #然后下载下面的代码，安装依赖
 git clone https://github.com/FlagOpen/FlagScale 
-#已经安装就不需要再clone了
+#已经安装成功就不需要再clone了
 cd FlagScale
 git checkout 3fc2037f90917227bd4aebabd9d7b330523f437c
 #版本提前安装好了
 PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation 
 
+#如果两个依赖都安装好了就代表可以了，注意本地部署时vllm需要安装
 
 ### 3. 运行系统
 
@@ -109,7 +113,6 @@ tail -f slaver/.log/agent.log          # Slaver 日志
 | 客厅 (livingRoom) | (2.0, 3.0, 0.0) |
 | 卧室 (bedroom) | (4.0, 1.0, 0.0) |
 | 厨房 | (1.0, 2.0, 0.0) |
-| 垃圾桶 | (4.0, 3.0, 0.0) |
 
 ## 扩展开发
 

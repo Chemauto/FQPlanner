@@ -225,16 +225,36 @@ class RobotManager:
 
         # List available tools
         response = await self.session.list_tools()
-        self.tools = [
-            {
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                },
-                "input_schema": tool.inputSchema,
-            }
-            for tool in response.tools
-        ]
+
+        # 根据模型类型选择工具格式
+        # robobrain 使用原有格式，其他模型使用 OpenAI 标准格式
+        use_openai_format = not self.model_path.startswith("robobrain")
+
+        if use_openai_format:
+            # OpenAI 标准格式 (用于 Qwen 等模型)
+            self.tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.inputSchema,
+                    },
+                }
+                for tool in response.tools
+            ]
+        else:
+            # RoboBrain 原有格式
+            self.tools = [
+                {
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                    },
+                    "input_schema": tool.inputSchema,
+                }
+                for tool in response.tools
+            ]
         # 只打印工具名称列表，不打印详细描述
         tool_names = [tool["function"]["name"] for tool in self.tools]
         print(f"Connected to robot with {len(self.tools)} tools: {', '.join(tool_names)}")
