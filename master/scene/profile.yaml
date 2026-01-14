@@ -54,3 +54,8 @@ scene:
     type: location
     position: [4.0, 1.0, 0.0]
     description: "卧室"
+
+  - name: kitchenTable
+    type: location
+    position: [1.0, 2.0, 3.0]
+    description: "厨房"

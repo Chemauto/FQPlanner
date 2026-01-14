@@ -213,9 +213,14 @@ class RobotManager:
 
         await self.session.initialize()
 
-        # init robot
+        # init robot with initial position and coordinates
         self.collaborator.record_environment(
-            "robot", json.dumps({"position": "entrance", "holding": None, "status": "idle"})
+            "robot", json.dumps({
+                "position": "entrance",
+                "coordinates": [0.0, 0.0, 0.0],
+                "holding": None,
+                "status": "idle"
+            })
         )
 
         # List available tools

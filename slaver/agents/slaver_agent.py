@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 import json
+import sys
 import time
 from logging import getLogger
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -169,14 +170,42 @@ class ToolCallingAgent(MultiStepAgent):
 
         observation = await self.tool_executor(tool_name, json.loads(tool_arguments))
 
+        # Debug: Print raw observation type and content
+        print(f"[DEBUG] Raw observation type: {type(observation)}", file=sys.stderr)
+        print(f"[DEBUG] Raw observation: {observation}", file=sys.stderr)
+
         # Handle different return formats from MCP
         if hasattr(observation, 'content') and len(observation.content) > 0:
+            print(f"[DEBUG] Observation content type: {type(observation.content)}", file=sys.stderr)
+            print(f"[DEBUG] Observation content[0] type: {type(observation.content[0])}", file=sys.stderr)
             if hasattr(observation.content[0], 'text'):
                 observation = observation.content[0].text
             else:
                 observation = str(observation.content[0])
         else:
             observation = str(observation)
+
+        # Parse state updates from tool result (format: "result_message" or tuple)
+        state_updates = {}
+        if isinstance(observation, str):
+            # Check if observation contains state updates in JSON format
+            try:
+                # FastMCP tools return tuple as JSON string: ["result", {"state": "updates"}]
+                parsed = json.loads(observation)
+                if isinstance(parsed, list) and len(parsed) == 2:
+                    observation = parsed[0]  # Result message
+                    state_updates = parsed[1] if isinstance(parsed[1], dict) else {}
+                    print(f"[DEBUG] Parsed state updates: {state_updates}", file=sys.stderr)
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"[DEBUG] Failed to parse JSON: {e}", file=sys.stderr)
+                pass  # Not a JSON tuple, use as-is
+
+        # Update robot state in Redis if there are state updates
+        if state_updates:
+            print(f"[DEBUG] Calling _update_robot_state with: {state_updates}", file=sys.stderr)
+            await self._update_robot_state(state_updates)
+        else:
+            print(f"[DEBUG] No state updates found", file=sys.stderr)
 
         # Attach current position information to the observation
         position_info = await self._get_current_position_info()
@@ -208,6 +237,30 @@ class ToolCallingAgent(MultiStepAgent):
 
         return enhanced_observation
 
+    async def _update_robot_state(self, state_updates: dict):
+        """
+        Update robot state in Redis with the provided state updates.
+
+        Args:
+            state_updates: Dictionary containing state updates (e.g., {"position": "bedroom", "coordinates": [4.0, 1.0, 0.0]})
+        """
+        try:
+            # Read current robot state
+            robot_info = self.collaborator.read_environment("robot")
+            if robot_info:
+                robot_state = json.loads(robot_info) if isinstance(robot_info, str) else robot_info
+            else:
+                robot_state = {"position": "entrance", "coordinates": [0.0, 0.0, 0.0], "holding": None, "status": "idle"}
+
+            # Update with new state
+            robot_state.update(state_updates)
+
+            # Write back to Redis
+            self.collaborator.record_environment("robot", json.dumps(robot_state))
+            print(f"[State Update] Robot state updated: {state_updates}", file=sys.stderr)
+        except Exception as e:
+            print(f"[State Update Error] Failed to update robot state: `{e}`", file=sys.stderr)
+
     async def _get_current_position_info(self) -> str:
         """
         Get current robot position information from collaborator.
@@ -227,7 +280,24 @@ class ToolCallingAgent(MultiStepAgent):
             if not current_position:
                 return "Position: Unknown"
 
-            # Try to get position coordinates from scene
+            # First, try to get coordinates from robot state (if set by navigation)
+            robot_coordinates = robot_info.get("coordinates")
+            if robot_coordinates and len(robot_coordinates) >= 3:
+                x, y, z = robot_coordinates[0], robot_coordinates[1], robot_coordinates[2]
+
+                # Try to get description from scene
+                scene_obj = self.collaborator.read_environment(current_position)
+                description = ""
+                if scene_obj:
+                    scene_obj = json.loads(scene_obj) if isinstance(scene_obj, str) else scene_obj
+                    description = scene_obj.get("description", "")
+
+                if description:
+                    return f"Location: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
+                else:
+                    return f"Location: {current_position}\nCoordinates: ({x}, {y}, {z})"
+
+            # Fallback: Try to get position coordinates from scene
             scene_obj = self.collaborator.read_environment(current_position)
             if scene_obj:
                 scene_obj = json.loads(scene_obj) if isinstance(scene_obj, str) else scene_obj
