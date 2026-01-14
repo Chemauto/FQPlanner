@@ -1,6 +1,11 @@
 # RoboOS
 
-RoboOS是一个基于“大脑-小脑”分层架构的机器人操作系统，通过大语言模型实现跨形态多机器人协作。
+RoboOS 是基于"大脑-小脑"分层架构的机器人操作系统，通过大语言模型实现跨形态多机器人协作。
+
+**核心功能**
+- 🧭 **模拟导航** - 场景定位与路径规划
+- 🦾 **机械臂控制** - SO101机械臂关节运动
+- 🌐 **远程通信** - 网络化机器人协作与抓取
 
 ## 快速入门
 
@@ -77,14 +82,17 @@ python test_robot.py
 
 ### 5. 任务示例
 
-**底盘控制:**
+**导航控制**
 - "前往卧室" / "到客厅"
 - "先去厨房，然后去卧室"
 
-**机械臂控制:**
+**机械臂控制**
 - "机械臂复位"
 - "腕部向上转动10度"
 - "夹爪闭合到50"
+
+**抓取功能**
+- "抓取" - 执行完整抓取流程
 
 ### 6. 查看日志
 
@@ -97,20 +105,20 @@ tail -f slaver/.log/agent.log          # Slaver 日志
 
 | 位置 | 坐标 |
 |------|------|
-| entrance (入口) | (0.0, 0.0, 0.0) |
-| livingRoom (客厅) | (2.0, 3.0, 0.0) |
-| bedroom (卧室) | (4.0, 1.0, 0.0) |
-| kitchenTable | (1.0, 2.0, 0.0) |
-| trashCan (垃圾桶) | (4.0, 3.0, 0.0) |
+| 入口 (entrance) | (0.0, 0.0, 0.0) |
+| 客厅 (livingRoom) | (2.0, 3.0, 0.0) |
+| 卧室 (bedroom) | (4.0, 1.0, 0.0) |
+| 厨房 | (1.0, 2.0, 0.0) |
+| 垃圾桶 | (4.0, 3.0, 0.0) |
 
 ## 扩展开发
 
-**添加新模块 (3步):**
+**添加新模块 (3步)**
 ```bash
 # 1. 复制模板
 cd slaver/demo_robot_local && cp example.py my_module.py
 
-# 2. 编辑 my_module.py 实现功能
+# 2. 编辑实现功能
 
 # 3. 在 skill.py 注册
 from my_module import register_tools as register_my_tools
@@ -118,5 +126,6 @@ from my_module import register_tools as register_my_tools
 
 ## 文档
 
-- [MODULE_DEVELOPMENT_GUIDE.md](MODULE_DEVELOPMENT_GUIDE.md) - 完整开发指南
-- [slaver/demo_robot_local/README_MODULES.md](slaver/demo_robot_local/README_MODULES.md) - 详细模块文档
+- [模块开发指南](MODULE_DEVELOPMENT_GUIDE.md) - 完整开发文档
+- [场景配置说明](master/scene/README.md) - 位置定义与映射
+- [状态管理文档](ROBOT_STATE_MANAGEMENT.md) - 位置状态追踪

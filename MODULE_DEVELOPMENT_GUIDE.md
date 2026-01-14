@@ -7,6 +7,8 @@
 - [现有模块介绍](#现有模块介绍)
 - [添加新模块](#添加新模块)
 - [模块开发规范](#模块开发规范)
+- [场景配置](#场景配置)
+- [状态管理](#状态管理)
 - [测试工具](#测试工具)
 - [常见问题](#常见问题)
 
@@ -21,8 +23,14 @@ slaver/demo_robot_local/
 ├── skill.py          # 统一入口，注册所有模块
 ├── base.py           # 底盘控制（导航、移动）
 ├── arm.py            # 机械臂控制（关节运动）
+├── grasp.py          # 抓取控制（视觉抓取）
 ├── example.py        # 示例模板（开发参考）
 └── README_MODULES.md # 详细开发文档
+
+master/scene/
+├── profile.yaml      # 场景配置文件
+├── LOCATION_MAP.py   # 位置名称映射
+└── README.md         # 场景配置说明
 ```
 
 ---
@@ -116,7 +124,30 @@ tail -f slaver/.log/agent.log
 "夹爪闭合到50"                  # 绝对位置
 ```
 
-### 3. example.py - 示例模板
+### 3. grasp.py - 抓取控制模块
+
+**功能：**
+- `grasp_object()` - 执行完整抓取流程（包含视觉识别）
+- `check_grasp_status()` - 检查抓取模块状态
+
+**工作原理：**
+1. 调用嵌入式开发板的视觉识别系统
+2. 通过网络通信发送10次抓取指令
+3. 开发板执行完整的抓取流程
+4. 返回抓取结果
+
+**使用示例：**
+```
+"抓取"             # 执行完整抓取流程
+"执行抓取"         # 同上
+```
+
+**技术细节：**
+- 支持远程网络通信
+- 集成摄像头视觉识别
+- 自主物体定位与抓取
+
+### 4. example.py - 示例模板
 
 这是一个完整的示例模块，展示如何创建新功能。包含两个示例函数：
 - `example_tool(param1, param2)` - 基本工具函数示例
@@ -147,28 +178,44 @@ cp example.py camera.py
 """我的自定义模块"""
 
 import sys
-from typing import Tuple, Dict
+import json
 
 
 def register_tools(mcp):
     """注册工具函数到 MCP 服务器"""
 
     @mcp.tool()
-    async def my_tool(param: str) -> Tuple[str, Dict]:
+    async def my_tool(param: str) -> str:
         """我的工具函数描述.
 
         Args:
             param: 参数说明
 
         Returns:
-            结果和状态更新
+            执行结果（字符串格式）
         """
         # 实现功能逻辑
         result = f"执行结果: {param}"
-        state = {"success": True, "param": param}
-
         print(f"[my_tool] {result}", file=sys.stderr)
-        return result, state
+        return result
+
+    @mcp.tool()
+    async def my_tool_with_state(target: str) -> str:
+        """带状态更新的工具函数.
+
+        Args:
+            target: 目标位置
+
+        Returns:
+            JSON数组格式: [结果消息, 状态更新]
+        """
+        result = f"已到达 {target}"
+        state_updates = {
+            "position": target,
+            "coordinates": [1.0, 2.0, 0.0]
+        }
+        print(f"[my_tool_with_state] {result}", file=sys.stderr)
+        return json.dumps([result, state_updates], ensure_ascii=False)
 
     print("[my_module.py] 模块已注册", file=sys.stderr)
 ```
@@ -208,6 +255,117 @@ python slaver/run.py
 
 ---
 
+## 场景配置
+
+RoboOS 使用场景配置文件定义机器人的工作环境。所有位置、物体和容器都需要在配置中定义。
+
+### 配置文件结构
+
+**master/scene/profile.yaml** - 场景定义
+```yaml
+scene:
+  - name: bedroom          # 英文名称（数据库key）
+    type: location         # 类型：location/table/container
+    position: [4.0, 1.0, 0.0]  # [x, y, z] 坐标
+    description: "卧室"     # 中文描述（用户输入）
+    contains:              # 可选：包含的物体
+      - bed
+      - table
+```
+
+**master/scene/LOCATION_MAP.py** - 名称映射
+```python
+LOCATION_MAP = {
+    "卧室": "bedroom",
+    "客厅": "livingRoom",
+    # ...
+}
+```
+
+### 修改场景
+
+添加新位置需要同步修改两个文件：
+
+**步骤1：** 在 `profile.yaml` 添加场景
+```yaml
+- name: balcony
+  type: location
+  position: [5.0, 2.0, 0.0]
+  description: "阳台"
+```
+
+**步骤2：** 在 `LOCATION_MAP.py` 添加映射
+```python
+LOCATION_MAP = {
+    # ...
+    "阳台": "balcony",
+}
+```
+
+**步骤3：** 重启 Master 和 Slaver
+
+详细说明见 [场景配置文档](master/scene/README.md)
+
+---
+
+## 状态管理
+
+### 机器人状态
+
+机器人的实时状态存储在Redis中，包含：
+
+```json
+{
+  "position": "bedroom",           // 当前位置（英文）
+  "coordinates": [4.0, 1.0, 0.0],  // 当前坐标 [x, y, z]
+  "holding": null,                 // 持有的物体
+  "status": "idle"                 // 机器人状态
+}
+```
+
+### 状态更新规则
+
+1. **导航操作**：更新 `position` 和 `coordinates`
+2. **机械臂操作**：不改变位置状态
+3. **抓取操作**：可能更新 `holding` 字段
+
+### 在模块中更新状态
+
+返回JSON数组格式以更新状态：
+
+```python
+@mcp.tool()
+async def navigate_to_target(target: str) -> str:
+    """导航到目标位置"""
+    import json
+
+    # 映射名称并查找坐标
+    target_en = LOCATION_MAP.LOCATION_MAP.get(target, target)
+    coordinates = [4.0, 1.0, 0.0]  # 从场景配置获取
+
+    result = f"Navigation to {target} completed"
+
+    # 返回JSON数组: [result_message, state_updates]
+    return json.dumps([result, {
+        "position": target_en,
+        "coordinates": coordinates
+    }], ensure_ascii=False)
+```
+
+### 不更新状态的函数
+
+```python
+@mcp.tool()
+async def simple_command(command: str) -> str:
+    """简单命令，不更新状态"""
+    result = f"Executed: {command}"
+    return result  # 只返回字符串，不包含状态更新
+```
+
+详细说明见 [状态管理文档](ROBOT_STATE_MANAGEMENT.md)
+
+---
+
 ## 模块开发规范
 
 ### 1. 函数签名
@@ -216,20 +374,33 @@ python slaver/run.py
 
 ```python
 @mcp.tool()
-async def function_name(param1: type, param2: type = default) -> Tuple[str, Dict]:
+async def function_name(param1: type, param2: type = default) -> str:
     """函数文档字符串.
 
     详细说明...
     """
     result = "操作结果"
-    state_update = {"key": "value"}
-    return result, state_update
+    return result  # 简单操作，不更新状态
+```
+
+**如需更新状态，返回JSON数组：**
+
+```python
+import json
+
+@mcp.tool()
+async def function_with_state(param: str) -> str:
+    """函数文档字符串"""
+    result = "操作结果"
+    state_updates = {"key": "value"}
+    return json.dumps([result, state_updates], ensure_ascii=False)
 ```
 
 **要求：**
 - ✅ 使用 `@mcp.tool()` 装饰器
 - ✅ 是 `async` 异步函数
-- ✅ 返回 `Tuple[str, Dict]`
+- ✅ 返回 `str` 类型
+- ✅ 如需更新状态，返回JSON数组格式
 - ✅ 包含完整文档字符串
 
 ### 2. 日志输出
@@ -246,19 +417,32 @@ print(f"[module_name.function_name] 日志信息", file=sys.stderr)
 try:
     # 执行操作
     result = perform_operation()
-    return result, {"success": True}
+    return result  # 成功时直接返回结果
 except Exception as e:
     error_msg = f"操作失败: {e}"
     print(f"[module_name] {error_msg}", file=sys.stderr)
-    return error_msg, {"error": str(e), "success": False}
+    return error_msg  # 返回错误信息
 ```
 
 ### 4. 状态更新
 
-返回的状态字典应包含：
-- `success`: 布尔值，表示操作是否成功
-- 相关参数和结果数据
-- 错误信息（如果失败）
+**需要更新状态的操作（如导航）：**
+```python
+import json
+
+result = "操作成功"
+state_updates = {
+    "position": "bedroom",
+    "coordinates": [4.0, 1.0, 0.0]
+}
+return json.dumps([result, state_updates], ensure_ascii=False)
+```
+
+**不需要更新状态的操作（如查询）：**
+```python
+result = "查询结果"
+return result
+```
 
 ---
 
@@ -376,31 +560,25 @@ config = load_config()
 """相机控制模块"""
 
 import sys
-from typing import Tuple, Dict
+import json
 
 
 def register_tools(mcp):
     @mcp.tool()
-    async def take_photo(camera_id: int = 0) -> Tuple[str, Dict]:
+    async def take_photo(camera_id: int = 0) -> str:
         """拍照.
 
         Args:
             camera_id: 相机ID (默认0)
 
         Returns:
-            拍照结果和文件信息
+            拍照结果信息
         """
         print(f"[camera.take_photo] Camera {camera_id}", file=sys.stderr)
 
         # 实际的拍照逻辑
         result = f"已使用相机{camera_id}拍照"
-        state = {
-            "camera_id": camera_id,
-            "photo_saved": True,
-            "success": True
-        }
-
-        return result, state
+        return result
 
     print("[camera.py] 相机模块已注册", file=sys.stderr)
 ```
@@ -446,10 +624,10 @@ tail -f slaver/.log/agent.log
 import asyncio
 
 @mcp.tool()
-async def long_operation(duration: int) -> Tuple[str, Dict]:
+async def long_operation(duration: int) -> str:
     """长时间操作示例"""
     await asyncio.sleep(duration)
-    return f"完成，耗时{duration}秒", {"success": True}
+    return f"完成，耗时{duration}秒"
 ```
 
 ### 2. 文件操作
@@ -459,7 +637,7 @@ import os
 from datetime import datetime
 
 @mcp.tool()
-async def save_data(data: str) -> Tuple[str, Dict]:
+async def save_data(data: str) -> str:
     """保存数据到文件"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"data_{timestamp}.txt"
@@ -467,7 +645,7 @@ async def save_data(data: str) -> Tuple[str, Dict]:
     with open(filename, 'w') as f:
         f.write(data)
 
-    return f"数据已保存到 {filename}", {"filename": filename}
+    return f"数据已保存到 {filename}"
 ```
 
 ### 3. 设备通信
@@ -476,13 +654,13 @@ async def save_data(data: str) -> Tuple[str, Dict]:
 import serial
 
 @mcp.tool()
-async def send_command(command: str) -> Tuple[str, Dict]:
+async def send_command(command: str) -> str:
     """向设备发送命令"""
     with serial.Serial('/dev/ttyUSB0', 9600) as ser:
         ser.write(command.encode())
         response = ser.read(100)
 
-    return response.decode(), {"command": command}
+    return response.decode()
 ```
 
 ---
@@ -503,7 +681,18 @@ RoboOS 模块化系统的优势：
 
 ## 参考资料
 
-- 详细开发文档: `slaver/demo_robot_local/README_MODULES.md`
-- 测试脚本: `test_robot.py`
-- 示例模块: `slaver/demo_robot_local/example.py`
-- 系统配置: `master/config.yaml`, `slaver/config.yaml`
+- **详细开发文档**: `slaver/demo_robot_local/README_MODULES.md`
+- **场景配置说明**: `master/scene/README.md`
+- **状态管理文档**: `ROBOT_STATE_MANAGEMENT.md`
+- **测试脚本**: `test_robot.py`
+- **示例模块**: `slaver/demo_robot_local/example.py`
+- **系统配置**: `master/config.yaml`, `slaver/config.yaml`
+
+## 现有模块快速参考
+
+| 模块 | 功能 | 主要函数 |
+|------|------|---------|
+| `base.py` | 底盘控制 | `navigate_to_target`, `move` |
+| `arm.py` | 机械臂控制 | `move_joint_relative`, `reset_arm_to_zero` |
+| `grasp.py` | 抓取控制 | `grasp_object`, `check_grasp_status` |
+| `example.py` | 示例模板 | `example_tool`, `another_example` |
