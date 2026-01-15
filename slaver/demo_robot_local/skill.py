@@ -27,10 +27,10 @@ from mcp.server.fastmcp import FastMCP
 # ==============================================================================
 # 1. 导入各功能模块的注册函数
 # ==============================================================================
-from base import register_tools as register_base_tools
-from arm import register_tools as register_arm_tools, cleanup_arm, initialize_arm
-from grasp import register_tools as register_grasp_tools
-from example import register_tools as register_example_tools
+from module.base import register_tools as register_base_tools
+from module.arm import register_tools as register_arm_tools, cleanup_arm, initialize_arm
+from module.grasp import register_tools as register_grasp_tools
+from module.example import register_tools as register_example_tools
 
 # ==============================================================================
 # 2. 全局变量和初始化

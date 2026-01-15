@@ -40,7 +40,68 @@ PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation
 
 #如果两个依赖都安装好了就代表可以了，注意本地部署时vllm需要安装
 
-### 3. 运行系统
+### 3. 模型配置
+
+RoboOS 支持两种模型模式，通过修改 `master/config.yaml` 和 `slaver/config.yaml` 中的 `model_select` 字段进行切换：
+
+#### 模式 1: 云端 API 模式
+
+使用 **qwen-plus** 模型，通过阿里云 API 调用，无需本地部署模型。
+
+**配置步骤：**
+
+1. **修改配置文件** (`master/config.yaml` 和 `slaver/config.yaml`):
+   ```yaml
+   # 选择模型
+   model_select: "qwen-plus"  # 使用云端API模式
+   # model_select: "robobrain"  # 注释掉本地模式
+
+   model_dict:
+     # 云端模型配置
+     cloud_model: "qwen-plus"
+     cloud_type: "default"
+     cloud_api_key: "sk-xxxxxxxxxxxxxxx"  # 替换为你的API Key
+     cloud_server: "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+   ```
+
+2. **获取 API Key**:
+   - 访问 [阿里云百炼平台](https://dashscope.aliyuncs.com/)
+   - 注册账号（新用户有3个月免费额度）
+   - 在控制台获取 API Key
+   - 将 API Key 填入配置文件的 `cloud_api_key` 字段
+- ✅ 无需 GPU，普通电脑即可运行
+- ✅ 配置简单，只需 API Key
+
+
+
+#### 模式 2: 本地部署模式（高级用户）
+
+使用 **robobrain** 模型，需要在本地部署 LLM，需要高性能 GPU。
+
+**配置步骤：**
+
+1. **启动本地模型服务器**:
+   ```bash
+   # 终端 1: 启动 vLLM 模型服务
+   conda activate RoboOS
+   bash Modeldeploy/start_server.sh
+   ```
+
+2. **修改配置文件** (`master/config.yaml` 和 `slaver/config.yaml`):
+   ```yaml
+   # 选择模型
+   # model_select: "qwen-plus"  # 注释掉云端模式
+   model_select: "robobrain"   # 使用本地部署模式
+
+   model_dict:
+     # 本地模型配置
+     cloud_model: "robobrain"
+     cloud_type: "default"
+     cloud_api_key: "EMPTY"     # 本地模式无需 API Key
+     cloud_server: "http://localhost:4567/v1/"  # 本地服务地址
+   ```
+
+### 4. 运行系统
 
 你可以手动运行系统，也可以使用部署界面。
 
@@ -90,13 +151,16 @@ python test_robot.py
 - "前往卧室" / "到客厅"
 - "先去厨房，然后去卧室"
 
+#看到坐标变化
+
 **机械臂控制**
-- "机械臂复位"
-- "腕部向上转动10度"
-- "夹爪闭合到50"
+- "腕部弯曲关节减少30度"
+
+#看到机械臂抬起
 
 **抓取功能**
 - "抓取" - 执行完整抓取流程
+#310B相机摄像头开启
 
 ### 6. 查看日志
 
@@ -119,12 +183,12 @@ tail -f slaver/.log/agent.log          # Slaver 日志
 **添加新模块 (3步)**
 ```bash
 # 1. 复制模板
-cd slaver/demo_robot_local && cp example.py my_module.py
+cd slaver/demo_robot_local && cp module/example.py module/my_module.py
 
 # 2. 编辑实现功能
 
 # 3. 在 skill.py 注册
-from my_module import register_tools as register_my_tools
+from module.my_module import register_tools as register_my_tools
 ```
 
 ## 文档

@@ -20,17 +20,20 @@ RoboOS 采用模块化设计，将机器人功能分散到独立模块中：
 
 ```
 slaver/demo_robot_local/
-├── skill.py          # 统一入口，注册所有模块
-├── base.py           # 底盘控制（导航、移动）
-├── arm.py            # 机械臂控制（关节运动）
-├── grasp.py          # 抓取控制（视觉抓取）
-├── example.py        # 示例模板（开发参考）
-└── README_MODULES.md # 详细开发文档
+├── skill.py              # 统一入口，注册所有模块
+├── module/               # 模块文件夹（存放所有功能模块）
+│   ├── __init__.py       # 模块包初始化文件
+│   ├── base.py           # 底盘控制（导航、移动）
+│   ├── arm.py            # 机械臂控制（关节运动）
+│   ├── grasp.py          # 抓取控制（视觉抓取）
+│   └── example.py        # 示例模板（开发参考）
+├── config.yaml           # 配置文件
+└── README_MODULES.md     # 详细开发文档
 
 master/scene/
-├── profile.yaml      # 场景配置文件
-├── LOCATION_MAP.py   # 位置名称映射
-└── README.md         # 场景配置说明
+├── profile.yaml          # 场景配置文件
+├── LOCATION_MAP.py       # 位置名称映射
+└── README.md             # 场景配置说明
 ```
 
 ---
@@ -162,9 +165,9 @@ tail -f slaver/.log/agent.log
 ```bash
 # 1. 复制示例文件
 cd slaver/demo_robot_local
-cp example.py camera.py
+cp module/example.py module/camera.py
 
-# 2. 编辑 camera.py，修改函数实现
+# 2. 编辑 module/camera.py，修改函数实现
 # 3. 在 skill.py 中导入并注册
 ```
 
@@ -172,7 +175,7 @@ cp example.py camera.py
 
 #### 步骤 1: 创建模块文件
 
-创建 `slaver/demo_robot_local/my_module.py`:
+创建 `slaver/demo_robot_local/module/my_module.py`:
 
 ```python
 """我的自定义模块"""
@@ -226,7 +229,7 @@ def register_tools(mcp):
 
 ```python
 # 在导入部分添加
-from my_module import register_tools as register_my_module_tools
+from module.my_module import register_tools as register_my_module_tools
 
 # 在 register_all_modules() 函数中添加
 def register_all_modules():
@@ -556,7 +559,7 @@ config = load_config()
 ### 1. 创建模块
 
 ```python
-# camera.py
+# module/camera.py
 """相机控制模块"""
 
 import sys
@@ -586,7 +589,7 @@ def register_tools(mcp):
 ### 2. 注册到 skill.py
 
 ```python
-from camera import register_tools as register_camera_tools
+from module.camera import register_tools as register_camera_tools
 
 def register_all_modules():
     register_base_tools(mcp)
@@ -685,14 +688,14 @@ RoboOS 模块化系统的优势：
 - **场景配置说明**: `master/scene/README.md`
 - **状态管理文档**: `ROBOT_STATE_MANAGEMENT.md`
 - **测试脚本**: `test_robot.py`
-- **示例模块**: `slaver/demo_robot_local/example.py`
+- **示例模块**: `slaver/demo_robot_local/module/example.py`
 - **系统配置**: `master/config.yaml`, `slaver/config.yaml`
 
 ## 现有模块快速参考
 
 | 模块 | 功能 | 主要函数 |
 |------|------|---------|
-| `base.py` | 底盘控制 | `navigate_to_target`, `move` |
-| `arm.py` | 机械臂控制 | `move_joint_relative`, `reset_arm_to_zero` |
-| `grasp.py` | 抓取控制 | `grasp_object`, `check_grasp_status` |
-| `example.py` | 示例模板 | `example_tool`, `another_example` |
+| `module/base.py` | 底盘控制 | `navigate_to_target`, `move` |
+| `module/arm.py` | 机械臂控制 | `move_joint_relative`, `reset_arm_to_zero` |
+| `module/grasp.py` | 抓取控制 | `grasp_object`, `check_grasp_status` |
+| `module/example.py` | 示例模板 | `example_tool`, `another_example` |

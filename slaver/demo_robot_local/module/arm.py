@@ -16,7 +16,7 @@ import os
 from typing import Tuple, Dict
 
 # 添加TestSo101路径到sys.path
-testso101_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../TestSo101'))
+testso101_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../TestSo101'))
 sys.path.insert(0, testso101_path)
 
 # 导入机械臂控制器

@@ -8,11 +8,15 @@ RoboOS 机器人系统采用模块化设计，将不同功能分散到独立的�
 
 ```
 slaver/demo_robot_local/
-├── skill.py          # 统一入口，注册所有模块
-├── base.py           # 底盘控制模块
-├── arm.py            # 机械臂控制模块
-├── example.py        # 示例模块（添加新功能的模板）
-└── README_MODULES.md # 本文档
+├── skill.py              # 统一入口，注册所有模块
+├── module/               # 模块文件夹（存放所有功能模块）
+│   ├── __init__.py       # 模块包初始化文件
+│   ├── base.py           # 底盘控制模块
+│   ├── arm.py            # 机械臂控制模块
+│   ├── grasp.py          # 抓取控制模块
+│   └── example.py        # 示例模块（添加新功能的模板）
+├── config.yaml           # 配置文件
+└── README_MODULES.md     # 本文档
 ```
 
 ## 现有模块说明
@@ -49,15 +53,15 @@ slaver/demo_robot_local/
 
 ### 步骤 1: 创建新模块文件
 
-复制 `example.py` 并重命名，例如创建 `camera.py`：
+复制 `module/example.py` 并重命名，例如创建 `module/camera.py`：
 
 ```bash
-cp example.py camera.py
+cp module/example.py module/camera.py
 ```
 
 ### 步骤 2: 编辑模块内容
 
-打开 `camera.py`，修改模块文档和工具函数：
+打开 `module/camera.py`，修改模块文档和工具函数：
 
 ```python
 """
@@ -110,7 +114,7 @@ def register_tools(mcp):
 
 ```python
 # 在导入部分添加
-from camera import register_tools as register_camera_tools
+from module.camera import register_tools as register_camera_tools
 
 # 在 register_all_modules() 函数中添加
 def register_all_modules():
@@ -205,7 +209,7 @@ except Exception as e:
 
 ### 场景 1: 添加传感器模块
 
-创建 `sensor.py`：
+创建 `module/sensor.py`：
 
 ```python
 """传感器模块"""
@@ -222,7 +226,7 @@ def register_tools(mcp):
 
 ### 场景 2: 添加语音模块
 
-创建 `voice.py`：
+创建 `module/voice.py`：
 
 ```python
 """语音控制模块"""
@@ -239,7 +243,7 @@ def register_tools(mcp):
 
 ### 场景 3: 添加抓取模块
 
-创建 `gripper.py`：
+创建 `module/gripper.py`：
 
 ```python
 """抓取控制模块"""
@@ -286,9 +290,9 @@ def register_tools(mcp):
 
 假设要添加一个灯光控制模块：
 
-1. **创建模块文件** `lighting.py`
+1. **创建模块文件** `module/lighting.py`
 2. **实现工具函数** (toggle_light, set_brightness, etc.)
-3. **在 skill.py 注册**
+3. **在 skill.py 注册**（添加导入：`from module.lighting import register_tools as register_lighting_tools`）
 4. **重启服务测试**
 5. **通过 Web UI 验证功能**
 

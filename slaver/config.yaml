@@ -24,7 +24,7 @@ model:
     # Deploy for the cloud server
     cloud_type: "default"
     # API key for the cloud server
-    cloud_api_key: "sk-xxxxxxxxxxxxxxxxxx"
+    cloud_api_key: "sk-019f0a6b56f8438b9da1fa04c8adc23c"
     #qwen新注册用户3个月免费额度
     # cloud_api_key: "EMPTY"
 
