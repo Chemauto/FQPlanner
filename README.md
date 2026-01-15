@@ -40,6 +40,8 @@ PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation
 
 #如果两个依赖都安装好了就代表可以了，注意本地部署时vllm需要安装
 
+
+注意requirements.txt，等到前面环境安装好后可以在安装
 ### 3. 模型配置
 
 RoboOS 支持两种模型模式，通过修改 `master/config.yaml` 和 `slaver/config.yaml` 中的 `model_select` 字段进行切换：
