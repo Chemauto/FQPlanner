@@ -297,9 +297,9 @@ class ToolCallingAgent(MultiStepAgent):
                     description = scene_obj.get("description", "")
 
                 if description:
-                    return f"Location: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
+                    return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
                 else:
-                    return f"Location: {current_position}\nCoordinates: ({x}, {y}, {z})"
+                    return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: ({x}, {y}, {z})"
 
             # Fallback: Try to get position coordinates from scene
             scene_obj = self.collaborator.read_environment(current_position)
@@ -311,15 +311,15 @@ class ToolCallingAgent(MultiStepAgent):
                 if position_coords and len(position_coords) >= 3:
                     x, y, z = position_coords[0], position_coords[1], position_coords[2]
                     if description:
-                        return f"Location: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
+                        return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
                     else:
-                        return f"Location: {current_position}\nCoordinates: ({x}, {y}, {z})"
+                        return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: ({x}, {y}, {z})"
                 elif description:
-                    return f"Location: {current_position} ({description})\nCoordinates: Not available"
+                    return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: Not available"
                 else:
-                    return f"Location: {current_position}\nCoordinates: Not available"
+                    return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not available"
             else:
-                return f"Location: {current_position}\nCoordinates: Not found in scene"
+                return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not found in scene"
 
         except Exception as e:
             print(f"[Get Position Error] `{e}`")
@@ -341,6 +341,25 @@ class ToolCallingAgent(MultiStepAgent):
 
         self.scene.apply_action(action_type, json.loads(memory_input["arguments"]))
 
+    async def _get_enhanced_task_with_context(self) -> str:
+        """
+        增强任务描述，添加当前位置和场景信息，帮助 LLM 做出更好的决策。
+
+        Returns:
+            增强后的任务描述字符串
+        """
+        # 获取当前位置信息
+        position_info = await self._get_current_position_info()
+
+        # 构建增强的任务描述
+        enhanced_task = self.task
+
+        # 如果有位置信息，添加到任务描述中
+        if position_info:
+            enhanced_task = f"{position_info}\n\nTask: {self.task}"
+
+        return enhanced_task
+
     async def step(self, memory_step: ActionStep) -> Union[None, Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -350,8 +369,12 @@ class ToolCallingAgent(MultiStepAgent):
 
         # Add new step in logs
         current_status = self.collaborator.read_agent_status(self.robot_name)
+
+        # 增强任务描述：添加当前位置和场景信息
+        enhanced_task = await self._get_enhanced_task_with_context()
+
         model_message: ChatMessage = self.model(
-            task=self.task,
+            task=enhanced_task,
             current_status=current_status,
             model_path=self.model_path,
             tools_to_call_from=self.tools,

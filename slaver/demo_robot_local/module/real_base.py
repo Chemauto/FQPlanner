@@ -340,34 +340,39 @@ def register_tools(mcp):
     async def navigate_to_location(target: str) -> str:
         """Navigate to a target location (导航到目标位置).
 
-        根据场景配置文件导航机器人到指定位置。通过Socket发送指令到开发板，开发板执行实际的运动控制。
+        根据场景配置文件自动导航机器人到指定位置。函数会自动读取profile.yaml中的坐标信息，
+        计算从当前位置到目标位置的移动距离，并执行运动。LLM不需要知道具体坐标，只需传递目标位置名称。
+
+        工作原理：
+            1. 从Redis读取机器人当前位置
+            2. 从profile.yaml读取目标位置坐标
+            3. 自动计算移动距离（dx, dy）
+            4. 通过Socket发送指令到开发板执行运动
+            5. 更新Redis中的机器人位置
 
         坐标系统：
             - x: 左右方向（右为正）
             - y: 前后方向（前为正）
             - z: 垂直方向（通常为0）
 
-        例如：从入口 [0.0, 0.0, 0.0] 到卧室 [4.0, 1.0, 0.0]
-            - 需要向右移动 4.0 米（20秒，速度 0.2 m/s）
-            - 需要向前移动 1.0 米（5秒，速度 0.2 m/s）
-
         Args:
             target: 目标位置名称，支持中英文。
-                   可用位置：卧室, 客厅, 入口, 厨房, 厨房桌子, 自定义桌子, 服务桌, 篮子, 垃圾桶
-                   或英文：bedroom, livingRoom, entrance, kitchen, kitchenTable, customTable, servingTable, basket, trashCan
+                   可用位置：卧室, 客厅, 入口, 厨房, 厕所, 厨房桌子, 自定义桌子, 服务桌, 篮子, 垃圾桶
+                   或英文：bedroom, livingRoom, entrance, kitchen, bathroom, kitchenTable, customTable, servingTable, basket, trashCan
 
         Returns:
             A JSON string containing the result message and state updates.
 
         Examples:
-            navigate_to_location(target="卧室")  # Navigate to bedroom
-            navigate_to_location(target="bedroom")  # Navigate to bedroom (English)
-            navigate_to_location(target="客厅")  # Navigate to living room
+            navigate_to_location(target="卧室")  # 从当前位置导航到卧室
+            navigate_to_location(target="livingRoom")  # 从当前位置导航到客厅
+            navigate_to_location(target="客厅")  # 中文也可以
 
         Notes:
             - 导航速度固定为 0.2 m/s
             - 会先沿 x 轴移动（左右），再沿 y 轴移动（前后）
-            - 如果目标位置就是当前位置，不会移动
+            - 如果目标位置就是当前位置，不会移动（自动跳过）
+            - 函数会自动处理所有坐标计算，LLM无需关心具体坐标
         """
         print(f"[real_base.navigate_to_location] 目标位置: {target}", file=sys.stderr)
 
@@ -468,75 +473,75 @@ def register_tools(mcp):
         # 返回 JSON 数组格式：[result_message, state_updates]
         return json.dumps([result_msg, state_updates], ensure_ascii=False)
 
-    @mcp.tool()
-    async def move_base(direction: str, speed: float = 0.2, duration: float = 2.0) -> Tuple[str, Dict]:
-        """Control omnidirectional robot base movement (麦轮底盘移动控制).
+    # @mcp.tool()
+    # async def move_base(direction: str, speed: float = 0.2, duration: float = 2.0) -> Tuple[str, Dict]:
+    #     """Control omnidirectional robot base movement (麦轮底盘移动控制).
 
-        控制三全向轮底盘按指定方向移动。通过Socket发送指令到开发板，开发板执行实际的运动控制。
+    #     控制三全向轮底盘按指定方向移动。通过Socket发送指令到开发板，开发板执行实际的运动控制。
 
-        支持的方向：前、后、左、右、左前、右前、左后、右后、原地旋转
+    #     支持的方向：前、后、左、右、左前、右前、左后、右后、原地旋转
 
-        Args:
-            direction: Movement direction. Available directions:
-                      - "forward" or "前": 向前移动
-                      - "backward" or "后": 向后移动
-                      - "left" or "左": 向左横移
-                      - "right" or "右": 向右横移
-                      - "forward_left" or "左前": 向左前方斜向移动
-                      - "forward_right" or "右前": 向右前方斜向移动
-                      - "backward_left" or "左后": 向左后方斜向移动
-                      - "backward_right" or "右后": 向右后方斜向移动
-                      - "rotate_cw" or "顺时针": 原地顺时针旋转
-                      - "rotate_ccw" or "逆时针": 原地逆时针旋转
-            speed: Movement speed in m/s (米/秒).
-                   典型范围：0.1 到 0.5 m/s，建议默认 0.2 m/s
-            duration: Movement duration in seconds (秒).
-                      运动持续时间，开发板会在这个时间后自动停止
+    #     Args:
+    #         direction: Movement direction. Available directions:
+    #                   - "forward" or "前": 向前移动
+    #                   - "backward" or "后": 向后移动
+    #                   - "left" or "左": 向左横移
+    #                   - "right" or "右": 向右横移
+    #                   - "forward_left" or "左前": 向左前方斜向移动
+    #                   - "forward_right" or "右前": 向右前方斜向移动
+    #                   - "backward_left" or "左后": 向左后方斜向移动
+    #                   - "backward_right" or "右后": 向右后方斜向移动
+    #                   - "rotate_cw" or "顺时针": 原地顺时针旋转
+    #                   - "rotate_ccw" or "逆时针": 原地逆时针旋转
+    #         speed: Movement speed in m/s (米/秒).
+    #                典型范围：0.1 到 0.5 m/s，建议默认 0.2 m/s
+    #         duration: Movement duration in seconds (秒).
+    #                   运动持续时间，开发板会在这个时间后自动停止
 
-        Returns:
-            A tuple containing the result message and updated robot state.
+    #     Returns:
+    #         A tuple containing the result message and updated robot state.
 
-        Examples:
-            move_base(direction="forward", speed=0.2, duration=2.0)  # 向前移动2秒
-            move_base(direction="left", speed=0.2, duration=1.5)   # 向左移动1.5秒
-            move_base(direction="rotate_ccw", speed=0.2, duration=3.0)  # 逆时针旋转3秒
+    #     Examples:
+    #         move_base(direction="forward", speed=0.2, duration=2.0)  # 向前移动2秒
+    #         move_base(direction="left", speed=0.2, duration=1.5)   # 向左移动1.5秒
+    #         move_base(direction="rotate_ccw", speed=0.2, duration=3.0)  # 逆时针旋转3秒
 
-        Notes:
-            - 指令发送到开发板后，开发板会执行运动并在duration时间后自动停止
-            - 如果需要立即停止，使用 stop_base()
-            - 旋转时 speed 参数表示角速度 (rad/s)
-        """
-        print(f"[real_base.move_base] 方向={direction}, 速度={speed}m/s, 时间={duration}s", file=sys.stderr)
+    #     Notes:
+    #         - 指令发送到开发板后，开发板会执行运动并在duration时间后自动停止
+    #         - 如果需要立即停止，使用 stop_base()
+    #         - 旋转时 speed 参数表示角速度 (rad/s)
+    #     """
+    #     print(f"[real_base.move_base] 方向={direction}, 速度={speed}m/s, 时间={duration}s", file=sys.stderr)
 
-        # 构建指令字符串
-        # 格式: MOVE:<direction>:<speed>:<duration>
-        command = f"MOVE:{direction}:{speed}:{duration}"
+    #     # 构建指令字符串
+    #     # 格式: MOVE:<direction>:<speed>:<duration>
+    #     command = f"MOVE:{direction}:{speed}:{duration}"
 
-        # 发送指令到开发板
-        success, result = send_base_command(command)
+    #     # 发送指令到开发板
+    #     success, result = send_base_command(command)
 
-        # 构建返回结果
-        if success:
-            state_update = {
-                "action": "move_base",
-                "direction": direction,
-                "speed": speed,
-                "duration": duration,
-                "success": True,
-                "timestamp": time.time()
-            }
-            message = f"✅ 底盘正在向{direction}方向移动，速度{speed}m/s，持续时间{duration}秒"
-            return message, state_update
-        else:
-            state_update = {
-                "action": "move_base",
-                "direction": direction,
-                "speed": speed,
-                "duration": duration,
-                "success": False,
-                "error": result
-            }
-            return f"❌ 底盘移动失败: {result}", state_update
+    #     # 构建返回结果
+    #     if success:
+    #         state_update = {
+    #             "action": "move_base",
+    #             "direction": direction,
+    #             "speed": speed,
+    #             "duration": duration,
+    #             "success": True,
+    #             "timestamp": time.time()
+    #         }
+    #         message = f"✅ 底盘正在向{direction}方向移动，速度{speed}m/s，持续时间{duration}秒"
+    #         return message, state_update
+    #     else:
+    #         state_update = {
+    #             "action": "move_base",
+    #             "direction": direction,
+    #             "speed": speed,
+    #             "duration": duration,
+    #             "success": False,
+    #             "error": result
+    #         }
+    #         return f"❌ 底盘移动失败: {result}", state_update
 
     # @mcp.tool()
     # async def move_base_raw(vx: float, vy: float, omega: float = 0.0, duration: float = 2.0) -> Tuple[str, Dict]:
