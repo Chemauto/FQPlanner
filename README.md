@@ -6,6 +6,7 @@ RoboOS 是基于"大脑-小脑"分层架构的机器人操作系统，通过大�
 - 🧭 **模拟导航** - 场景定位与路径规划
 - 🦾 **机械臂控制** - SO101机械臂关节运动
 - 🌐 **远程通信** - 网络化机器人协作与抓取
+- 🤖 **麦轮底盘** - 三全向轮底盘的Socket远程控制与位置追踪
 
 ## 快速入门
 
@@ -171,30 +172,139 @@ tail -f master/.logs/master_agent.log  # Master 日志
 tail -f slaver/.log/agent.log          # Slaver 日志
 ```
 
-## 场景位置
+---
 
-| 位置 | 坐标 |
-|------|------|
-| 入口 (entrance) | (0.0, 0.0, 0.0) |
-| 客厅 (livingRoom) | (2.0, 3.0, 0.0) |
-| 卧室 (bedroom) | (4.0, 1.0, 0.0) |
-| 厨房 | (1.0, 2.0, 0.0) |
+## 📝 更新日志 / Changelog
 
-## 扩展开发
+### 主要功能更新
 
-**添加新模块 (3步)**
-```bash
-# 1. 复制模板
-cd slaver/demo_robot_local && cp module/example.py module/my_module.py
+#### 2026-01-19: 麦轮底盘远程控制与位置追踪
+- ✅ **新增 `real_base.py` 模块** - 基于Socket通信的三全向轮底盘控制
+  - 支持远程移动控制（前、后、左、右、斜向、旋转）
+  - 集成Redis位置追踪，根据当前实际位置计算导航距离
+  - 固定速度0.2 m/s，支持精确时间控制
+  - 自动状态更新，避免重复移动到同一位置
+- 📁 **项目结构优化** - 将 `RealBaseTest` 重命名为 `TestRealBase`
+- 🔧 **开发板服务器** - `base_server.py` 用于部署到嵌入式开发板
+  - 支持Socket TCP通信（端口9998）
+  - 完整的指令协议和错误处理
 
-# 2. 编辑实现功能
+**技术细节：**
+- Redis哈希表集成：`HGET ENVIRONMENT_INFO robot`
+- 位置智能判断：当 `dx=0, dy=0` 时自动跳过移动
+- Socket超时处理：10秒连接超时
+- 详细日志输出：便于调试和状态监控
 
-# 3. 在 skill.py 注册
-from module.my_module import register_tools as register_my_tools
+**相关文档：**
+- `/home/dora/RoboOs/RoboOS/NAVIGATION_GUIDE.md` - 麦轮底盘导航功能使用说明
+- `/home/dora/RoboOs/RoboOS/REALBASE_REDIS_UPDATE.md` - Redis位置追踪更新说明
+
+---
+
+#### 2026-01-18: 添加Xbox手柄模拟器（Project4_SimJoy）
+- 图形化虚拟手柄，支持pygame兼容接口
+
+#### 2026-01-16: 增加全局坐标系导航系统
+- 基于航位推算的PID控制
+
+#### 2026-01-15: 完善三麦克纳姆轮平台仿真和文档
+
+#### 2026-01-14: 添加双轮差速小车基础控制
+
+#### 2026-01-13: 项目初始化
+- 添加 MuJoCo 模型
+
+---
+
+## 📁 项目结构
+
+```
+RoboOS/
+├── master/                  # Master节点（任务规划）
+│   ├── scene/              # 场景配置文件
+│   │   ├── profile.yaml    # 位置和物体坐标定义
+│   │   ├── LOCATION_MAP.py # 中文名称到英文名称映射
+│   │   └── README.md       # 场景配置说明
+│   └── run.py              # Master启动脚本
+│
+├── slaver/                 # Slaver节点（任务执行）
+│   ├── demo_robot_local/   # 本地机器人模拟
+│   │   └── module/         # 功能模块
+│   │       ├── base.py           # 模拟底盘导航
+│   │       ├── arm.py            # SO101机械臂控制
+│   │       ├── grasp.py          # 抓取功能
+│   │       ├── real_base.py      # 麦轮底盘远程控制 ⭐ NEW
+│   │       └── example.py        # 示例模块
+│   └── run.py              # Slaver启动脚本
+│
+├── TestRealBase/           # 麦轮底盘测试项目 ⭐ RENAMED
+│   ├── RealBase/           # 底盘控制核心库
+│   │   ├── motor_controller.py  # 底盘运动控制
+│   │   └── test_motor.py        # 单元测试
+│   ├── base_server.py      # 开发板服务器程序 ⭐ NEW
+│   └── README.md           # 项目说明
+│
+├── NAVIGATION_GUIDE.md     # 麦轮底盘导航使用指南 ⭐ NEW
+├── REALBASE_REDIS_UPDATE.md  # Redis位置追踪说明 ⭐ NEW
+├── MODULE_GUIDE.md         # 模块开发指南
+├── grasp_server.py         # 抓取服务器
+├── test_robot.py           # 机器人测试脚本
+└── requirements.txt        # Python依赖
 ```
 
-## 文档
+---
 
-- [模块开发指南](MODULE_DEVELOPMENT_GUIDE.md) - 完整开发文档
-- [场景配置说明](master/scene/README.md) - 位置定义与映射
-- [状态管理文档](ROBOT_STATE_MANAGEMENT.md) - 位置状态追踪
+## 🔧 麦轮底盘控制使用
+
+### 快速测试
+
+1. **启动开发板服务器** (在实际硬件上):
+```bash
+# 将服务器程序复制到开发板
+scp TestRealBase/base_server.py HwHiAiUser@192.168.0.155:/home/HwHiAiUser/
+scp -r TestRealBase/RealBase HwHiAiUser@192.168.0.155:/home/HwHiAiUser/
+
+# SSH 登录到开发板
+ssh HwHiAiUser@192.168.0.155
+
+# 在开发板上运行服务器
+cd /home/HwHiAiUser
+python3 base_server.py
+```
+
+2. **测试导航功能**:
+```bash
+# 启动 Slaver
+python slaver/run.py
+
+# 通过 Web UI 或测试脚本发送指令
+用户说: "导航到客厅"
+用户说: "去卧室"
+用户说: "回到入口"
+```
+
+3. **验证位置追踪**:
+```bash
+# 查看Redis中的机器人状态
+redis-cli HGET ENVIRONMENT_INFO robot
+# 输出: {"position": "livingRoom", "coordinates": [0.0, 0.4, 0.0], ...}
+```
+
+### 可用指令
+
+- `navigate_to_location(target="位置名")` - 导航到指定位置
+- `move_base(direction="方向", speed=0.2, duration=2.0)` - 按方向移动
+- `stop_base()` - 立即停止
+- `check_base_status()` - 检查连接状态
+
+支持的位置：入口、客厅、卧室、厨房、厕所、厨房桌子、自定义桌子、服务桌、篮子、垃圾桶
+
+---
+
+## 📚 更多文档
+
+- [模块开发指南](MODULE_GUIDE.md) - 如何添加新的功能模块
+- [场景配置说明](master/scene/README.md) - 如何修改场景和位置
+- [麦轮底盘导航指南](NAVIGATION_GUIDE.md) - 麦轮底盘详细使用说明
+- [TestRealBase项目](TestRealBase/README.md) - 底盘硬件控制详情
+

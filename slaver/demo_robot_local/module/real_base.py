@@ -21,10 +21,76 @@ import socket
 import time
 from typing import Tuple, Dict
 import yaml
+import json
 
 # Import location map from master/scene directory
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../master/scene')))
 import LOCATION_MAP
+
+# Redis配置 - 从config.yaml读取
+REDIS_CONFIG = {
+    "host": "127.0.0.1",
+    "port": 6379,
+    "db": 0,
+    "password": None
+}
+
+# 全局Redis客户端（延迟初始化）
+_redis_client = None
+
+
+def get_redis_client():
+    """获取Redis客户端实例（延迟初始化）"""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis
+            _redis_client = redis.Redis(
+                host=REDIS_CONFIG["host"],
+                port=REDIS_CONFIG["port"],
+                db=REDIS_CONFIG["db"],
+                password=REDIS_CONFIG["password"],
+                decode_responses=True
+            )
+            print("[real_base] Redis客户端已创建", file=sys.stderr)
+        except ImportError:
+            print("[real_base] 警告: 未安装redis库，无法读取当前位置", file=sys.stderr)
+            _redis_client = False
+        except Exception as e:
+            print(f"[real_base] Redis连接失败: {e}", file=sys.stderr)
+            _redis_client = False
+    return _redis_client if _redis_client is not False else None
+
+
+def get_current_robot_position() -> Tuple[str, list]:
+    """从Redis获取当前机器人位置
+
+    Returns:
+        (位置名称, 坐标数组) 或 (None, [0, 0, 0]) 如果无法获取
+    """
+    try:
+        redis_client = get_redis_client()
+        if redis_client is None:
+            print("[real_base] 无法连接Redis，使用默认位置 [0.0, 0.0, 0.0]", file=sys.stderr)
+            return None, [0.0, 0.0, 0.0]
+
+        # 从Redis哈希表读取机器人状态
+        # Redis结构：HGET ENVIRONMENT_INFO robot
+        robot_info = redis_client.hget("ENVIRONMENT_INFO", "robot")
+        if not robot_info:
+            print("[real_base] Redis中无机器人状态，使用默认位置 [0.0, 0.0, 0.0]", file=sys.stderr)
+            return None, [0.0, 0.0, 0.0]
+
+        robot_state = json.loads(robot_info)
+        position_name = robot_state.get("position", "entrance")
+        coordinates = robot_state.get("coordinates", [0.0, 0.0, 0.0])
+
+        print(f"[real_base] 当前位置: {position_name}, 坐标: {coordinates}", file=sys.stderr)
+        return position_name, coordinates
+
+    except Exception as e:
+        print(f"[real_base] 读取当前位置失败: {e}，使用默认位置 [0.0, 0.0, 0.0]", file=sys.stderr)
+        return None, [0.0, 0.0, 0.0]
 
 
 # 配置信息（根据实际情况修改）
@@ -271,7 +337,7 @@ def register_tools(mcp):
     """
 
     @mcp.tool()
-    async def navigate_to_location(target: str) -> Tuple[str, Dict]:
+    async def navigate_to_location(target: str) -> str:
         """Navigate to a target location (导航到目标位置).
 
         根据场景配置文件导航机器人到指定位置。通过Socket发送指令到开发板，开发板执行实际的运动控制。
@@ -291,7 +357,7 @@ def register_tools(mcp):
                    或英文：bedroom, livingRoom, entrance, kitchen, kitchenTable, customTable, servingTable, basket, trashCan
 
         Returns:
-            A tuple containing the result message and updated robot state with coordinates.
+            A JSON string containing the result message and state updates.
 
         Examples:
             navigate_to_location(target="卧室")  # Navigate to bedroom
@@ -311,21 +377,22 @@ def register_tools(mcp):
         if not success:
             error_msg = location_info.get('error', '未知错误')
             print(f"[real_base.navigate_to_location] {error_msg}", file=sys.stderr)
-            return f"❌ {error_msg}", {"error": error_msg, "target": target}
+            return json.dumps([f"❌ {error_msg}", {"error": error_msg, "target": target}], ensure_ascii=False)
 
         target_pos = location_info['position']
+        target_en = location_info['name']
         x, y, z = target_pos
 
         print(f"[real_base.navigate_to_location] 目标坐标: [{x}, {y}, {z}]", file=sys.stderr)
 
-        # 假设机器人当前在入口 [0.0, 0.0, 0.0]
-        # TODO: 未来可以追踪当前位置
-        current_pos = [0.0, 0.0, 0.0]
+        # 从Redis获取当前机器人位置
+        current_pos_name, current_pos = get_current_robot_position()
 
-        # 计算需要移动的距离
+        # 计算需要移动的距离（基于当前实际位置）
         dx = x - current_pos[0]
         dy = y - current_pos[1]
 
+        print(f"[real_base.navigate_to_location] 从 {current_pos_name} {current_pos} 到 {target_en} {target_pos}", file=sys.stderr)
         print(f"[real_base.navigate_to_location] 需要移动: dx={dx}m, dy={dy}m", file=sys.stderr)
 
         # 计算移动时间（速度固定为 0.2 m/s）
@@ -361,12 +428,11 @@ def register_tools(mcp):
         if not movement_steps:
             result_msg = f"✅ 已经在目标位置：{location_info['description']} ({target})"
             print(f"[real_base.navigate_to_location] {result_msg}", file=sys.stderr)
-            return result_msg, {
-                "target": target,
-                "position": target_pos,
-                "success": True,
-                "movement": "none"
+            state_updates = {
+                "position": target_en,
+                "coordinates": target_pos
             }
+            return json.dumps([result_msg, state_updates], ensure_ascii=False)
 
         # 执行移动步骤
         print(f"[real_base.navigate_to_location] 开始导航，共 {len(movement_steps)} 步", file=sys.stderr)
@@ -385,12 +451,7 @@ def register_tools(mcp):
             if not success:
                 error_msg = f"导航失败在步骤 {i}: {result}"
                 print(f"[real_base.navigate_to_location] {error_msg}", file=sys.stderr)
-                return f"❌ {error_msg}", {
-                    "target": target,
-                    "position": target_pos,
-                    "success": False,
-                    "error": result
-                }
+                return json.dumps([f"❌ {error_msg}", {"error": result, "target": target}], ensure_ascii=False)
 
             # 等待移动完成
             time.sleep(duration)
@@ -398,14 +459,14 @@ def register_tools(mcp):
         result_msg = f"✅ 已导航到 {location_info['description']} ({target})，用时 {total_duration:.1f}秒"
         print(f"[real_base.navigate_to_location] {result_msg}", file=sys.stderr)
 
-        return result_msg, {
-            "target": target,
-            "target_en": location_info['name'],
-            "position": target_pos,
-            "success": True,
-            "total_duration": total_duration,
-            "steps": len(movement_steps)
+        # 构建状态更新
+        state_updates = {
+            "position": target_en,
+            "coordinates": target_pos
         }
+
+        # 返回 JSON 数组格式：[result_message, state_updates]
+        return json.dumps([result_msg, state_updates], ensure_ascii=False)
 
     @mcp.tool()
     async def move_base(direction: str, speed: float = 0.2, duration: float = 2.0) -> Tuple[str, Dict]:
