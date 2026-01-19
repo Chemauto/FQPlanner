@@ -7,10 +7,26 @@
 
 import socket
 import sys
+import os
 import time
 
+# 添加 RealBase 目录到 Python 路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+realbase_path = os.path.join(current_dir, 'RealBase')
+if os.path.exists(realbase_path):
+    sys.path.insert(0, realbase_path)
+    print(f"[路径] 已添加 RealBase 到路径: {realbase_path}")
+else:
+    print(f"[警告] 未找到 RealBase 目录: {realbase_path}")
+
 # 导入底盘控制器
-from motor_controller import OmniWheelController
+try:
+    from motor_controller import OmniWheelController
+    print("[导入] ✓ motor_controller 导入成功")
+except ImportError as e:
+    print(f"[错误] 无法导入 motor_controller: {e}")
+    print(f"[提示] 请确保 RealBase 目录在: {realbase_path}")
+    sys.exit(1)
 
 # 配置
 HOST = '0.0.0.0'  # 监听所有网络接口
