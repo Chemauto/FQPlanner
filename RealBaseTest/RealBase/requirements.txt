@@ -1,0 +1,13 @@
+# 3全向轮底盘控制模块依赖
+
+# 核心依赖
+numpy>=1.21.0
+pyserial
+
+# 电机驱动依赖 (来自 motors/ 模块)
+deepdiff
+tqdm
+
+# 注意: scservo-sdk 不需要单独安装
+# 舵机控制代码已包含在 motors/feetech/ 目录中
+
