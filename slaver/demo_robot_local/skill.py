@@ -81,7 +81,7 @@ def register_all_modules():
     register_real_base_tools(mcp)
 
     # 注册抓取控制模块
-    register_grasp_tools(mcp)
+    # register_grasp_tools(mcp)
 
     # 注册示例模块（可选，实际使用时可以注释掉）
     # register_example_tools(mcp)

@@ -16,9 +16,15 @@
 """
 
 import sys
+import os
 import socket
 import time
 from typing import Tuple, Dict
+import yaml
+
+# Import location map from master/scene directory
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../master/scene')))
+import LOCATION_MAP
 
 
 # 配置信息（根据实际情况修改）
@@ -44,6 +50,77 @@ RESPONSE_CODES = {
     "SUCCESS": "执行成功",
     "FAILED": "执行失败",
 }
+
+# 导航配置
+NAVIGATION_SPEED = 0.2  # 固定导航速度 (m/s)
+
+
+def load_location_config():
+    """从 profile.yaml 加载位置配置"""
+    try:
+        profile_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../master/scene/profile.yaml'))
+        with open(profile_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        # 提取所有位置的坐标信息
+        locations = {}
+        if 'scene' in config:
+            for item in config['scene']:
+                if 'position' in item:
+                    locations[item['name']] = {
+                        'position': item['position'],
+                        'description': item.get('description', ''),
+                        'type': item.get('type', 'location')
+                    }
+
+        print(f"[real_base.load_location_config] 已加载 {len(locations)} 个位置配置", file=sys.stderr)
+        return locations
+    except Exception as e:
+        print(f"[real_base.load_location_config] 加载配置失败: {e}", file=sys.stderr)
+        return {}
+
+
+def get_location_coordinates(target: str) -> Tuple[bool, Dict]:
+    """获取目标位置的坐标
+
+    Args:
+        target: 目标位置名称（支持中英文）
+
+    Returns:
+        (成功标志, 位置信息字典)
+    """
+    locations = load_location_config()
+
+    # 映射中文到英文
+    target_en = LOCATION_MAP.LOCATION_MAP.get(target, target)
+
+    if target_en in locations:
+        return True, {
+            'name': target_en,
+            'position': locations[target_en]['position'],
+            'description': locations[target_en]['description']
+        }
+
+    return False, {'error': f'未找到位置: {target}'}
+
+
+def cleanup_base():
+    """清理底盘连接 - Socket版本不需要清理
+
+    此函数为兼容 skill.py 的导入要求而保留。
+    Socket 通信是无状态的，不需要清理连接。
+    """
+    print("[real_base.py] Socket通信版本，无需清理底盘连接", file=sys.stderr)
+
+
+def initialize_base():
+    """初始化底盘连接 - Socket版本不需要初始化
+
+    此函数为兼容 skill.py 的导入要求而保留。
+    Socket 通信在每次发送指令时自动建立连接。
+    """
+    print("[real_base.py] Socket通信版本，无需初始化底盘连接", file=sys.stderr)
+    return True
 
 
 def send_base_command(command: str) -> Tuple[bool, str]:
@@ -194,6 +271,143 @@ def register_tools(mcp):
     """
 
     @mcp.tool()
+    async def navigate_to_location(target: str) -> Tuple[str, Dict]:
+        """Navigate to a target location (导航到目标位置).
+
+        根据场景配置文件导航机器人到指定位置。通过Socket发送指令到开发板，开发板执行实际的运动控制。
+
+        坐标系统：
+            - x: 左右方向（右为正）
+            - y: 前后方向（前为正）
+            - z: 垂直方向（通常为0）
+
+        例如：从入口 [0.0, 0.0, 0.0] 到卧室 [4.0, 1.0, 0.0]
+            - 需要向右移动 4.0 米（20秒，速度 0.2 m/s）
+            - 需要向前移动 1.0 米（5秒，速度 0.2 m/s）
+
+        Args:
+            target: 目标位置名称，支持中英文。
+                   可用位置：卧室, 客厅, 入口, 厨房, 厨房桌子, 自定义桌子, 服务桌, 篮子, 垃圾桶
+                   或英文：bedroom, livingRoom, entrance, kitchen, kitchenTable, customTable, servingTable, basket, trashCan
+
+        Returns:
+            A tuple containing the result message and updated robot state with coordinates.
+
+        Examples:
+            navigate_to_location(target="卧室")  # Navigate to bedroom
+            navigate_to_location(target="bedroom")  # Navigate to bedroom (English)
+            navigate_to_location(target="客厅")  # Navigate to living room
+
+        Notes:
+            - 导航速度固定为 0.2 m/s
+            - 会先沿 x 轴移动（左右），再沿 y 轴移动（前后）
+            - 如果目标位置就是当前位置，不会移动
+        """
+        print(f"[real_base.navigate_to_location] 目标位置: {target}", file=sys.stderr)
+
+        # 获取目标位置坐标
+        success, location_info = get_location_coordinates(target)
+
+        if not success:
+            error_msg = location_info.get('error', '未知错误')
+            print(f"[real_base.navigate_to_location] {error_msg}", file=sys.stderr)
+            return f"❌ {error_msg}", {"error": error_msg, "target": target}
+
+        target_pos = location_info['position']
+        x, y, z = target_pos
+
+        print(f"[real_base.navigate_to_location] 目标坐标: [{x}, {y}, {z}]", file=sys.stderr)
+
+        # 假设机器人当前在入口 [0.0, 0.0, 0.0]
+        # TODO: 未来可以追踪当前位置
+        current_pos = [0.0, 0.0, 0.0]
+
+        # 计算需要移动的距离
+        dx = x - current_pos[0]
+        dy = y - current_pos[1]
+
+        print(f"[real_base.navigate_to_location] 需要移动: dx={dx}m, dy={dy}m", file=sys.stderr)
+
+        # 计算移动时间（速度固定为 0.2 m/s）
+        speed = NAVIGATION_SPEED
+        duration_x = abs(dx) / speed if dx != 0 else 0
+        duration_y = abs(dy) / speed if dy != 0 else 0
+
+        movement_steps = []
+        total_duration = 0
+
+        # 先沿 x 轴移动（左右）
+        if dx != 0:
+            direction_x = "right" if dx > 0 else "left"
+            duration_x = abs(dx) / speed
+            movement_steps.append({
+                'direction': direction_x,
+                'duration': duration_x,
+                'distance': abs(dx)
+            })
+            total_duration += duration_x
+
+        # 再沿 y 轴移动（前后）
+        if dy != 0:
+            direction_y = "forward" if dy > 0 else "backward"
+            duration_y = abs(dy) / speed
+            movement_steps.append({
+                'direction': direction_y,
+                'duration': duration_y,
+                'distance': abs(dy)
+            })
+            total_duration += duration_y
+
+        if not movement_steps:
+            result_msg = f"✅ 已经在目标位置：{location_info['description']} ({target})"
+            print(f"[real_base.navigate_to_location] {result_msg}", file=sys.stderr)
+            return result_msg, {
+                "target": target,
+                "position": target_pos,
+                "success": True,
+                "movement": "none"
+            }
+
+        # 执行移动步骤
+        print(f"[real_base.navigate_to_location] 开始导航，共 {len(movement_steps)} 步", file=sys.stderr)
+
+        for i, step in enumerate(movement_steps, 1):
+            direction = step['direction']
+            duration = step['duration']
+            distance = step['distance']
+
+            print(f"[real_base.navigate_to_location] 步骤 {i}/{len(movement_steps)}: {direction} {distance}m ({duration}s)", file=sys.stderr)
+
+            # 发送移动指令
+            command = f"MOVE:{direction}:{speed}:{duration}"
+            success, result = send_base_command(command)
+
+            if not success:
+                error_msg = f"导航失败在步骤 {i}: {result}"
+                print(f"[real_base.navigate_to_location] {error_msg}", file=sys.stderr)
+                return f"❌ {error_msg}", {
+                    "target": target,
+                    "position": target_pos,
+                    "success": False,
+                    "error": result
+                }
+
+            # 等待移动完成
+            time.sleep(duration)
+
+        result_msg = f"✅ 已导航到 {location_info['description']} ({target})，用时 {total_duration:.1f}秒"
+        print(f"[real_base.navigate_to_location] {result_msg}", file=sys.stderr)
+
+        return result_msg, {
+            "target": target,
+            "target_en": location_info['name'],
+            "position": target_pos,
+            "success": True,
+            "total_duration": total_duration,
+            "steps": len(movement_steps)
+        }
+
+    @mcp.tool()
     async def move_base(direction: str, speed: float = 0.2, duration: float = 2.0) -> Tuple[str, Dict]:
         """Control omnidirectional robot base movement (麦轮底盘移动控制).
 
@@ -223,8 +437,8 @@ def register_tools(mcp):
 
         Examples:
             move_base(direction="forward", speed=0.2, duration=2.0)  # 向前移动2秒
-            move_base(direction="left", speed=0.15, duration=1.5)   # 向左移动1.5秒
-            move_base(direction="rotate_ccw", speed=0.3, duration=3.0)  # 逆时针旋转3秒
+            move_base(direction="left", speed=0.2, duration=1.5)   # 向左移动1.5秒
+            move_base(direction="rotate_ccw", speed=0.2, duration=3.0)  # 逆时针旋转3秒
 
         Notes:
             - 指令发送到开发板后，开发板会执行运动并在duration时间后自动停止
@@ -263,67 +477,67 @@ def register_tools(mcp):
             }
             return f"❌ 底盘移动失败: {result}", state_update
 
-    @mcp.tool()
-    async def move_base_raw(vx: float, vy: float, omega: float = 0.0, duration: float = 2.0) -> Tuple[str, Dict]:
-        """Control omnidirectional base with raw velocity components (原始速度分量控制底盘).
+    # @mcp.tool()
+    # async def move_base_raw(vx: float, vy: float, omega: float = 0.0, duration: float = 2.0) -> Tuple[str, Dict]:
+    #     """Control omnidirectional base with raw velocity components (原始速度分量控制底盘).
 
-        直接设置底盘的速度分量，不进行方向归一化。通过Socket发送指令到开发板。
+    #     直接设置底盘的速度分量，不进行方向归一化。通过Socket发送指令到开发板。
 
-        与 move_base 不同，此函数直接使用速度分量，提供更精确的控制。
+    #     与 move_base 不同，此函数直接使用速度分量，提供更精确的控制。
 
-        Args:
-            vx: X方向速度 (m/s)，正值向前，负值向后
-            vy: Y方向速度 (m/s)，正值向左，负值向右
-            omega: 旋转角速度 (rad/s)，正值逆时针，负值顺时针，默认0
-            duration: 运动持续时间 (秒)，默认2.0秒
+    #     Args:
+    #         vx: X方向速度 (m/s)，正值向前，负值向后
+    #         vy: Y方向速度 (m/s)，正值向左，负值向右
+    #         omega: 旋转角速度 (rad/s)，正值逆时针，负值顺时针，默认0
+    #         duration: 运动持续时间 (秒)，默认2.0秒
 
-        Returns:
-            A tuple containing the result message and updated robot state.
+    #     Returns:
+    #         A tuple containing the result message and updated robot state.
 
-        Examples:
-            move_base_raw(vx=0.2, vy=0.0, duration=2.0)  # 向前移动
-            move_base_raw(vx=0.0, vy=0.15, duration=1.5)  # 向左横移
-            move_base_raw(vx=0.1, vy=0.1, duration=3.0)  # 向左前方斜向移动
-            move_base_raw(vx=0.0, vy=0.0, omega=0.5, duration=2.0)  # 原地逆时针旋转
+    #     Examples:
+    #         move_base_raw(vx=0.2, vy=0.0, duration=2.0)  # 向前移动
+    #         move_base_raw(vx=0.0, vy=0.15, duration=1.5)  # 向左横移
+    #         move_base_raw(vx=0.1, vy=0.1, duration=3.0)  # 向左前方斜向移动
+    #         move_base_raw(vx=0.0, vy=0.0, omega=0.5, duration=2.0)  # 原地逆时针旋转
 
-        Notes:
-            - 速度单位为 m/s，角速度单位为 rad/s
-            - 运动结束后开发板会自动停止
-            - 如果需要立即停止，使用 stop_base()
-        """
-        print(f"[real_base.move_base_raw] vx={vx}m/s, vy={vy}m/s, omega={omega}rad/s, 时间={duration}s", file=sys.stderr)
+    #     Notes:
+    #         - 速度单位为 m/s，角速度单位为 rad/s
+    #         - 运动结束后开发板会自动停止
+    #         - 如果需要立即停止，使用 stop_base()
+    #     """
+    #     print(f"[real_base.move_base_raw] vx={vx}m/s, vy={vy}m/s, omega={omega}rad/s, 时间={duration}s", file=sys.stderr)
 
-        # 构建指令字符串
-        # 格式: MOVE_RAW:<vx>:<vy>:<omega>:<duration>
-        command = f"MOVE_RAW:{vx}:{vy}:{omega}:{duration}"
+    #     # 构建指令字符串
+    #     # 格式: MOVE_RAW:<vx>:<vy>:<omega>:<duration>
+    #     command = f"MOVE_RAW:{vx}:{vy}:{omega}:{duration}"
 
-        # 发送指令到开发板
-        success, result = send_base_command(command)
+    #     # 发送指令到开发板
+    #     success, result = send_base_command(command)
 
-        # 构建返回结果
-        if success:
-            state_update = {
-                "action": "move_base_raw",
-                "vx": vx,
-                "vy": vy,
-                "omega": omega,
-                "duration": duration,
-                "success": True,
-                "timestamp": time.time()
-            }
-            message = f"✅ 底盘正在以 vx={vx}m/s, vy={vy}m/s, omega={omega}rad/s 移动，持续时间{duration}秒"
-            return message, state_update
-        else:
-            state_update = {
-                "action": "move_base_raw",
-                "vx": vx,
-                "vy": vy,
-                "omega": omega,
-                "duration": duration,
-                "success": False,
-                "error": result
-            }
-            return f"❌ 底盘移动失败: {result}", state_update
+    #     # 构建返回结果
+    #     if success:
+    #         state_update = {
+    #             "action": "move_base_raw",
+    #             "vx": vx,
+    #             "vy": vy,
+    #             "omega": omega,
+    #             "duration": duration,
+    #             "success": True,
+    #             "timestamp": time.time()
+    #         }
+    #         message = f"✅ 底盘正在以 vx={vx}m/s, vy={vy}m/s, omega={omega}rad/s 移动，持续时间{duration}秒"
+    #         return message, state_update
+    #     else:
+    #         state_update = {
+    #             "action": "move_base_raw",
+    #             "vx": vx,
+    #             "vy": vy,
+    #             "omega": omega,
+    #             "duration": duration,
+    #             "success": False,
+    #             "error": result
+    #         }
+    #         return f"❌ 底盘移动失败: {result}", state_update
 
     @mcp.tool()
     async def stop_base() -> Tuple[str, Dict]:

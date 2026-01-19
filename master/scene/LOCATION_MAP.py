@@ -32,7 +32,7 @@ LOCATION_MAP = {
     "客厅": "livingRoom",
     "入口": "entrance",
     "厨房": "kitchen",
-
+    "厕所": "bathroom",
     # 桌子 (Tables)
     "厨房桌子": "kitchenTable",
     "自定义桌子": "customTable",

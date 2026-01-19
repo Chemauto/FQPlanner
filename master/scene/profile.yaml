@@ -47,15 +47,20 @@ scene:
 
   - name: livingRoom
     type: location
-    position: [2.0, 3.0, 0.0]
+    position: [0.0, 0.4, 0.0]
     description: "客厅"
 
   - name: bedroom
     type: location
-    position: [4.0, 1.0, 0.0]
+    position: [0.0, 0.6, 0.0]
     description: "卧室"
 
   - name: kitchenTable
     type: location
-    position: [1.0, 2.0, 3.0]
+    position: [0.2, 0.0, 0.0]
     description: "厨房"
+
+  - name: bathroom
+    type: location
+    position: [0.6, 0.0, 0.0]
+    description: "厕所"
