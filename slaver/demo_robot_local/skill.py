@@ -30,6 +30,7 @@ from mcp.server.fastmcp import FastMCP
 from module.base import register_tools as register_base_tools
 from module.arm import register_tools as register_arm_tools, cleanup_arm, initialize_arm
 from module.grasp import register_tools as register_grasp_tools
+from module.real_base import register_tools as register_real_base_tools, cleanup_base
 from module.example import register_tools as register_example_tools
 
 # ==============================================================================
@@ -44,11 +45,13 @@ def signal_handler(signum, frame):
     """信号处理器 - 处理Ctrl+C等信号"""
     print(f"\n[skill.py] 收到信号 {signum}，正在清理资源...", file=sys.stderr)
     cleanup_arm()
+    cleanup_base()
     sys.exit(0)
 
 
 # 注册退出处理函数
 atexit.register(cleanup_arm)
+atexit.register(cleanup_base)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
@@ -69,10 +72,13 @@ def register_all_modules():
     print("=" * 60, file=sys.stderr)
 
     # 注册底盘控制模块
-    register_base_tools(mcp)
+    # register_base_tools(mcp)
 
     # 注册机械臂控制模块
-    register_arm_tools(mcp)
+    # register_arm_tools(mcp)
+
+    # 注册麦轮底盘控制模块
+    register_real_base_tools(mcp)
 
     # 注册抓取控制模块
     register_grasp_tools(mcp)
