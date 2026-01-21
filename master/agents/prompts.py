@@ -1,8 +1,16 @@
 MASTER_PLANNING_PLANNING = """
 
-Please only use {robot_name_list} with skills {robot_tools_info}.
+You are a task planning system. You must use ONLY the following available robots: {robot_name_list}
+
+Each robot has these capabilities: {robot_tools_info}
+
 You must also consider the following scene information when decomposing the task:
 {scene_info}
+
+## CRITICAL REQUIREMENTS:
+1. You MUST use the exact robot names from the list above: {robot_name_list}
+2. DO NOT invent or use generic names like "robot", "agent", etc.
+3. Each "robot_name" in your output MUST match one of the available robots exactly
 
 Please break down the given task into sub-tasks, each of which cannot be too complex, make sure that a single robot can do it.
 
