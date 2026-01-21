@@ -10,8 +10,17 @@ slaver/demo_robot_local/
 │   ├── arm.py            # 机械臂控制
 │   ├── grasp.py          # 抓取控制
 │   ├── real_base.py      # 麦轮底盘控制
+│   ├── mujoco_base.py    # MuJoCo仿真控制 ⭐ NEW
 │   └── example.py        # 示例模板
 └── config.yaml           # 配置文件
+
+TestMujoco/               # MuJoCo仿真测试 ⭐ NEW
+├── controller/           # 控制器
+│   ├── omni_controller.py      # 运动学控制器
+│   └── global_navigator.py     # 全局导航控制器
+├── model/                # MuJoCo模型文件
+└── test/                 # 测试脚本
+    └── test_mujoco.py          # 仿真测试程序
 
 master/scene/
 ├── profile.yaml          # 场景配置
@@ -118,7 +127,56 @@ master/scene/
 "去客厅" → 向右2米(10秒) + 向前3米(15秒) = 25秒
 ```
 
-### 5. example.py - 示例模板
+### 5. mujoco_base.py - MuJoCo仿真控制模块 ⭐ NEW
+
+**功能:**
+- `test_mujoco_viewer(mode)` - 启动MuJoCo仿真界面并测试运动学
+- `navigate_to_target(x, y, yaw)` - 使用PID全局导航移动到目标位置
+- `move_base_velocity(vx, vy, omega, duration)` - 按速度分量控制运动
+- `stop_base()` - 立即停止
+- `check_base_status()` - 检查状态
+
+**测试模式:**
+- `mode="1"` - 前进测试
+- `mode="2"` - 后退测试
+- `mode="3"` - 左移测试
+- `mode="4"` - 右移测试
+- `mode="5"` - 原地旋转测试
+
+**指令示例:**
+```
+"打开MuJoCo仿真测试前进" / "测试运动学"
+"导航到位置0.5,0.3" / "移动到坐标0.5米0.3米"
+"以速度0.2向前移动2秒" / "向左移动1.5秒"
+"检查仿真状态"
+```
+
+**导航示例:**
+```python
+# 自动导航到目标点，使用PID控制
+navigate_to_target(x=0.5, y=0.3, yaw=None)  # 只控制位置
+navigate_to_target(x=0.5, y=0.3, yaw=1.57)  # 位置+姿态(90度)
+```
+
+**测试脚本:**
+```bash
+# 运行MuJoCo仿真测试
+cd /home/dora/RoboOs/RoboOS/TestMujoco
+python test/test_mujoco.py
+```
+
+**依赖:**
+- `mujoco` - 物理仿真引擎
+- `mujoco-viewer` - 仿真查看器
+- `numpy` - 数值计算
+- `scipy` - 坐标变换
+
+**安装:**
+```bash
+pip install mujoco mujoco-viewer numpy scipy
+```
+
+### 6. example.py - 示例模板
 
 用于参考开发新模块。
 

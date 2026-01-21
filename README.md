@@ -178,6 +178,41 @@ tail -f slaver/.log/agent.log          # Slaver 日志
 
 ### 主要功能更新
 
+#### 2026-01-21: MuJoCo仿真集成 ⭐ NEW
+- ✅ **新增 `mujoco_base.py` 模块** - MuJoCo物理仿真环境中的三麦克纳姆轮底盘控制
+  - 运动学测试：前进、后退、左移、右移、原地旋转
+  - 全局导航：PID控制器实现精确的点到点移动
+  - 速度控制：支持原始速度分量控制
+  - 图形化仿真界面：实时观察机器人运动
+- 📁 **新增 `TestMujoco/` 目录** - MuJoCo仿真测试项目
+  - `omni_controller.py` - 三轮全向轮运动学控制器
+  - `global_navigator.py` - 全局导航PID控制器
+  - `test_mujoco.py` - 完整的测试脚本
+  - MuJoCo模型文件：完整的机器人场景模型
+
+**技术细节：**
+- 基于LeKiwi官方运动学实现
+- PID控制器：位置控制(kp=1.5) + 姿态控制(kp=3.0)
+- 位置精度：2cm，角度精度：3度
+- 支持独立控制和组合控制
+
+**相关文档：**
+- `slaver/demo_robot_local/README_MODULES.md` - 模块使用指南
+- `TestMujoco/test/test_mujoco.py` - 测试脚本
+
+**依赖安装：**
+```bash
+pip install mujoco mujoco-viewer numpy scipy
+```
+
+**快速测试：**
+```bash
+cd /home/dora/RoboOs/RoboOS/TestMujoco
+python test/test_mujoco.py
+```
+
+---
+
 #### 2026-01-19: 麦轮底盘远程控制与位置追踪
 - ✅ **新增 `real_base.py` 模块** - 基于Socket通信的三全向轮底盘控制
   - 支持远程移动控制（前、后、左、右、斜向、旋转）
@@ -233,19 +268,28 @@ RoboOS/
 │   │       ├── base.py           # 模拟底盘导航
 │   │       ├── arm.py            # SO101机械臂控制
 │   │       ├── grasp.py          # 抓取功能
-│   │       ├── real_base.py      # 麦轮底盘远程控制 ⭐ NEW
+│   │       ├── real_base.py      # 麦轮底盘远程控制
+│   │       ├── mujoco_base.py    # MuJoCo仿真控制 ⭐ NEW
 │   │       └── example.py        # 示例模块
 │   └── run.py              # Slaver启动脚本
 │
-├── TestRealBase/           # 麦轮底盘测试项目 ⭐ RENAMED
+├── TestMujoco/             # MuJoCo仿真测试 ⭐ NEW
+│   ├── controller/         # 控制器
+│   │   ├── omni_controller.py    # 运动学控制器
+│   │   └── global_navigator.py   # 全局导航控制器
+│   ├── model/              # MuJoCo模型文件
+│   └── test/               # 测试脚本
+│       └── test_mujoco.py        # 仿真测试程序
+│
+├── TestRealBase/           # 麦轮底盘测试项目
 │   ├── RealBase/           # 底盘控制核心库
 │   │   ├── motor_controller.py  # 底盘运动控制
 │   │   └── test_motor.py        # 单元测试
-│   ├── base_server.py      # 开发板服务器程序 ⭐ NEW
+│   ├── base_server.py      # 开发板服务器程序
 │   └── README.md           # 项目说明
 │
-├── NAVIGATION_GUIDE.md     # 麦轮底盘导航使用指南 ⭐ NEW
-├── REALBASE_REDIS_UPDATE.md  # Redis位置追踪说明 ⭐ NEW
+├── NAVIGATION_GUIDE.md     # 麦轮底盘导航使用指南
+├── REALBASE_REDIS_UPDATE.md  # Redis位置追踪说明
 ├── MODULE_GUIDE.md         # 模块开发指南
 ├── grasp_server.py         # 抓取服务器
 ├── test_robot.py           # 机器人测试脚本

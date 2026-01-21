@@ -31,6 +31,7 @@ from module.base import register_tools as register_base_tools
 from module.arm import register_tools as register_arm_tools, cleanup_arm, initialize_arm
 from module.grasp import register_tools as register_grasp_tools
 from module.real_base import register_tools as register_real_base_tools, cleanup_base
+from module.mujoco_base import register_tools as register_mujoco_base_tools
 from module.example import register_tools as register_example_tools
 
 # ==============================================================================
@@ -46,12 +47,14 @@ def signal_handler(signum, frame):
     print(f"\n[skill.py] 收到信号 {signum}，正在清理资源...", file=sys.stderr)
     cleanup_arm()
     cleanup_base()
+    # mujoco_base cleanup is handled internally
     sys.exit(0)
 
 
 # 注册退出处理函数
 atexit.register(cleanup_arm)
 atexit.register(cleanup_base)
+# mujoco_base cleanup is handled internally
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
@@ -78,7 +81,10 @@ def register_all_modules():
     # register_arm_tools(mcp)
 
     # 注册麦轮底盘控制模块
-    register_real_base_tools(mcp)
+    # register_real_base_tools(mcp)
+
+    # 注册MuJoCo仿真控制模块
+    register_mujoco_base_tools(mcp)
 
     # 注册抓取控制模块
     # register_grasp_tools(mcp)
