@@ -365,14 +365,17 @@ def register_tools(mcp):
 
         Examples:
             navigate_to_location(target="卧室")  # 从当前位置导航到卧室
+            navigate_to_location(target="厕所")  # 从当前位置导航到厕所
             navigate_to_location(target="livingRoom")  # 从当前位置导航到客厅
             navigate_to_location(target="客厅")  # 中文也可以
+            navigate_to_location(target="kitchen")  # 从当前位置导航到厨房
 
         Notes:
             - 导航速度固定为 0.2 m/s
             - 会先沿 x 轴移动（左右），再沿 y 轴移动（前后）
             - 如果目标位置就是当前位置，不会移动（自动跳过）
             - 函数会自动处理所有坐标计算，LLM无需关心具体坐标
+            - 重要：此函数名为 navigate_to_location，不是 navigate_to_target
         """
         print(f"[real_base.navigate_to_location] 目标位置: {target}", file=sys.stderr)
 

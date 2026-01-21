@@ -67,7 +67,9 @@ def register_tools(mcp):
             "customTable": [2.0, 1.0, 0.0],
             "servingTable": [3.0, 2.0, 0.0],
             "basket": [1.5, 1.5, 0.5],
-            "trashCan": [4.0, 3.0, 0.0]
+            "trashCan": [4.0, 3.0, 0.0],
+            "kitchen": [0.4, 0.0, 0.0],
+            "bathroom": [0.4, 0.8, 0.0]
         }
 
         if target_en in location_coordinates:
