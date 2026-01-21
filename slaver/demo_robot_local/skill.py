@@ -81,10 +81,10 @@ def register_all_modules():
     # register_arm_tools(mcp)
 
     # 注册麦轮底盘控制模块
-    # register_real_base_tools(mcp)
+    register_real_base_tools(mcp)
 
     # 注册MuJoCo仿真控制模块
-    register_mujoco_base_tools(mcp)
+    # register_mujoco_base_tools(mcp)
 
     # 注册抓取控制模块
     # register_grasp_tools(mcp)

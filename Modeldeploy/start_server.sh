@@ -11,4 +11,4 @@ python -m vllm.entrypoints.openai.api_server \
   --enable-chunked-prefill \
   --enable-auto-tool-choice \
   --tool-call-parser hermes \
-  --chat-template /home/dora/RoboOs/RoboOS/deploy/templates/tool_chat_template_hermes.jinja
+  --chat-template /home/dora/RoboOs/test20260121/RoboOS/deploy/templates/tool_chat_template_hermes.jinja
