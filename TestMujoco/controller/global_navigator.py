@@ -3,6 +3,7 @@
 使用PID控制器实现精确的位置和姿态控制
 """
 
+import sys
 import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -183,7 +184,7 @@ class GlobalNavigator:
         self.pid_yaw.reset()
 
         yaw_str = f"{yaw:.3f}" if yaw is not None else "不控制"
-        print(f"设置目标: 位置=({x:.3f}, {y:.3f}, {z:.3f}), 姿态={yaw_str}")
+        print(f"设置目标: 位置=({x:.3f}, {y:.3f}, {z:.3f}), 姿态={yaw_str}", file=sys.stderr)
 
     def compute_control(self, dt):
         """
@@ -222,7 +223,7 @@ class GlobalNavigator:
         # 如果都到达,停止导航
         if position_reached and angle_reached:
             self.is_navigating = False
-            print(f"到达目标! 位置误差={error_distance*100:.2f}cm, 姿态误差={abs(error_yaw)*180/np.pi:.2f}°")
+            print(f"到达目标! 位置误差={error_distance*100:.2f}cm, 姿态误差={abs(error_yaw)*180/np.pi:.2f}°", file=sys.stderr)
             return 0.0, 0.0, 0.0
 
         # 分阶段控制策略
