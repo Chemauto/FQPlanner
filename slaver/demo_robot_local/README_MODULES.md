@@ -14,13 +14,16 @@ slaver/demo_robot_local/
 │   └── example.py        # 示例模板
 └── config.yaml           # 配置文件
 
-TestMujoco/               # MuJoCo仿真测试 ⭐ NEW
+TestMujoco/               # MuJoCo仿真测试 ⭐
 ├── controller/           # 控制器
-│   ├── omni_controller.py      # 运动学控制器
-│   └── global_navigator.py     # 全局导航控制器
+│   ├── omni_controller.py      # 运动学控制器（三轮全向轮）
+│   └── global_navigator.py     # 全局导航控制器（PID）
 ├── model/                # MuJoCo模型文件
-└── test/                 # 测试脚本
-    └── test_mujoco.py          # 仿真测试程序
+│   └── assets/
+│       └── scene.xml          # 机器人场景模型
+├── run_navigation_standalone.py  # 独立导航脚本（核心）
+├── video/               # 录制的导航视频
+└── README.md            # 详细文档
 
 master/scene/
 ├── profile.yaml          # 场景配置
@@ -127,54 +130,73 @@ master/scene/
 "去客厅" → 向右2米(10秒) + 向前3米(15秒) = 25秒
 ```
 
-### 5. mujoco_base.py - MuJoCo仿真控制模块 ⭐ NEW
+### 5. mujoco_base.py - MuJoCo仿真控制模块 ⭐
 
 **功能:**
-- `test_mujoco_viewer(mode)` - 启动MuJoCo仿真界面并测试运动学
-- `navigate_to_target(x, y, yaw)` - 使用PID全局导航移动到目标位置
-- `move_base_velocity(vx, vy, omega, duration)` - 按速度分量控制运动
-- `stop_base()` - 立即停止
-- `check_base_status()` - 检查状态
+- `navigate_to_target(target)` - 导航到目标位置（支持中文名称）
+- `move_base_test(test_mode)` - 测试底盘移动功能
 
-**测试模式:**
-- `mode="1"` - 前进测试
-- `mode="2"` - 后退测试
-- `mode="3"` - 左移测试
-- `mode="4"` - 右移测试
-- `mode="5"` - 原地旋转测试
+**核心特性:**
+- ✅ **独立进程运行**：避免OpenGL上下文冲突
+- ✅ **位置记忆**：连续导航保持位置连续性
+- ✅ **自动录制视频**：俯视视角，固定坐标系
+- ✅ **PID全局导航**：精确的点到点控制（5cm精度）
+
+**支持的位置名称:**
+- 中文: 卧室, 客厅, 入口, 厨房, 厕所, 卫生间
+- 英文: bedroom, livingRoom, entrance, kitchen, bathroom
 
 **指令示例:**
 ```
-"打开MuJoCo仿真测试前进" / "测试运动学"
-"导航到位置0.5,0.3" / "移动到坐标0.5米0.3米"
-"以速度0.2向前移动2秒" / "向左移动1.5秒"
-"检查仿真状态"
+"前往卧室" / "去卧室"
+"导航到卫生间" / "去厕所"
+"移动到客厅" / "去入口"
 ```
 
-**导航示例:**
-```python
-# 自动导航到目标点，使用PID控制
-navigate_to_target(x=0.5, y=0.3, yaw=None)  # 只控制位置
-navigate_to_target(x=0.5, y=0.3, yaw=1.57)  # 位置+姿态(90度)
-```
+**工作流程:**
+1. 从`profile.yaml`读取目标位置坐标
+2. 使用`LOCATION_MAP`进行中英文映射
+3. 调用独立进程执行导航和视频录制
+4. 自动更新机器人位置记忆
+5. 视频保存到`TestMujoco/video/`
 
-**测试脚本:**
-```bash
-# 运行MuJoCo仿真测试
-cd /home/dora/RoboOs/RoboOS/TestMujoco
-python test/test_mujoco.py
-```
+**位置坐标:**
+| 名称 | 坐标 [x,y,z] | 说明 |
+|------|-------------|------|
+| entrance | [0.0, 0.0, 0.0] | 入口 |
+| livingRoom | [0.0, 0.4, 0.0] | 客厅 |
+| bedroom | [0.0, 0.6, 0.0] | 卧室 |
+| kitchen | [0.2, 0.0, 0.0] | 厨房 |
+| bathroom | [0.6, 0.0, 0.0] | 厕所/卫生间 |
+
+**测试模式 (move_base_test):**
+- `test_mode="auto"` - 自动演示所有移动（默认）
+- `test_mode="1"` - 前进测试
+- `test_mode="2"` - 后退测试
+- `test_mode="3"` - 左移测试
+- `test_mode="4"` - 右移测试
+- `test_mode="5"` - 旋转测试
+
+**视频录制:**
+- 保存路径: `/home/dora/RoboOs/RoboOS/TestMujoco/video/`
+- 文件命名: `navigate_{location}_{timestamp}.mp4`
+- 相机视角: 俯视（elevation=89°），固定看向原点
+- 分辨率: 640x480, 30 FPS
 
 **依赖:**
-- `mujoco` - 物理仿真引擎
-- `mujoco-viewer` - 仿真查看器
+- `mujoco` >= 3.0.0 - 物理仿真引擎
 - `numpy` - 数值计算
 - `scipy` - 坐标变换
+- `pillow` - 图像处理
+- `ffmpeg` - 视频编码
 
 **安装:**
 ```bash
-pip install mujoco mujoco-viewer numpy scipy
+pip install mujoco numpy scipy pillow
+sudo apt install ffmpeg  # 视频录制需要
 ```
+
+**详细文档:** `/home/dora/RoboOs/RoboOS/TestMujoco/README.md`
 
 ### 6. example.py - 示例模板
 
@@ -377,6 +399,7 @@ with open('config.yaml') as f:
 | arm.py | 机械臂控制 | "腕部向上转10度" |
 | grasp.py | 抓取控制 | "抓取" |
 | real_base.py | 麦轮底盘 | "向前移动" / "去卧室" |
+| mujoco_base.py | MuJoCo仿真 | "前往卧室" / "导航到卫生间" |
 
 ---
 

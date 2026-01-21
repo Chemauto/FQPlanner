@@ -43,6 +43,11 @@ _GLOBAL_XVFB_PROCESS = None
 _GLOBAL_XVFB_DISPLAY = None
 _GLOBAL_XVFB_LOCK = threading.Lock()
 
+# 机器人当前位置记忆（在独立进程之间保持连续性）
+_CURRENT_ROBOT_POSITION = [0.0, 0.0, 0.0]  # [x, y, z]
+_CURRENT_ROBOT_YAW = 0.0  # 朝向角度
+_POSITION_LOCK = threading.Lock()
+
 # 导入控制器
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../TestMujoco/controller')))
 if MUJOCO_AVAILABLE:
@@ -98,6 +103,19 @@ def get_location_coordinates(target: str):
     Returns:
         (成功标志, 位置信息字典)
     """
+    # 额外的位置名称映射（支持更多中文别名）
+    EXTRA_LOCATION_MAP = {
+        "卫生间": "厕所",
+        "盥洗室": "厕所",
+        "浴 室": "厕所",
+        "书房": "study",
+        "图书室": "study"
+    }
+
+    # 先检查额外映射
+    if target in EXTRA_LOCATION_MAP:
+        target = EXTRA_LOCATION_MAP[target]
+
     locations = load_location_config()
     target_en = LOCATION_MAP.LOCATION_MAP.get(target, target)
 
@@ -144,8 +162,8 @@ def register_tools(mcp):
 
         Args:
             target: 目标位置名称，支持中英文
-                   可用位置：卧室, 客厅, 入口, 厨房, 卫生间, 书房
-                   或英文：bedroom, living_room, entrance, kitchen, bathroom, study
+                   可用位置：卧室, 客厅, 入口, 厨房, 厕所, 卫生间
+                   或英文：bedroom, livingRoom, entrance, kitchen, bathroom
 
         Returns:
             导航结果消息（JSON数组格式：[消息, 状态更新]）
@@ -172,7 +190,14 @@ def register_tools(mcp):
         target_pos = location_info['position']
         x, y, z = target_pos
 
+        # 获取当前机器人位置
+        global _CURRENT_ROBOT_POSITION, _CURRENT_ROBOT_YAW
+        with _POSITION_LOCK:
+            start_x, start_y, start_z = _CURRENT_ROBOT_POSITION
+            start_yaw = _CURRENT_ROBOT_YAW
+
         print(f"[mujoco_base] 导航到: {location_info['description']} ({x}, {y}, {z})", file=sys.stderr)
+        print(f"[mujoco_base] 起始位置: ({start_x:.3f}, {start_y:.3f}, {start_z:.3f})", file=sys.stderr)
 
         # 准备调用独立脚本的参数
         import subprocess
@@ -186,7 +211,9 @@ def register_tools(mcp):
             'z': float(z),
             'yaw': None,  # 不控制姿态
             'timeout': 30,
-            'video_dir': video_dir
+            'video_dir': video_dir,
+            'start_position': [start_x, start_y, start_z],  # 添加起始位置
+            'start_yaw': start_yaw
         }
 
         try:
@@ -215,7 +242,13 @@ def register_tools(mcp):
             # 构建返回消息
             if nav_result.get('success'):
                 if nav_result.get('reached'):
-                    # 成功到达
+                    # 成功到达 - 更新全局位置
+                    final_pos = nav_result.get('final_position', [x, y, z])
+                    final_yaw = nav_result.get('final_yaw', 0.0)
+                    with _POSITION_LOCK:
+                        _CURRENT_ROBOT_POSITION = [final_pos[0], final_pos[1], final_pos[2]]
+                        _CURRENT_ROBOT_YAW = final_yaw
+
                     if nav_result.get('video_path'):
                         file_size = os.path.getsize(nav_result['video_path']) / (1024 * 1024) if os.path.exists(nav_result['video_path']) else 0
                         result_msg = f"✅ 已到达 {location_info['description']} ({target}) - 用时 {nav_result.get('steps', 0) * 0.002:.1f}秒\n📹 视频已保存: {nav_result['video_path']} ({file_size:.1f}MB)"
@@ -230,12 +263,18 @@ def register_tools(mcp):
 
                     return json.dumps([result_msg, state_updates], ensure_ascii=False)
                 else:
-                    # 超时未到达
+                    # 超时未到达 - 但仍然更新位置到实际到达的位置
+                    final_pos = nav_result.get('final_position', _CURRENT_ROBOT_POSITION)
+                    final_yaw = nav_result.get('final_yaw', _CURRENT_ROBOT_YAW)
+                    with _POSITION_LOCK:
+                        _CURRENT_ROBOT_POSITION = [final_pos[0], final_pos[1], final_pos[2]]
+                        _CURRENT_ROBOT_YAW = final_yaw
+
                     if nav_result.get('video_path'):
                         file_size = os.path.getsize(nav_result['video_path']) / (1024 * 1024) if os.path.exists(nav_result['video_path']) else 0
-                        timeout_msg = f"❌ 导航超时 - 最后位置: {nav_result.get('final_position', [])[:2]}\n📹 视频已保存: {nav_result['video_path']} ({file_size:.1f}MB)"
+                        timeout_msg = f"❌ 导航超时 - 最后位置: {final_pos[:2]}\n📹 视频已保存: {nav_result['video_path']} ({file_size:.1f}MB)"
                     else:
-                        timeout_msg = f"❌ 导航超时 - 最后位置: {nav_result.get('final_position', [])[:2]}"
+                        timeout_msg = f"❌ 导航超时 - 最后位置: {final_pos[:2]}"
 
                     return json.dumps([timeout_msg, {}], ensure_ascii=False)
             else:

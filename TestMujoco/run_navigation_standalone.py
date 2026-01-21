@@ -72,7 +72,7 @@ def run_navigation(params):
     在独立进程中运行导航
 
     参数:
-        params: dict包含 location, x, y, z, yaw, timeout, video_dir
+        params: dict包含 location, x, y, z, yaw, timeout, video_dir, start_position, start_yaw
 
     返回:
         dict包含结果状态和视频路径
@@ -84,6 +84,10 @@ def run_navigation(params):
     yaw = params['yaw']
     timeout = params['timeout']
     video_dir = params['video_dir']
+
+    # 获取起始位置（如果提供）
+    start_position = params.get('start_position', [0.0, 0.0, 0.0])
+    start_yaw = params.get('start_yaw', 0.0)
 
     # 创建视频目录
     os.makedirs(video_dir, exist_ok=True)
@@ -133,9 +137,25 @@ def run_navigation(params):
         model = mujoco.MjModel.from_xml_path(model_path)
         data = mujoco.MjData(model)
 
-        # 预热仿真
-        for _ in range(100):
+        # 设置机器人到起始位置
+        robot_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, 'base_plate_layer_1_link')
+
+        # 设置位置（qpos[0:3]）和四元数（qpos[3:7]，默认朝向）
+        data.qpos[0:3] = start_position
+        data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]  # 单位四元数，朝向x轴正向
+
+        # 清零速度
+        data.qvel[0:6] = 0.0
+
+        print(f"[独立进程] 设置起始位置: {start_position}", file=sys.stderr)
+
+        # 预热仿真（让机器人位置稳定）
+        for i in range(200):
             mujoco.mj_step(model, data)
+            if i == 100:
+                # 中间再次确认位置
+                current_pos = data.qpos[0:3].copy()
+                print(f"[独立进程] 预热中位置: {current_pos}", file=sys.stderr)
 
         # 创建导航器和控制器
         navigator = GlobalNavigator(model, data)
@@ -144,13 +164,14 @@ def run_navigation(params):
         # 设置目标
         navigator.set_target(x, y, z, yaw)
 
-        # 设置相机（俯视视角）
+        # 设置相机（俯视视角，固定看向原点，保持所有视频坐标系一致）
         camera = mujoco.MjvCamera()
         mujoco.mjv_defaultCamera(camera)
         camera.distance = 2.5
         camera.elevation = 89  # 俯视
         camera.azimuth = 0
-        camera.lookat = [x, y, z]
+        # 固定看向原点，所有视频使用相同坐标系
+        camera.lookat = [0.0, 0.0, 0.0]
 
         # 设置渲染器
         renderer = mujoco.Renderer(model, height=480, width=640)

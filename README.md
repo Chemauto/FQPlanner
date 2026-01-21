@@ -172,84 +172,6 @@ tail -f master/.logs/master_agent.log  # Master 日志
 tail -f slaver/.log/agent.log          # Slaver 日志
 ```
 
----
-
-## 📝 更新日志 / Changelog
-
-### 主要功能更新
-
-#### 2026-01-21: MuJoCo仿真集成 ⭐ NEW
-- ✅ **新增 `mujoco_base.py` 模块** - MuJoCo物理仿真环境中的三麦克纳姆轮底盘控制
-  - 运动学测试：前进、后退、左移、右移、原地旋转
-  - 全局导航：PID控制器实现精确的点到点移动
-  - 速度控制：支持原始速度分量控制
-  - 图形化仿真界面：实时观察机器人运动
-- 📁 **新增 `TestMujoco/` 目录** - MuJoCo仿真测试项目
-  - `omni_controller.py` - 三轮全向轮运动学控制器
-  - `global_navigator.py` - 全局导航PID控制器
-  - `test_mujoco.py` - 完整的测试脚本
-  - MuJoCo模型文件：完整的机器人场景模型
-
-**技术细节：**
-- 基于LeKiwi官方运动学实现
-- PID控制器：位置控制(kp=1.5) + 姿态控制(kp=3.0)
-- 位置精度：2cm，角度精度：3度
-- 支持独立控制和组合控制
-
-**相关文档：**
-- `slaver/demo_robot_local/README_MODULES.md` - 模块使用指南
-- `TestMujoco/test/test_mujoco.py` - 测试脚本
-
-**依赖安装：**
-```bash
-pip install mujoco mujoco-viewer numpy scipy
-```
-
-**快速测试：**
-```bash
-cd /home/dora/RoboOs/RoboOS/TestMujoco
-python test/test_mujoco.py
-```
-
----
-
-#### 2026-01-19: 麦轮底盘远程控制与位置追踪
-- ✅ **新增 `real_base.py` 模块** - 基于Socket通信的三全向轮底盘控制
-  - 支持远程移动控制（前、后、左、右、斜向、旋转）
-  - 集成Redis位置追踪，根据当前实际位置计算导航距离
-  - 固定速度0.2 m/s，支持精确时间控制
-  - 自动状态更新，避免重复移动到同一位置
-- 📁 **项目结构优化** - 将 `RealBaseTest` 重命名为 `TestRealBase`
-- 🔧 **开发板服务器** - `base_server.py` 用于部署到嵌入式开发板
-  - 支持Socket TCP通信（端口9998）
-  - 完整的指令协议和错误处理
-
-**技术细节：**
-- Redis哈希表集成：`HGET ENVIRONMENT_INFO robot`
-- 位置智能判断：当 `dx=0, dy=0` 时自动跳过移动
-- Socket超时处理：10秒连接超时
-- 详细日志输出：便于调试和状态监控
-
-**相关文档：**
-- `/home/dora/RoboOs/RoboOS/NAVIGATION_GUIDE.md` - 麦轮底盘导航功能使用说明
-- `/home/dora/RoboOs/RoboOS/REALBASE_REDIS_UPDATE.md` - Redis位置追踪更新说明
-
----
-
-#### 2026-01-18: 添加Xbox手柄模拟器（Project4_SimJoy）
-- 图形化虚拟手柄，支持pygame兼容接口
-
-#### 2026-01-16: 增加全局坐标系导航系统
-- 基于航位推算的PID控制
-
-#### 2026-01-15: 完善三麦克纳姆轮平台仿真和文档
-
-#### 2026-01-14: 添加双轮差速小车基础控制
-
-#### 2026-01-13: 项目初始化
-- 添加 MuJoCo 模型
-
----
 
 ## 📁 项目结构
 
@@ -273,13 +195,16 @@ RoboOS/
 │   │       └── example.py        # 示例模块
 │   └── run.py              # Slaver启动脚本
 │
-├── TestMujoco/             # MuJoCo仿真测试 ⭐ NEW
+├── TestMujoco/             # MuJoCo仿真测试 ⭐
 │   ├── controller/         # 控制器
-│   │   ├── omni_controller.py    # 运动学控制器
-│   │   └── global_navigator.py   # 全局导航控制器
+│   │   ├── omni_controller.py    # 运动学控制器（三轮全向轮）
+│   │   └── global_navigator.py   # 全局导航控制器（PID）
 │   ├── model/              # MuJoCo模型文件
-│   └── test/               # 测试脚本
-│       └── test_mujoco.py        # 仿真测试程序
+│   │   └── assets/
+│   │       └── scene.xml        # 机器人场景模型
+│   ├── run_navigation_standalone.py  # 独立导航脚本
+│   ├── video/              # 录制的导航视频
+│   └── README.md           # 详细文档
 │
 ├── TestRealBase/           # 麦轮底盘测试项目
 │   ├── RealBase/           # 底盘控制核心库
@@ -298,52 +223,6 @@ RoboOS/
 
 ---
 
-## 🔧 麦轮底盘控制使用
-
-### 快速测试
-
-1. **启动开发板服务器** (在实际硬件上):
-```bash
-# 将服务器程序复制到开发板
-scp TestRealBase/base_server.py HwHiAiUser@192.168.0.155:/home/HwHiAiUser/
-scp -r TestRealBase/RealBase HwHiAiUser@192.168.0.155:/home/HwHiAiUser/
-
-# SSH 登录到开发板
-ssh HwHiAiUser@192.168.0.155
-
-# 在开发板上运行服务器
-cd /home/HwHiAiUser
-python3 base_server.py
-```
-
-2. **测试导航功能**:
-```bash
-# 启动 Slaver
-python slaver/run.py
-
-# 通过 Web UI 或测试脚本发送指令
-用户说: "导航到客厅"
-用户说: "去卧室"
-用户说: "回到入口"
-```
-
-3. **验证位置追踪**:
-```bash
-# 查看Redis中的机器人状态
-redis-cli HGET ENVIRONMENT_INFO robot
-# 输出: {"position": "livingRoom", "coordinates": [0.0, 0.4, 0.0], ...}
-```
-
-### 可用指令
-
-- `navigate_to_location(target="位置名")` - 导航到指定位置
-- `move_base(direction="方向", speed=0.2, duration=2.0)` - 按方向移动
-- `stop_base()` - 立即停止
-- `check_base_status()` - 检查连接状态
-
-支持的位置：入口、客厅、卧室、厨房、厕所、厨房桌子、自定义桌子、服务桌、篮子、垃圾桶
-
----
 
 ## 📚 更多文档
 
