@@ -6,7 +6,7 @@
 相关文件：
 1. 场景配置文件：master/scene/profile.yaml
 2. 映射配置文件：master/scene/LOCATION_MAP.py（本文件）
-3. 使用映射的文件：slaver/demo_robot_local/base.py
+3. 使用映射的文件：slaver/robot/base.py
 
 修改场景时的步骤：
 1. 在 master/scene/profile.yaml 中添加/修改场景定义

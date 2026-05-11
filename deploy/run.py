@@ -1,37 +1,53 @@
+"""
+FQPlanner 任务控制台
+启动后访问 http://127.0.0.1:8888
+
+功能：任务发布、配置校验、工具查看
+"""
+
 import ast
 import json
 import os
-import socket
-import subprocess
 from pathlib import Path
 
 import redis
 import requests
-from flask import Flask, jsonify, render_template, request, send_from_directory
-from ruamel.yaml import YAML
-from utils import (
-    handle_local_tools,
-    handle_remote_tools,
-    recursive_update,
-    split_dot_keys,
-    validate_collaborator_config,
-)
+import yaml
+from flask import Flask, jsonify, render_template, request
 
-yaml = YAML()
-yaml.preserve_quotes = True
+app = Flask(__name__)
 
-app = Flask(__name__, static_folder="assets")
-
-services = {
-    "inference": {"pid": None, "port": None},
-    "master": {"pid": None, "port": 6000},
-    "slaver": {"pid": None},
-}
+MASTER_URL = "http://127.0.0.1:5000"
+REDIS_CFG = {"host": "127.0.0.1", "port": 6379, "db": 0, "password": None}
 
 
-def is_port_in_use(port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("127.0.0.1", port)) == 0
+def extract_tools_from_ast(source, filename):
+    """从 skill.py 源码中解析工具函数"""
+    tree = ast.parse(source, filename=filename)
+    tools = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not node.decorator_list:
+                continue
+            for deco in node.decorator_list:
+                if isinstance(deco, ast.Call) and getattr(deco.func, "attr", None) == "tool":
+                    parameters = []
+                    total_args = len(node.args.args)
+                    defaults = [None] * (total_args - len(node.args.defaults)) + node.args.defaults
+                    for arg, default in zip(node.args.args, defaults):
+                        if arg.arg == "self":
+                            continue
+                        parameters.append({
+                            "name": arg.arg,
+                            "type": ast.unparse(arg.annotation) if arg.annotation else "Any",
+                            "default": ast.unparse(default) if default else None,
+                        })
+                    tools.append({
+                        "name": node.name,
+                        "description": ast.get_docstring(node) or "",
+                        "parameters": parameters,
+                    })
+    return tools
 
 
 @app.route("/")
@@ -39,398 +55,136 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/release")
-def release():
-    return render_template("release.html")
-
-
-@app.route("/deploy")
-def deploy():
-    return render_template("deploy.html")
-
-
-@app.route("/js/<path:filename>")
-def js_file(filename):
-    return send_from_directory("templates/js", filename)
-
-
-@app.route("/config")
-def config():
-    path = request.args.get("path")
-    if not path:
-        return jsonify({"status": 400, "message": "Illegal request"})
-    if not os.path.exists(path):
-        return jsonify({"status": 400, "message": "Configuration does not exist"})
-
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.load(f)
-
-    return jsonify({"status": 200, "data": data})
-
-
-@app.route("/saveconfig", methods=["POST"])
-def saveconfig():
+@app.route("/publish_task", methods=["POST"])
+def publish_task():
+    """转发任务到 Master"""
     try:
-        data = request.json
-
-        if not data or "file_path" not in data or "config_data" not in data:
-            return (
-                jsonify(
-                    {
-                        "status": 400,
-                        "message": "Required parameter missing: file_path 、config_data",
-                    }
-                ),
-                400,
-            )
-
-        file_path = data["file_path"]
-        config_data = data["config_data"]
-        node = data.get("node", "master")
-        # TODO Save to environment variable
-
-        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-
-        with open(file_path, "r", encoding="utf-8") as f:
-            yaml_data = yaml.load(f)
-
-        model_dict = config_data.get("model", {}).get("model_dict", {})
-        for key in ["model_select", "model_retry_planning"]:
-            config_data["model"][key] = model_dict.pop(key)
-
-        processed_config = split_dot_keys(config_data)
-
-        print(processed_config)
-
-        yaml_data = recursive_update(yaml_data, processed_config)
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            yaml.dump(yaml_data, f)
-
-        return jsonify(
-            {"status": 200, "message": "Configuration file saved successfully"}
-        )
-
+        data = request.get_json()
+        if not data or "task" not in data:
+            return jsonify({"error": "缺少 task 字段"}), 400
+        resp = requests.post(f"{MASTER_URL}/publish_task", json=data, timeout=120)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Master 服务未启动"}), 503
     except Exception as e:
-        return jsonify({"status": 500, "message": f"Server error: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/validate-config", methods=["POST"])
 def validate_config():
-    data = request.json
-    required_fields = ["conda_env", "startup_command", "master_config", "slaver_config"]
+    """校验配置文件和 Redis/MCP 连通性"""
+    project_root = Path(__file__).parent.parent
+    data = request.json or {}
+    master_cfg = data.get("master_config") or str(project_root / "master" / "config.yaml")
+    slaver_cfg = data.get("slaver_config") or str(project_root / "slaver" / "config.yaml")
 
-    for field in required_fields:
-        if not data.get(field):
-            return (
-                jsonify(
-                    {"success": False, "message": f"Missing necessary fields: {field}"}
-                ),
-                400,
-            )
+    for path in [master_cfg, slaver_cfg]:
+        if not path or not os.path.exists(path):
+            return jsonify({"success": False, "message": f"配置文件不存在: {path}"}), 400
 
-    for file_path in [data["master_config"], data["slaver_config"]]:
-        if not os.path.exists(file_path):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": f"The model path does not exist: {file_path}",
-                    }
-                ),
-                400,
-            )
+    with open(master_cfg, "r", encoding="utf-8") as f:
+        master_data = yaml.safe_load(f)
+    with open(slaver_cfg, "r", encoding="utf-8") as f:
+        slaver_data = yaml.safe_load(f)
 
-    # Check if the port is occupied
-    is_flagscale = data.get("is_flagscale", True)
-    serve_port = [5000]
-    if is_flagscale:
-        serve_port.append(4567)
+    master_col = master_data.get("collaborator", {})
+    slaver_col = slaver_data.get("collaborator", {})
+    required_keys = {"host", "port", "password", "db"}
 
-    for port in serve_port:
-        if is_port_in_use(port):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": f"The port is already occupied: {port}",
-                    }
-                ),
-                400,
-            )
+    if not required_keys.issubset(master_col.keys()) or not required_keys.issubset(slaver_col.keys()):
+        return jsonify({"success": False, "message": "collaborator 配置字段不完整"})
 
-    # master
-    master_config = data["master_config"]
-    slaver_config = data["slaver_config"]
-
-    with open(master_config, "r", encoding="utf-8") as f:
-        master_data = yaml.load(f)
-
-    with open(slaver_config, "r", encoding="utf-8") as f:
-        slaver_data = yaml.load(f)
-
-    # collaborator
-    master_collaborator = master_data.get("collaborator")
-    slaver_collaborator = slaver_data.get("collaborator")
-
-    valid, message = validate_collaborator_config(
-        master_collaborator, slaver_collaborator
-    )
-    if not valid:
-        return jsonify({"success": False, "message": message}), 400
+    if (master_col["host"], master_col["port"]) != (slaver_col["host"], slaver_col["port"]):
+        return jsonify({"success": False, "message": "Master 和 Slaver collaborator 配置不匹配"})
 
     try:
         r = redis.StrictRedis(
-            host=master_collaborator["host"],
-            port=master_collaborator["port"],
-            password=master_collaborator["password"],
-            db=master_collaborator["db"],
+            host=master_col["host"], port=master_col["port"],
+            password=master_col["password"], db=master_col["db"],
             socket_connect_timeout=5,
         )
         r.ping()
     except Exception as e:
+        return jsonify({"success": False, "message": f"Redis 连接失败: {e}"})
 
-        return (
-            jsonify(
-                {"success": False, "message": f"communicator connection failed: {e}"}
-            ),
-            400,
-        )
-
-    # mcp ：  remote
-    call_type = slaver_data["robot"]["call_type"]
-    path = slaver_data["robot"]["path"]
-    if call_type == "remote":
+    robot = slaver_data.get("robot", {})
+    if robot.get("call_type") == "remote":
         try:
-            url = path.rstrip("/") + "/mcp"
+            requests.post(robot["path"].rstrip("/") + "/mcp", timeout=5)
+        except requests.exceptions.RequestException:
+            return jsonify({"success": False, "message": "MCP 远程服务不可达"})
 
-            requests.post(url, timeout=5)
-        except requests.exceptions.RequestException as e:
-            return (
-                jsonify({"success": False, "message": "mcp service exception"}),
-                400,
-            )
-
-    return jsonify(
-        {
-            "success": True,
-            "message": "Configuration verification passed",
-            "validated_config": data,
-        }
-    )
+    return jsonify({"success": True, "message": "配置校验通过"})
 
 
-@app.route("/api/start-inference", methods=["POST"])
-def start_inference():
-    data = request.json
-
-    conda_env = data.get("conda_env")
-    startup_command = data.get("startup_command")
-    is_flagscale = data.get("is_flagscale", True)
-    if not is_flagscale:
-        return jsonify(
-            {
-                "success": True,
-                "message": f"Skip deployment of inference service",
-            }
-        )
-
-    if not conda_env or not startup_command:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "message": "Missing required fields: 'conda_env' and/or 'startup_command'",
-                }
-            ),
-            400,
-        )
-
+@app.route("/api/auto_tools", methods=["GET"])
+def auto_tools():
+    """从 Redis 自动读取已注册机器人的工具列表"""
     try:
-        log_file = "vllm.log"
-
-        bash_command = f"source ~/miniconda3/etc/profile.d/conda.sh && conda activate {conda_env} && {startup_command}"
-
-        with open(log_file, "w") as f:
-            subprocess.Popen(
-                ["bash", "-c", bash_command], stdout=f, stderr=f, preexec_fn=os.setpgrp
-            )
-
-        return jsonify(
-            {
-                "success": True,
-                "message": f"Model has been started in conda env '{conda_env}'. Log file: {log_file}",
-            }
-        )
-
+        r = redis.StrictRedis(**REDIS_CFG, socket_connect_timeout=3, decode_responses=True)
+        r.ping()
+        agents = r.hgetall("AGENT_INFO")
+        if not agents:
+            return jsonify({"success": True, "data": []})
+        result = []
+        for name, info_str in agents.items():
+            try:
+                info = json.loads(info_str)
+                tools = info.get("robot_tool", [])
+                for t in tools:
+                    func = t.get("function", {})
+                    params = func.get("parameters", {})
+                    props = params.get("properties", {})
+                    param_list = [
+                        {"name": k, "type": v.get("type", "any")}
+                        for k, v in props.items()
+                    ]
+                    result.append({
+                        "robot": name,
+                        "name": func.get("name", ""),
+                        "description": func.get("description", ""),
+                        "parameters": param_list,
+                    })
+            except (json.JSONDecodeError, AttributeError):
+                continue
+        return jsonify({"success": True, "data": result})
     except Exception as e:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "message": f"Failed to start inference service: {str(e)}",
-                }
-            ),
-            500,
-        )
-
-
-@app.route("/api/start-master", methods=["POST"])
-def start_master():
-    data = request.json
-    conda_env = data.get("conda_env")
-    master_config = data.get("master_config")
-
-    master_path = Path(master_config)
-    pwd = master_path.parent
-
-    try:
-        bash_command = """
-            if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
-                source ~/miniconda3/etc/profile.d/conda.sh
-            elif [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-                source ~/anaconda3/etc/profile.d/conda.sh
-            else
-                echo "conda.sh not found!" >&2
-                exit 1
-            fi
-            conda activate {env} && python run.py
-            """.format(
-            env=conda_env
-        ).strip()
-
-        with open("master.log", "w") as log:
-            subprocess.Popen(
-                ["bash", "-c", bash_command],
-                stdout=log,
-                stderr=log,
-                cwd=pwd,
-                preexec_fn=os.setpgrp,
-            )
-        return jsonify(
-            {
-                "success": True,
-                "message": "Master service started successfully",
-            }
-        )
-    except Exception as e:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "message": f"Failed to start Master service: {str(e)}",
-                }
-            ),
-            500,
-        )
-
-
-@app.route("/api/start-slaver", methods=["POST"])
-def start_slaver():
-    data = request.json
-
-    conda_env = data.get("conda_env")
-
-    slaver_config = data.get("slaver_config")
-
-    slaver_path = Path(slaver_config)
-
-    pwd = slaver_path.parent
-
-    try:
-        bash_command = """
-            if [ -f ~/miniconda3/etc/profile.d/conda.sh ]; then
-                source ~/miniconda3/etc/profile.d/conda.sh
-            elif [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-                source ~/anaconda3/etc/profile.d/conda.sh
-            else
-                echo "conda.sh not found!" >&2
-                exit 1
-            fi
-            conda activate {env} && python run.py
-            """.format(
-            env=conda_env
-        ).strip()
-
-        with open("slaver.log", "w") as log:
-            subprocess.Popen(
-                ["bash", "-c", bash_command],
-                stdout=log,
-                stderr=log,
-                cwd=pwd,
-                preexec_fn=os.setpgrp,
-            )
-        return jsonify(
-            {
-                "success": True,
-                "message": "slaver service started successfully",
-            }
-        )
-    except Exception as e:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "message": f"Failed to start slaver service: {str(e)}",
-                }
-            ),
-            500,
-        )
+        return jsonify({"success": False, "message": f"Redis 连接失败: {e}", "data": []})
 
 
 @app.route("/api/get_tool_config", methods=["POST"])
-async def get_tool_config():
-    data = request.json
-    slaver_config_path = data.get("slaver_config")
+def get_tool_config():
+    """获取工具列表（解析 skill.py 中的 @mcp.tool() 函数）"""
+    data = request.json or {}
+    slaver_cfg_path = data.get("slaver_config")
 
-    if not slaver_config_path or not os.path.exists(slaver_config_path):
-        return (
-            jsonify(
-                {"success": False, "message": "Invalid config file path", "data": []}
-            ),
-            400,
-        )
+    if not slaver_cfg_path or not os.path.exists(slaver_cfg_path):
+        return jsonify({"success": False, "message": "配置文件不存在", "data": []}), 400
 
-    try:
-        with open(slaver_config_path, "r", encoding="utf-8") as f:
-            slaver_data = yaml.load(f)
-    except Exception as e:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "message": f"Failed to read config file: {str(e)}",
-                    "data": [],
-                }
-            ),
-            400,
-        )
+    with open(slaver_cfg_path, "r", encoding="utf-8") as f:
+        slaver_data = yaml.safe_load(f)
 
     call_type = slaver_data.get("robot", {}).get("call_type")
     path = slaver_data.get("robot", {}).get("path")
 
     if call_type == "local":
-        return await handle_local_tools(slaver_config_path, path)
+        base_dir = Path(slaver_cfg_path).parent
+        tool_path = base_dir / path / "skill.py"
+        if not tool_path.exists():
+            return jsonify({"success": False, "message": f"{tool_path} 不存在", "data": []}), 400
+        with open(tool_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        results = extract_tools_from_ast(source, str(tool_path))
+        return jsonify({"success": True, "data": results})
     else:
-        return await handle_remote_tools(path)
-
-
-@app.route("/api/save_tool_config", methods=["POST"])
-def save_tool_config():
-    try:
-        config = request.json
-        required_sections = ["navigate", "grasp", "place"]
-        for section in required_sections:
-            if section not in config:
-                return jsonify({"error": f"Missing section: {section}"}), 400
-
-        with open("/workspace/RoboOS/slaver/robot_tools/robot_profile.yaml", "w") as f:
-            json.dump(config, f, indent=4)
-
-        return jsonify({"status": "success"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        try:
+            url = path.rstrip("/") + "/mcp"
+            requests.post(url, timeout=5)
+            return jsonify({"success": True, "data": []})
+        except Exception as e:
+            return jsonify({"success": False, "message": f"MCP 服务不可达: {e}", "data": []}), 400
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8888, debug=False, use_reloader=False)
+    print("任务控制台已启动: http://127.0.0.1:8888")
+    app.run(host="0.0.0.0", port=8888, debug=False)

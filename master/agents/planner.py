@@ -2,7 +2,7 @@ from typing import Any, Dict, Union
 
 import yaml
 from agents.prompts import MASTER_PLANNING_PLANNING
-from flag_scale.flagscale.agent.collaboration import Collaborator
+from agent.collaboration import Collaborator
 from openai import AzureOpenAI, OpenAI
 
 
