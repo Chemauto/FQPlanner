@@ -10,7 +10,7 @@ import re # Added for robust JSON extraction
 
 import yaml
 from agents.planner import GlobalTaskPlanner
-from flag_scale.flagscale.agent.collaboration import Collaborator
+from agent.collaboration import Collaborator
 
 
 class GlobalAgent:
@@ -86,7 +86,7 @@ class GlobalAgent:
         )
 
         # Register functions for processing robot execution results in the brain
-        channel_r2b = f"{robot_name}_to_RoboOS"
+        channel_r2b = f"{robot_name}_to_FQPlanner"
         threading.Thread(
             target=lambda: self.collaborator.listen(channel_r2b, self._handle_result),
             daemon=True,
@@ -95,7 +95,7 @@ class GlobalAgent:
         self.listening_robots.add(robot_name)
 
         self.logger.info(
-            f"RoboOS has listened to [{robot_name}] by channel [{channel_r2b}]"
+            f"FQPlanner has listened to [{robot_name}] by channel [{channel_r2b}]"
         )
 
     def _handle_result(self, data: str):
@@ -274,7 +274,7 @@ class GlobalAgent:
                 if refresh:
                     self.collaborator.clear_agent_status(robot_name)
                 self.collaborator.send(
-                    f"roboos_to_{robot_name}", json.dumps(subtask_data)
+                    f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
                 )
                 working_robots.append(robot_name)
                 self.collaborator.update_agent_busy(robot_name, True)

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import yaml
 from slaver.agents.models import AzureOpenAIServerModel, OpenAIServerModel
 from slaver.agents.slaver_agent import ToolCallingAgent
-from flag_scale.flagscale.agent.collaboration import Collaborator
+from agent.collaboration import Collaborator
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
@@ -166,7 +166,7 @@ class RobotManager:
         if self._shutdown_event.is_set():
             return
 
-        channel = f"{robot_name}_to_RoboOS"
+        channel = f"{robot_name}_to_FQPlanner"
         payload = {
             "robot_name": robot_name,
             "subtask_handle": task,
@@ -287,7 +287,7 @@ class RobotManager:
             self.threads.append(heartbeat_thread)
 
             # Command listener thread
-            channel_b2r = f"roboos_to_{robot_name}"
+            channel_b2r = f"fqplanner_to_{robot_name}"
             listener_thread = threading.Thread(
                 target=lambda: self.collaborator.listen(channel_b2r, self.handle_task),
                 daemon=True,

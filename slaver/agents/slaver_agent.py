@@ -7,7 +7,7 @@ from logging import getLogger
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from slaver.agents.models import ChatMessage
-from flag_scale.flagscale.agent.collaboration import Collaborator
+from agent.collaboration import Collaborator
 from mcp import ClientSession
 from rich.panel import Panel
 from rich.text import Text

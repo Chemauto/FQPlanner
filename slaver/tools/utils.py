@@ -25,7 +25,7 @@ from io import BytesIO
 from typing import TYPE_CHECKING, Any, Dict
 
 import yaml
-from flag_scale.flagscale.agent.collaboration import Collaborator
+from agent.collaboration import Collaborator
 
 if TYPE_CHECKING:
     from memory import AgentLogger

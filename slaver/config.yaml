@@ -11,26 +11,25 @@ tool:
 # Cloud Server Infos
 model:
   # Model name for the cloud server
-  # model_select: "qwen-plus"
-  model_select: "robobrain"
+  model_select: "qwen3.5-plus-2026-02-15"
+  # model_select: "robobrain"
 
   # Number of retries for planning
   model_retry_planning: 5
   model_dict:
     # Model name for the cloud server
-    # cloud_model: "qwen-plus"
-    cloud_model: "robobrain"
+    cloud_model: "qwen3.5-plus-2026-02-15"
+    # cloud_model: "robobrain"
 
     # Deploy for the cloud server
     cloud_type: "default"
     # API key for the cloud server
-    # cloud_api_key: "sk-019f0a6b56f8438b9da1fa04c8adc23c"
-    #qwen新注册用户3个月免费额度
-    cloud_api_key: "EMPTY"
+    cloud_api_key: "sk-3a150955228a4cdb96cad8c1abfadaac"
+    # cloud_api_key: "EMPTY"
 
     # URL of the cloud server
-    # cloud_server: "https://dashscope.aliyuncs.com/compatible-mode/v1/"
-    cloud_server: "http://localhost:4567/v1/"
+    cloud_server: "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+    # cloud_server: "http://localhost:4567/v1/"
 
     # Maximum number of chat messages to keep in memory
     max_chat_message: 50
@@ -58,8 +57,8 @@ robot:
   # "local" with a fold name such as "demo_robot"
   # "remote" with URL such as "http://127.0.0.1:8000", and run the Python script 'skill.py' on the robot itself.
   call_type: local
-  path: "demo_robot_local"
-  name: demo_robot
+  path: "robot"
+  name: FQrobot
 
 # Output reasoning context, time cost and other information
 profiling: true
