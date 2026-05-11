@@ -152,6 +152,68 @@ def auto_tools():
         return jsonify({"success": False, "message": f"Redis 连接失败: {e}", "data": []})
 
 
+@app.route("/api/scene_state", methods=["GET"])
+def scene_state():
+    """读取当前场景状态"""
+    try:
+        r = redis.StrictRedis(**REDIS_CFG, socket_connect_timeout=3, decode_responses=True)
+        r.ping()
+        raw = r.hgetall("ENVIRONMENT_INFO")
+        if not raw:
+            return jsonify({"success": True, "data": {}})
+        result = {}
+        for name, val in raw.items():
+            try:
+                result[name] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                result[name] = val
+        return jsonify({"success": True, "data": result})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Redis 连接失败: {e}", "data": {}})
+
+
+@app.route("/api/update_scene", methods=["POST"])
+def update_scene():
+    """手动更新场景（外部变化）"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "缺少 JSON 数据"}), 400
+
+        location = data.get("location")
+        action = data.get("action")  # add_object / remove_object
+        obj = data.get("object")
+
+        if not location or not action or not obj:
+            return jsonify({"success": False, "message": "需要 location, action, object 三个字段"}), 400
+
+        r = redis.StrictRedis(**REDIS_CFG, socket_connect_timeout=3, decode_responses=True)
+        r.ping()
+
+        raw = r.hget("ENVIRONMENT_INFO", location)
+        if not raw:
+            return jsonify({"success": False, "message": f"位置 '{location}' 不存在"}), 404
+
+        scene_obj = json.loads(raw)
+        contains = scene_obj.get("contains", [])
+
+        if action == "add_object":
+            if obj not in contains:
+                contains.append(obj)
+        elif action == "remove_object":
+            if obj in contains:
+                contains.remove(obj)
+        else:
+            return jsonify({"success": False, "message": f"不支持的 action: {action}"}), 400
+
+        scene_obj["contains"] = contains
+        r.hset("ENVIRONMENT_INFO", location, json.dumps(scene_obj, ensure_ascii=False))
+
+        return jsonify({"success": True, "message": f"{action} '{obj}' at '{location}'", "data": scene_obj})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 @app.route("/api/get_tool_config", methods=["POST"])
 def get_tool_config():
     """获取工具列表（解析 skill.py 中的 @mcp.tool() 函数）"""
