@@ -21,6 +21,8 @@ class GlobalAgent:
         self.collaborator = Collaborator.from_config(self.config["collaborator"])
         self.planner = GlobalTaskPlanner(self.config)
         self.listening_robots = set()
+        self.conversation_history = []  # 最近 5 轮对话
+        self.max_history = 5
 
         self.logger.info(f"Configuration loaded from {config_path} ...")
         self.logger.info(f"Master Configuration:\n{self.config}")
@@ -217,7 +219,7 @@ class GlobalAgent:
         """Publish a global task to all Agents"""
         self.logger.info(f"Publishing global task: {task}")
 
-        response = self.planner.forward(task)
+        response = self.planner.forward(task, self.conversation_history)
         self.logger.info(f"Raw response from planner: {response}")
         reasoning_and_subtasks = self._extract_json(response) # Use the improved _extract_json
 
@@ -241,6 +243,20 @@ class GlobalAgent:
 
         self.logger.info(f"Received reasoning and subtasks:\n{reasoning_and_subtasks}")
         subtask_list = reasoning_and_subtasks.get("subtask_list", [])
+
+        # Save to conversation history (ensure content is always a string)
+        def _ensure_str(v):
+            if v is None:
+                return ""
+            if isinstance(v, list):
+                return "".join(p.get("text", "") if isinstance(p, dict) else getattr(p, "text", "") for p in v)
+            return v if isinstance(v, str) else str(v)
+
+        self.conversation_history.append({"role": "user", "content": _ensure_str(task)})
+        self.conversation_history.append({"role": "assistant", "content": _ensure_str(response)})
+        if len(self.conversation_history) > self.max_history * 2:
+            self.conversation_history = self.conversation_history[-self.max_history * 2:]
+
         grouped_tasks = self._group_tasks_by_order(subtask_list)
 
         task_id = task_id or str(uuid.uuid4()).replace("-", "")

@@ -14,20 +14,12 @@ You must also consider the following scene information when decomposing the task
 
 Please break down the given task into sub-tasks, each of which cannot be too complex, make sure that a single robot can do it.
 
-## CRITICAL RULES - DO NOT DECOMPOSE THESE TASKS:
+## Decomposition Guidelines:
 
-The following task types MUST be passed directly to the robot WITHOUT any decomposition:
-1. **Grasp-related tasks**: Any task containing "抓取" (grasp), "抓" (catch), "grasp", "pick up", etc.
-   - These map directly to the `grasp_object` tool
-   - Examples: "抓取", "抓取方块", "执行抓取", "grasp object", "抓取物体"
-   - DO NOT add navigation, DO NOT add gripper control, DO NOT break into steps
-
-2. **Status check tasks**: Any task asking to check/verify status
-   - Examples: "检查抓取状态", "check status"
-
-3. **Any task that can be completed by a single direct tool call**
-
-For these direct-call tasks, simply set the "subtask" field to the original task text. Do not add any navigation, preparation, or intermediate steps.
+- Analyze the task and break it into logical steps based on the robot's available tools.
+- If the task involves moving to a location AND performing an action there, decompose into separate subtasks (e.g., navigate first, then act).
+- If the task is simple enough for a single tool call (e.g., "抓取方块" when already at the location), it can remain as one subtask.
+- Always consider the robot's current position and the scene layout when deciding whether navigation is needed.
 
 Each sub-task in the output needs a concise name of the sub-task, which includes the robots that need to complete the sub-task.
 Additionally you need to give a reasoning explanation on subtask decomposition and analyze if each step can be done by a single robot based on each robot's tools!

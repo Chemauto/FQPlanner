@@ -64,7 +64,7 @@ class GlobalTaskPlanner:
             print(f" [{module_name}] {description}:")
             print(message)
 
-    def forward(self, task: str) -> str:
+    def forward(self, task: str, history: list = None) -> str:
         """Get the sub-tasks from the task."""
 
         all_robots_name = self.collaborator.read_all_agents_name()
@@ -75,14 +75,26 @@ class GlobalTaskPlanner:
             robot_name_list=all_robots_name, robot_tools_info=all_robots_info, task=task, scene_info=all_environments_info
         )
 
-        messages = [
+        messages = []
+
+        # Add conversation history for context (ensure content is always a string)
+        if history:
+            for msg in history:
+                c = msg.get("content")
+                if isinstance(c, list):
+                    c = "".join(p.get("text", "") if isinstance(p, dict) else getattr(p, "text", "") for p in c)
+                elif c is None:
+                    c = ""
+                elif not isinstance(c, str):
+                    c = str(c)
+                messages.append({"role": msg["role"], "content": c})
+
+        messages.append(
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": content},
-                ],
+                "content": content,
             },
-        ]
+        )
 
         self.display_profiling_info("messages", messages)
 
@@ -106,4 +118,15 @@ class GlobalTaskPlanner:
         self.display_profiling_info("response", response)
         self.display_profiling_info("response.usage", response.usage)
 
-        return response.choices[0].message.content
+        raw = response.choices[0].message.content
+        # Qwen API may return content as list or None, ensure it's always a string
+        if raw is None:
+            raw = ""
+        elif isinstance(raw, list):
+            raw = "".join(
+                part.get("text", "") if isinstance(part, dict) else getattr(part, "text", "")
+                for part in raw
+            )
+        elif not isinstance(raw, str):
+            raw = str(raw)
+        return raw
