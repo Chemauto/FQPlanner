@@ -36,6 +36,16 @@
         .tool-desc { color: #94a3b8; font-size: 13px; margin-top: 4px; }
         .tool-params { color: #64748b; font-size: 12px; margin-top: 6px; font-family: monospace; }
         .param-tag { background: #334155; padding: 2px 8px; border-radius: 4px; margin-right: 4px; }
+        .scene-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 10px; }
+        .scene-card { background: #0f172a; border-radius: 8px; padding: 12px; }
+        .scene-name { color: #38bdf8; font-weight: bold; font-size: 14px; }
+        .scene-type { color: #64748b; font-size: 12px; margin-left: 6px; }
+        .scene-desc { color: #94a3b8; font-size: 13px; margin-top: 4px; }
+        .scene-contains { color: #a78bfa; font-size: 12px; margin-top: 6px; font-family: monospace; }
+        .scene-coords { color: #64748b; font-size: 11px; margin-top: 4px; font-family: monospace; }
+        .update-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .update-row select { padding: 8px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 13px; outline: none; }
+        .update-row select:focus { border-color: #38bdf8; }
     </style>
 </head>
 <body>
@@ -67,6 +77,25 @@
             <h2>已注册工具</h2>
             <button class="btn btn-outline btn-sm" onclick="loadTools()">刷新</button>
             <div class="tools-list" id="tools-list"></div>
+        </div>
+
+        <!-- 场景状态 -->
+        <div class="card">
+            <h2>场景状态</h2>
+            <div class="btn-row">
+                <button class="btn btn-outline btn-sm" onclick="loadScene()">刷新</button>
+            </div>
+            <div class="scene-grid" id="scene-grid"></div>
+            <div class="update-row">
+                <select id="scene-location"><option value="">选择位置</option></select>
+                <select id="scene-action">
+                    <option value="add_object">添加物体</option>
+                    <option value="remove_object">移除物体</option>
+                </select>
+                <input type="text" id="scene-object" placeholder="物体名称" style="width:140px">
+                <button class="btn btn-primary btn-sm" onclick="updateScene()">更新</button>
+            </div>
+            <div class="msg" id="scene-msg"></div>
         </div>
     </div>
 
@@ -163,6 +192,76 @@
         }
         loadTools();
         setInterval(loadTools, 10000);
+
+        // 场景状态
+        let sceneData = {};
+        async function loadScene() {
+            try {
+                const resp = await fetch('/api/scene_state');
+                const data = await resp.json();
+                if (!data.success) {
+                    document.getElementById('scene-grid').innerHTML = `<div style="color:#ef4444;font-size:13px">${data.message}</div>`;
+                    return;
+                }
+                sceneData = data.data;
+                const grid = document.getElementById('scene-grid');
+                const locSelect = document.getElementById('scene-location');
+                const locations = [];
+
+                grid.innerHTML = Object.entries(sceneData).filter(([k]) => k !== 'robot').map(([name, info]) => {
+                    const desc = info.description || '';
+                    const type = info.type || '';
+                    const coords = info.position ? `(${info.position.join(', ')})` : '';
+                    const contains = (info.contains || []).length > 0
+                        ? info.contains.join(', ')
+                        : '空';
+                    return `<div class="scene-card">
+                        <div><span class="scene-name">${name}</span><span class="scene-type">${type}</span></div>
+                        ${desc ? '<div class="scene-desc">' + desc + '</div>' : ''}
+                        <div class="scene-contains">contains: ${contains}</div>
+                        ${coords ? '<div class="scene-coords">' + coords + '</div>' : ''}
+                    </div>`;
+                }).join('');
+
+                // 更新下拉框
+                for (const [name, info] of Object.entries(sceneData)) {
+                    if (name === 'robot') continue;
+                    const desc = info.description || name;
+                    locations.push(`<option value="${name}">${desc} (${name})</option>`);
+                }
+                locSelect.innerHTML = '<option value="">选择位置</option>' + locations.join('');
+            } catch (e) {
+                document.getElementById('scene-grid').innerHTML = `<div style="color:#ef4444;font-size:13px">加载失败: ${e.message}</div>`;
+            }
+        }
+        loadScene();
+        setInterval(loadScene, 10000);
+
+        // 手动更新场景
+        async function updateScene() {
+            const location = document.getElementById('scene-location').value;
+            const action = document.getElementById('scene-action').value;
+            const object = document.getElementById('scene-object').value.trim();
+            if (!location || !object) {
+                showMsg('scene-msg', false, '请选择位置并输入物体名称');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/update_scene', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({location, action, object})
+                });
+                const data = await resp.json();
+                showMsg('scene-msg', data.success, data.message || data.error);
+                if (data.success) {
+                    document.getElementById('scene-object').value = '';
+                    loadScene();
+                }
+            } catch (e) {
+                showMsg('scene-msg', false, '请求失败: ' + e.message);
+            }
+        }
     </script>
 </body>
 </html>

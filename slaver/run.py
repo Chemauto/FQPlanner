@@ -151,16 +151,22 @@ class RobotManager:
         )
 
         result = await agent.run(task)
+        # result may be a tuple (result_str, terminated_bool) or just a string
+        if isinstance(result, tuple):
+            result, terminated = result
+        else:
+            terminated = False
         self._send_result(
             robot_name=self.robot_name,
             task=task,
             task_id=task_data["task_id"],
             result=result,
             tool_call=agent.tool_call,
+            terminated=terminated,
         )
 
     def _send_result(
-        self, robot_name: str, task: str, task_id: str, result: Dict, tool_call: List
+        self, robot_name: str, task: str, task_id: str, result: Dict, tool_call: List, terminated: bool = False
     ) -> None:
         """Send task results to collaboration channel"""
         if self._shutdown_event.is_set():
@@ -173,6 +179,7 @@ class RobotManager:
             "subtask_result": result,
             "tools": tool_call,
             "task_id": task_id,
+            "terminated": terminated,
         }
         self.collaborator.send(channel, json.dumps(payload))
 

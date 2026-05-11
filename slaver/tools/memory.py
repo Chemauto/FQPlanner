@@ -189,6 +189,32 @@ class AgentMemory:
 class SceneMemory:
     def __init__(self, collaborator):
         self.collaborator = collaborator
+        # Build Chinese→English name mapping from scene data in Redis
+        self._name_map = {}  # description → key (e.g. "厨房桌子" → "kitchenTable")
+        self._build_name_map()
+
+    def _build_name_map(self):
+        """Build mapping from Chinese description to English key for all scene objects."""
+        try:
+            # read_environment(None) returns all environment data
+            all_env = self.collaborator.read_environment(None)
+            if all_env:
+                for key, value in all_env.items():
+                    if key == "robot":
+                        continue
+                    if isinstance(value, str):
+                        value = json.loads(value)
+                    desc = value.get("description", "")
+                    if desc:
+                        self._name_map[desc] = key
+        except Exception as e:
+            print(f"[SceneMemory] Failed to build name map: {e}")
+
+    def _resolve_position(self, position: str) -> str:
+        """Convert Chinese position name to English key if needed."""
+        if position in self._name_map:
+            return self._name_map[position]
+        return position
 
     def add_object(self, target: str):
         robot_info = self.collaborator.read_environment("robot")
@@ -203,7 +229,9 @@ class SceneMemory:
             print(f"[Warning] Robot is not holding '{target}', but holding '{holding}'")
             return
 
-        scene_obj = self.collaborator.read_environment(position)
+        # Convert Chinese position name to English key
+        redis_key = self._resolve_position(position)
+        scene_obj = self.collaborator.read_environment(redis_key)
         if not scene_obj:
             print(f"[Error] Scene object at position '{position}' not found")
             return
@@ -216,7 +244,7 @@ class SceneMemory:
         robot_info["holding"] = None
 
         self.collaborator.record_environment("robot", json.dumps(robot_info))
-        self.collaborator.record_environment(position, json.dumps(scene_obj))
+        self.collaborator.record_environment(redis_key, json.dumps(scene_obj))
 
     def remove_object(self, target: str):
         robot_info = self.collaborator.read_environment("robot")
@@ -225,9 +253,12 @@ class SceneMemory:
             return
 
         position = robot_info.get("position")
-        scene_obj = self.collaborator.read_environment(position)
+
+        # Convert Chinese position name to English key
+        redis_key = self._resolve_position(position)
+        scene_obj = self.collaborator.read_environment(redis_key)
         if not scene_obj:
-            print(f"[Error] Scene object at position '{position}' not found")
+            print(f"[Error] Scene object at position '{position}' (key: {redis_key}) not found")
             return
 
         contains = scene_obj.get("contains", [])
@@ -240,7 +271,7 @@ class SceneMemory:
         robot_info["holding"] = target
 
         self.collaborator.record_environment("robot", json.dumps(robot_info))
-        self.collaborator.record_environment(position, json.dumps(scene_obj))
+        self.collaborator.record_environment(redis_key, json.dumps(scene_obj))
 
     def move_to(self, target: str):
         robot_info = self.collaborator.read_environment("robot")
@@ -259,26 +290,26 @@ class SceneMemory:
         """
         print(f"[Scene Update] Applying `{action_type}` with args {args}")
         try:
+            # Accept multiple key names for flexibility (object, object_name, target)
+            target = args.get("object") or args.get("object_name") or args.get("target")
+
             if "remove_object" in action_type:
-                target = args.get("object")
                 if target:
                     self.remove_object(target)
                 else:
-                    print("[Scene Update] Missing `object` for remove_object")
+                    print(f"[Scene Update] Missing object key for remove_object, args: {args}")
 
             elif "add_object" in action_type:
-                target = args.get("object")
                 if target:
                     self.add_object(target)
                 else:
-                    print("[Scene Update] Missing `object` for add_object")
+                    print(f"[Scene Update] Missing object key for add_object, args: {args}")
 
             elif "position" in action_type:
-                target = args.get("target")
                 if target:
                     self.move_to(target)
                 else:
-                    print("[Scene Update] Missing `target` for position")
+                    print(f"[Scene Update] Missing target key for position, args: {args}")
 
             else:
                 print(f"[Scene Update] Unknown action `{action_type}`")

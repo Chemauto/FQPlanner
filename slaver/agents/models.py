@@ -343,7 +343,8 @@ Rules:
             completion_kwargs["tools"] = tools_to_call_from
             completion_kwargs["tool_choice"] = "auto"
 
-        self.display_profiling_info("completion_kwargs", completion_kwargs)
+        # [调试] 取消注释以下行以查看详细的请求/响应信息
+        # self.display_profiling_info("completion_kwargs", completion_kwargs)
         from datetime import datetime
 
         start_inference = datetime.now()
@@ -353,12 +354,12 @@ Rules:
         self.last_output_token_count = response.usage.completion_tokens
 
         end_inference = datetime.now()
-        self.display_profiling_info(
-            "inference time",
-            f"inference start:{start_inference} end:{end_inference} during:{end_inference-start_inference}",
-        )
-        self.display_profiling_info("response", response)
-        self.display_profiling_info("response.usage", response.usage)
+        # self.display_profiling_info(
+        #     "inference time",
+        #     f"inference start:{start_inference} end:{end_inference} during:{end_inference-start_inference}",
+        # )
+        # self.display_profiling_info("response", response)
+        # self.display_profiling_info("response.usage", response.usage)
 
         first_message = ChatMessage.from_dict(
             response.choices[0].message.model_dump(

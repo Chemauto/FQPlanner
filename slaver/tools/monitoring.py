@@ -111,7 +111,7 @@ class AgentLogger:
         self.file_logger.setLevel(logging.DEBUG)  # File logger captures all levels
 
         # Create a file handler
-        file_handler = logging.FileHandler(self.log_file)
+        file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
 
         # Set log format

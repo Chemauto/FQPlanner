@@ -20,12 +20,18 @@
 import ast
 import base64
 import json
+import os
 import re
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Dict
 
 import yaml
+from dotenv import load_dotenv
 from agent.collaboration import Collaborator
+
+# Load .env from project root
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+load_dotenv(os.path.join(_project_root, '.env'))
 
 if TYPE_CHECKING:
     from memory import AgentLogger
@@ -152,7 +158,10 @@ def make_image_url(base64_image):
 class Config:
     @classmethod
     def load_config(cls, config_path="config.yaml"):
-        """Initialize configuration"""
+        """Initialize configuration, with ${ENV_VAR} substitution from .env"""
         with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            raw = f.read()
+        # Replace ${VAR} with environment variable values
+        raw = re.sub(r'\$\{(\w+)\}', lambda m: os.environ.get(m.group(1), m.group(0)), raw)
+        config = yaml.safe_load(raw)
         return config

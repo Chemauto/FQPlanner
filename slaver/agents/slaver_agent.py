@@ -13,6 +13,12 @@ from rich.panel import Panel
 from rich.text import Text
 from slaver.tools.memory import ActionStep, AgentMemory, SceneMemory
 from slaver.tools.monitoring import AgentLogger, LogLevel, Monitor
+from slaver.tools.judge import judge_on_failure
+
+
+class TaskTerminatedException(Exception):
+    """Raised when the judge decides to terminate the entire task."""
+    pass
 
 logger = getLogger(__name__)
 
@@ -103,7 +109,12 @@ class MultiStepAgent:
                 start_time=step_start_time,
                 observations_images=images,
             )
-            answer = await self.step(step)
+            try:
+                answer = await self.step(step)
+            except TaskTerminatedException as e:
+                self.logger.log(str(e), level=LogLevel.INFO)
+                return str(e), True  # (result, terminated)
+
             if answer == "final_answer":
                 # Return the actual tool execution result if available, otherwise use default message
                 if self.last_tool_result:
@@ -111,15 +122,15 @@ class MultiStepAgent:
                         f"Task completed with result: {self.last_tool_result}",
                         level=LogLevel.INFO,
                     )
-                    return self.last_tool_result
+                    return self.last_tool_result, False
                 else:
-                    return "Mission accomplished"
+                    return "Mission accomplished", False
 
             self.collaborator.record_agent_status(self.robot_name, answer)
             step.end_time = time.time()
             self.step_number += 1
 
-        return "Maximum number of attempts reached, Mission not completed"
+        return "Maximum number of attempts reached, Mission not completed", False
 
     def step(self) -> Optional[Any]:
         """To be implemented in children classes. Should return either None if the step is not final."""
@@ -157,27 +168,28 @@ class ToolCallingAgent(MultiStepAgent):
         )
 
     async def _execute_tool_call(
-        self, tool_name: str, tool_arguments: dict, memory_step: ActionStep
+        self, tool_name: str, tool_arguments: dict, memory_step: ActionStep, _retry_count: int = 0
     ) -> Union[str, None]:
+        MAX_RETRIES = 3
+
         self.logger.log(
             Panel(
                 Text(f"Calling tool: '{tool_name}' with arguments: {tool_arguments}")
             ),
             level=LogLevel.INFO,
         )
-        # Log to file
         self.logger.log2file(f"Calling tool: '{tool_name}' with arguments: {tool_arguments}", level=LogLevel.INFO)
 
         observation = await self.tool_executor(tool_name, json.loads(tool_arguments))
 
-        # Debug: Print raw observation type and content
-        print(f"[DEBUG] Raw observation type: {type(observation)}", file=sys.stderr)
-        print(f"[DEBUG] Raw observation: {observation}", file=sys.stderr)
+        # [调试] 取消注释以查看原始 MCP 返回值
+        # print(f"[DEBUG] Raw observation type: {type(observation)}", file=sys.stderr)
+        # print(f"[DEBUG] Raw observation: {observation}", file=sys.stderr)
 
         # Handle different return formats from MCP
         if hasattr(observation, 'content') and len(observation.content) > 0:
-            print(f"[DEBUG] Observation content type: {type(observation.content)}", file=sys.stderr)
-            print(f"[DEBUG] Observation content[0] type: {type(observation.content[0])}", file=sys.stderr)
+            # print(f"[DEBUG] Observation content type: {type(observation.content)}", file=sys.stderr)
+            # print(f"[DEBUG] Observation content[0] type: {type(observation.content[0])}", file=sys.stderr)
             if hasattr(observation.content[0], 'text'):
                 observation = observation.content[0].text
             else:
@@ -195,17 +207,40 @@ class ToolCallingAgent(MultiStepAgent):
                 if isinstance(parsed, list) and len(parsed) == 2:
                     observation = parsed[0]  # Result message
                     state_updates = parsed[1] if isinstance(parsed[1], dict) else {}
-                    print(f"[DEBUG] Parsed state updates: {state_updates}", file=sys.stderr)
+                    # print(f"[DEBUG] Parsed state updates: {state_updates}", file=sys.stderr)
             except (json.JSONDecodeError, ValueError) as e:
-                print(f"[DEBUG] Failed to parse JSON: {e}", file=sys.stderr)
+                # print(f"[DEBUG] Failed to parse JSON: {e}", file=sys.stderr)
+                pass
                 pass  # Not a JSON tuple, use as-is
+
+        # Check if the tool execution failed
+        is_failed = isinstance(observation, str) and ("失败" in observation or "failed" in observation.lower())
+
+        if is_failed:
+            # Ask the judge what to do
+            decision = judge_on_failure(tool_name, observation)
+
+            if decision == "retry" and _retry_count < MAX_RETRIES:
+                print(f"[Judge] Retrying ({_retry_count + 1}/{MAX_RETRIES})...", file=sys.stderr)
+                return await self._execute_tool_call(tool_name, tool_arguments, memory_step, _retry_count + 1)
+
+            elif decision == "skip":
+                skip_msg = f"任务跳过：{tool_name} 执行失败，放弃该子任务。"
+                print(f"[Judge] {skip_msg}", file=sys.stderr)
+                self.last_tool_result = skip_msg
+                return skip_msg
+
+            elif decision == "terminate":
+                terminate_msg = f"任务终止：{tool_name} 执行失败，判定终止整个任务。"
+                print(f"[Judge] {terminate_msg}", file=sys.stderr)
+                raise TaskTerminatedException(terminate_msg)
 
         # Update robot state in Redis if there are state updates
         if state_updates:
-            print(f"[DEBUG] Calling _update_robot_state with: {state_updates}", file=sys.stderr)
+            # print(f"[DEBUG] Calling _update_robot_state with: {state_updates}", file=sys.stderr)
             await self._update_robot_state(state_updates)
-        else:
-            print(f"[DEBUG] No state updates found", file=sys.stderr)
+        # else:
+        #     print(f"[DEBUG] No state updates found", file=sys.stderr)
 
         # Attach current position information to the observation
         position_info = await self._get_current_position_info()
@@ -228,16 +263,18 @@ class ToolCallingAgent(MultiStepAgent):
         # Log to file
         self.logger.log2file(f"Observations: {enhanced_observation}", level=LogLevel.INFO)
 
-        # Construct memory input
-        memory_input = {
-            "tool_name": tool_name,
-            "arguments": tool_arguments,
-            "result": observation,  # Use original observation for memory prediction
-        }
-        try:
-            await self.memory_predict(memory_input)
-        except Exception as e:
-            print(f"[Scene Update Error] `{e}`")
+        # Only update scene memory on success
+        if not is_failed:
+            memory_input = {
+                "tool_name": tool_name,
+                "arguments": tool_arguments,
+                "result": observation,
+            }
+            try:
+                await self.memory_predict(memory_input)
+            except Exception as e:
+                # print(f"[Scene Update Error] `{e}`")
+                pass
 
         return enhanced_observation
 
@@ -261,9 +298,10 @@ class ToolCallingAgent(MultiStepAgent):
 
             # Write back to Redis
             self.collaborator.record_environment("robot", json.dumps(robot_state))
-            print(f"[State Update] Robot state updated: {state_updates}", file=sys.stderr)
+            # print(f"[State Update] Robot state updated: {state_updates}", file=sys.stderr)
         except Exception as e:
-            print(f"[State Update Error] Failed to update robot state: `{e}`", file=sys.stderr)
+            # print(f"[State Update Error] Failed to update robot state: `{e}`", file=sys.stderr)
+            pass
 
     async def _get_current_position_info(self) -> str:
         """
@@ -322,7 +360,7 @@ class ToolCallingAgent(MultiStepAgent):
                 return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not found in scene"
 
         except Exception as e:
-            print(f"[Get Position Error] `{e}`")
+            # print(f"[Get Position Error] `{e}`")
             return None
 
     async def memory_predict(self, memory_input: dict) -> str:
@@ -397,11 +435,12 @@ class ToolCallingAgent(MultiStepAgent):
         else:
             log_content = str(model_message.raw)
 
-        self.logger.log_markdown(
-            content=log_content,
-            title="Output message of the LLM:",
-            level=LogLevel.DEBUG,
-        )
+        # [调试] 取消注释以查看 LLM 完整输出（含 reasoning_content）
+        # self.logger.log_markdown(
+        #     content=log_content,
+        #     title="Output message of the LLM:",
+        #     level=LogLevel.DEBUG,
+        # )
 
         # Initialize tool_name and tool_arguments
         tool_name = None

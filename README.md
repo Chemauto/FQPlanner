@@ -58,7 +58,7 @@ python slaver/run.py
 
 ### 6. 发布任务
 
-**方式一：Web 控制台（推荐）**
+**Web 控制台**
 
 ```bash
 # 终端 3
@@ -67,16 +67,10 @@ python deploy/run.py
 
 访问 http://127.0.0.1:8888 ，在页面中输入任务。
 
-**方式二：API 调用**
-
-```bash
-curl -X POST http://127.0.0.1:5000/publish_task -H "Content-Type: application/json" -d "{\"task\": \"前往卧室\"}"
-```
-
 **任务示例：**
 - "前往卧室" / "到客厅"
 - "先去厨房，然后去卧室"
-
+- "抓取厨房桌子上的所有水果"
 ### 7. 查看日志
 
 ```bash

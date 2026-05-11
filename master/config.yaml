@@ -41,8 +41,8 @@ model:
 
     # Deploy for the cloud server
     cloud_type: "default"
-    # API key for the cloud server
-    cloud_api_key: "sk-3a150955228a4cdb96cad8c1abfadaac"
+    # API key for the cloud server (read from .env)
+    cloud_api_key: "${CLOUD_API_KEY}"
     # cloud_api_key: "EMPTY"
 
     # URL of the cloud server

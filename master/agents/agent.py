@@ -9,8 +9,13 @@ from typing import Dict
 import re # Added for robust JSON extraction
 
 import yaml
+from dotenv import load_dotenv
 from agents.planner import GlobalTaskPlanner
 from agent.collaboration import Collaborator
+
+# Load .env from project root
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+load_dotenv(os.path.join(_project_root, '.env'))
 
 
 class GlobalAgent:
@@ -23,6 +28,7 @@ class GlobalAgent:
         self.listening_robots = set()
         self.conversation_history = []  # 最近 5 轮对话
         self.max_history = 5
+        self.terminated_tasks = set()  # 被 judge 终止的 task_id
 
         self.logger.info(f"Configuration loaded from {config_path} ...")
         self.logger.info(f"Master Configuration:\n{self.config}")
@@ -56,9 +62,11 @@ class GlobalAgent:
         self.logger.addHandler(file_handler)
 
     def _init_config(self, config_path="config.yaml"):
-        """Initialize configuration"""
+        """Initialize configuration, with ${ENV_VAR} substitution from .env"""
         with open(config_path, "r", encoding="utf-8") as f:
-            self.config = yaml.safe_load(f)
+            raw = f.read()
+        raw = re.sub(r'\$\{(\w+)\}', lambda m: os.environ.get(m.group(1), m.group(0)), raw)
+        self.config = yaml.safe_load(raw)
 
     def _init_scene(self, scene_config):
         """Initialize scene object"""
@@ -107,6 +115,8 @@ class GlobalAgent:
         robot_name = data.get("robot_name")
         subtask_handle = data.get("subtask_handle")
         subtask_result = data.get("subtask_result")
+        terminated = data.get("terminated", False)
+        task_id = data.get("task_id")
 
         # TODO: Task result should be refered to the next step determination.
         if robot_name and subtask_handle and subtask_result:
@@ -114,6 +124,10 @@ class GlobalAgent:
                 f"================ Received result from {robot_name} ================"
             )
             self.logger.info(f"Subtask: {subtask_handle}\nResult: {subtask_result}")
+            if terminated:
+                self.logger.warning(f"[TERMINATE] Task {task_id} terminated by judge")
+                if task_id:
+                    self.terminated_tasks.add(task_id)
             self.logger.info(
                 "===================================================================="
             )
@@ -278,6 +292,12 @@ class GlobalAgent:
     ):
         order_flag = "false" if len(grouped_tasks.keys()) == 1 else "true"
         for task_count, (order, group_task) in enumerate(grouped_tasks.items()):
+            # Check if this task has been terminated
+            if task_id in self.terminated_tasks:
+                self.logger.warning(f"[TERMINATE] Skipping remaining subtasks for task {task_id}")
+                self.terminated_tasks.discard(task_id)
+                break
+
             self.logger.info(f"Sending task group {order}:\n{group_task}")
             working_robots = []
             for tasks in group_task:
@@ -295,4 +315,11 @@ class GlobalAgent:
                 working_robots.append(robot_name)
                 self.collaborator.update_agent_busy(robot_name, True)
             self.collaborator.wait_agents_free(working_robots)
+
+            # Check again after waiting (terminate may have happened during execution)
+            if task_id in self.terminated_tasks:
+                self.logger.warning(f"[TERMINATE] Task {task_id} terminated, skipping remaining groups")
+                self.terminated_tasks.discard(task_id)
+                break
+
         self.logger.info(f"Task_id ({task_id}) [{task}] has been sent to all agents.")
