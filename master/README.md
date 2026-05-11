@@ -13,8 +13,7 @@ master/
 │   ├── planner.py      # GlobalTaskPlanner - LLM 任务分解
 │   └── prompts.py      # Prompt 模板
 └── scene/
-    ├── profile.yaml    # 场景位置坐标定义
-    └── LOCATION_MAP.py # 中英文位置名称映射
+    └── profile.yaml    # 场景位置坐标及中英文名称定义
 ```
 
 ## 启动

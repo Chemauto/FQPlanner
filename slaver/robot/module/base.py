@@ -11,10 +11,6 @@ Functions:
 import sys
 import os
 
-# Import location map from master/scene directory
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../master/scene')))
-import LOCATION_MAP
-
 
 def register_tools(mcp):
     """
@@ -42,9 +38,25 @@ def register_tools(mcp):
             navigate_to_target(target="卧室")
         """
         import json
+        import yaml
+
+        # Read profile.yaml and build Chinese→English mapping
+        profile_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../master/scene/profile.yaml'))
+        profile = {}
+        location_map = {}
+        try:
+            with open(profile_path, "r", encoding="utf-8") as f:
+                profile = yaml.safe_load(f)
+            for item in profile.get("scene", []):
+                desc = item.get("description")
+                name = item.get("name")
+                if desc and name:
+                    location_map[desc] = name
+        except Exception as e:
+            print(f"[base.navigate_to_target] Failed to read profile.yaml: {e}", file=sys.stderr)
 
         # Map Chinese name to English if needed
-        target_en = LOCATION_MAP.LOCATION_MAP.get(target, target)
+        target_en = location_map.get(target, target)
 
         # In a real robot, this would contain navigation logic.
         # For simulation, we just confirm the action is "done".
@@ -56,19 +68,12 @@ def register_tools(mcp):
         # Build state updates with position and coordinates
         state_updates = {"position": target_en}
 
-        # Read coordinates from profile.yaml
-        import yaml
-        profile_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../master/scene/profile.yaml'))
-        try:
-            with open(profile_path, "r", encoding="utf-8") as f:
-                profile = yaml.safe_load(f)
-            for item in profile.get("scene", []):
-                if item.get("name") == target_en:
-                    state_updates["coordinates"] = item["position"]
-                    print(f"[base.navigate_to_target] Updated coordinates to {item['position']}", file=sys.stderr)
-                    break
-        except Exception as e:
-            print(f"[base.navigate_to_target] Failed to read profile.yaml: {e}", file=sys.stderr)
+        # Find coordinates for the target
+        for item in profile.get("scene", []):
+            if item.get("name") == target_en:
+                state_updates["coordinates"] = item["position"]
+                print(f"[base.navigate_to_target] Updated coordinates to {item['position']}", file=sys.stderr)
+                break
 
         # Return JSON array: [result_message, state_updates]
         response = json.dumps([result, state_updates], ensure_ascii=False)
