@@ -60,6 +60,16 @@
         .subtask-item.done .subtask-text { text-decoration: line-through; color: #64748b; }
         .subtask-item .subtask-robot { color: #64748b; font-size: 12px; }
         .no-task { color: #64748b; font-size: 13px; margin-top: 10px; }
+        .exp-card { display: none; margin-top: 16px; padding: 16px; background: #1a2744; border: 1px solid #38bdf8; border-radius: 10px; }
+        .exp-card h3 { font-size: 14px; color: #38bdf8; margin-bottom: 10px; }
+        .exp-card p { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
+        .exp-card textarea { width: 100%; padding: 10px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 13px; resize: vertical; min-height: 60px; outline: none; display: none; margin-bottom: 10px; }
+        .exp-card textarea:focus { border-color: #38bdf8; }
+        .exp-btns { display: flex; gap: 8px; }
+        .btn-success { background: #16a34a; color: #fff; }
+        .btn-success:hover { background: #15803d; }
+        .btn-danger { background: #dc2626; color: #fff; }
+        .btn-danger:hover { background: #b91c1c; }
     </style>
 </head>
 <body>
@@ -80,6 +90,20 @@
             <div class="task-progress" id="task-progress"></div>
             <div class="btn-row" style="margin-top:10px">
                 <button class="btn btn-outline btn-sm" onclick="refreshTaskStatus()">刷新任务进度</button>
+            </div>
+            <div class="exp-card" id="exp-card">
+                <h3>任务执行完成，是否将本次经验注入经验库？</h3>
+                <p id="exp-task-info"></p>
+                <div class="exp-btns" id="exp-btns-main">
+                    <button class="btn btn-sm btn-success" onclick="savePositiveExp()">是，注入经验</button>
+                    <button class="btn btn-sm btn-danger" onclick="showNegInput()">否，写避免规则</button>
+                    <button class="btn btn-sm btn-outline" onclick="dismissExp()">跳过</button>
+                </div>
+                <textarea id="exp-note" placeholder="请描述需要避免的规则或正确做法..."></textarea>
+                <div class="exp-btns" id="exp-btns-neg" style="display:none">
+                    <button class="btn btn-sm btn-danger" onclick="saveNegativeExp()">提交规则</button>
+                    <button class="btn btn-sm btn-outline" onclick="dismissExp()">取消</button>
+                </div>
             </div>
         </div>
 
@@ -157,6 +181,8 @@
                 result.textContent = JSON.stringify(data, null, 2);
                 // 发送成功后立即开始轮询任务进度
                 if (data.status === 'success') {
+                    expDismissed = false;
+                    document.getElementById('exp-card').style.display = 'none';
                     startTaskPolling();
                 }
             } catch (e) {
@@ -192,6 +218,7 @@
                 </div>`;
             }
             el.innerHTML = html;
+            if (data.all_done) showExpCard(data);
         }
 
         async function refreshTaskStatus() {
@@ -221,6 +248,57 @@
                 clearInterval(taskPollingTimer);
                 taskPollingTimer = null;
             }
+        }
+
+        // 经验卡片
+        let expDismissed = false;
+        let currentTaskId = null;
+
+        function showExpCard(data) {
+            if (expDismissed || !data.active || !data.all_done) return;
+            currentTaskId = data.task_id;
+            document.getElementById('exp-task-info').textContent =
+                `任务：${data.task}（${data.completed}/${data.total} 完成）`;
+            document.getElementById('exp-card').style.display = 'block';
+            document.getElementById('exp-btns-main').style.display = 'flex';
+            document.getElementById('exp-note').style.display = 'none';
+            document.getElementById('exp-btns-neg').style.display = 'none';
+        }
+
+        function dismissExp() {
+            expDismissed = true;
+            document.getElementById('exp-card').style.display = 'none';
+            document.getElementById('exp-note').value = '';
+        }
+
+        function showNegInput() {
+            document.getElementById('exp-btns-main').style.display = 'none';
+            document.getElementById('exp-note').style.display = 'block';
+            document.getElementById('exp-btns-neg').style.display = 'flex';
+        }
+
+        async function savePositiveExp() {
+            try {
+                await fetch('/api/save_experience', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_id: currentTaskId, type: 'positive'})
+                });
+            } catch (e) {}
+            dismissExp();
+        }
+
+        async function saveNegativeExp() {
+            const note = document.getElementById('exp-note').value.trim();
+            if (!note) return;
+            try {
+                await fetch('/api/save_experience', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_id: currentTaskId, type: 'negative', note: note})
+                });
+            } catch (e) {}
+            dismissExp();
         }
 
         // 配置校验 - 自动检测

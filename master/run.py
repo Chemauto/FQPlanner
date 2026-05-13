@@ -72,6 +72,30 @@ def task_status():
     return jsonify(master_agent.get_task_status()), 200
 
 
+@app.route("/api/save_experience", methods=["POST"])
+def save_experience():
+    """保存任务执行经验。"""
+    try:
+        data = request.get_json()
+        task_id = data.get("task_id", "")
+        exp_type = data.get("type")  # "positive" or "negative"
+        note = data.get("note", "")
+
+        if exp_type not in ("positive", "negative"):
+            return jsonify({"success": False, "message": "type 必须是 positive 或 negative"}), 400
+
+        result = master_agent.save_experience(task_id, exp_type, note)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/experiences", methods=["GET"])
+def experiences():
+    """查看经验库全文。"""
+    return jsonify({"success": True, "data": master_agent.get_experiences()}), 200
+
+
 @app.route("/publish_task", methods=["POST", "GET"])
 def publish_task():
     """
