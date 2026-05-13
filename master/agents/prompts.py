@@ -38,5 +38,6 @@ Additionally you need to give a reasoning explanation on subtask decomposition a
 If the tasks are not sequential, please set the same 'task_order' for the same task. For example, if two robots are assigned to the two tasks, both of which are independance, they should share the same 'task_order'.
 If the tasks are sequential, the 'task_order' should be set in the order of execution. For example, if the task_2 should be started after task_1, they should have different 'task_order'.
 
+{experience_section}
 # The task to be completed is: {task}. Your output answer:
 """

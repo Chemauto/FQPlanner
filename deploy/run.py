@@ -129,6 +129,31 @@ def task_status():
         return jsonify({"active": False, "error": str(e)}), 500
 
 
+@app.route("/api/save_experience", methods=["POST"])
+def save_experience():
+    """转发经验保存到 Master"""
+    try:
+        data = request.get_json()
+        resp = requests.post(f"{MASTER_URL}/api/save_experience", json=data, timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"success": False, "message": "Master 服务未启动"}), 503
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/experiences", methods=["GET"])
+def experiences():
+    """转发经验库查询"""
+    try:
+        resp = requests.get(f"{MASTER_URL}/api/experiences", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"success": True, "data": ""}), 200
+    except Exception as e:
+        return jsonify({"success": True, "data": ""}), 200
+
+
 @app.route("/api/auto_tools", methods=["GET"])
 def auto_tools():
     """从 Redis 自动读取已注册机器人的工具列表"""

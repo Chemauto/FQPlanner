@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import threading
+from datetime import datetime
 import uuid
 from typing import Dict, List, Optional
 import re
@@ -90,6 +91,8 @@ class GlobalAgent:
         self.current_task_queue: Optional[TaskQueue] = None
         self.current_task_id: Optional[str] = None
         self.current_task_desc: Optional[str] = None
+        self._memory_dir = os.path.join(os.path.dirname(__file__), '..', 'memory')
+        self._experience_file = os.path.join(self._memory_dir, 'experiences.md')
 
         self.logger.info(f"Configuration loaded from {config_path} ...")
         self.logger.info(f"Master Configuration:\n{self.config}")
@@ -278,7 +281,8 @@ class GlobalAgent:
         """Publish a global task to all Agents"""
         self.logger.info(f"Publishing global task: {task}")
 
-        response = self.planner.forward(task, self.conversation_history)
+        experiences = self._load_experiences()
+        response = self.planner.forward(task, self.conversation_history, experiences)
         self.logger.info(f"Raw response from planner: {response}")
         reasoning_and_subtasks = self._extract_json(response)
 
@@ -289,7 +293,7 @@ class GlobalAgent:
             self.logger.warning(
                 f"Attempt {attempt + 1} to extract JSON failed. Retrying..."
             )
-            response = self.planner.forward(task)
+            response = self.planner.forward(task, history=None, experiences=experiences)
             reasoning_and_subtasks = self._extract_json(response)
             attempt += 1
 
@@ -497,3 +501,121 @@ class GlobalAgent:
             if parts:
                 summary_parts.append(f"{loc} 中" + "，".join(parts))
         return "；".join(summary_parts) if summary_parts else "无变化"
+
+    def _load_experiences(self) -> str:
+        """读取经验库 md 文件，返回格式化的经验段落供注入 prompt。"""
+        if not os.path.exists(self._experience_file):
+            return ""
+
+        with open(self._experience_file, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+
+        if not content:
+            return ""
+
+        # 解析 md 文件，提取每个经验条目
+        sections = {"正向经验": [], "避免规则": []}
+        current_section = None
+        current_entry = []
+
+        for line in content.split("\n"):
+            if line.strip() == "## 正向经验":
+                if current_section and current_entry:
+                    sections[current_section].append("\n".join(current_entry))
+                current_section = "正向经验"
+                current_entry = []
+            elif line.strip() == "## 避免规则":
+                if current_section and current_entry:
+                    sections[current_section].append("\n".join(current_entry))
+                current_section = "避免规则"
+                current_entry = []
+            elif line.startswith("### ") and current_section:
+                if current_entry:
+                    sections[current_section].append("\n".join(current_entry))
+                current_entry = [line]
+            elif current_section:
+                current_entry.append(line)
+
+        if current_section and current_entry:
+            sections[current_section].append("\n".join(current_entry))
+
+        parts = []
+        for entry in sections["正向经验"]:
+            # 提取 ### 标题行和教训行
+            lines = [l for l in entry.strip().split("\n") if l.strip()]
+            summary = ""
+            for l in lines:
+                if l.startswith("- 教训：") or l.startswith("- 结果："):
+                    summary = l.lstrip("- ")
+                    break
+            if summary:
+                parts.append(f"✓ {summary}")
+
+        for entry in sections["避免规则"]:
+            lines = [l for l in entry.strip().split("\n") if l.strip()]
+            for l in lines:
+                if l.startswith("- 规则："):
+                    parts.append(f"✗ {l.lstrip('- ')}")
+                    break
+
+        if not parts:
+            return ""
+
+        return "\n\n## 过往经验（请参考以下经验进行规划）：\n" + "\n".join(parts)
+
+    def save_experience(self, task_id: str, exp_type: str, note: str = ""):
+        """保存经验到 md 文件。"""
+        os.makedirs(self._memory_dir, exist_ok=True)
+
+        # 收集当前任务信息
+        task_desc = self.current_task_desc or "未知任务"
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        if exp_type == "positive":
+            section = "## 正向经验"
+            # 提取子任务执行摘要
+            task_summary = ""
+            if self.current_task_queue:
+                completed = [t["subtask"] for t in self.current_task_queue.tasks if t["done"]]
+                task_summary = "\n".join(f"  - {s}" for s in completed)
+
+            entry = f"\n### {date_str} {task_desc}\n"
+            entry += f"- 任务：{task_desc}\n"
+            if task_summary:
+                entry += f"- 子任务：{task_summary}\n"
+            entry += f"- 教训：{note or '此方案有效，可复用'}\n"
+
+        else:  # negative
+            section = "## 避免规则"
+            entry = f"\n### {date_str} {task_desc}\n"
+            entry += f"- 任务：{task_desc}\n"
+            entry += f"- 规则：{note or '此方案有问题，需避免'}\n"
+
+        # 读取或创建文件
+        if os.path.exists(self._experience_file):
+            with open(self._experience_file, "r", encoding="utf-8") as f:
+                content = f.read()
+        else:
+            content = "# 经验库\n\n## 正向经验\n\n## 避免规则\n"
+
+        # 在对应 section 后插入
+        section_pos = content.find(section)
+        if section_pos == -1:
+            content += f"\n{section}\n{entry}"
+        else:
+            # 找到该 section 的末尾（下一个 ## 或文件末尾）
+            insert_pos = section_pos + len(section)
+            content = content[:insert_pos] + "\n" + entry + content[insert_pos:]
+
+        with open(self._experience_file, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        self.logger.info(f"[Experience] Saved {exp_type}: {note or task_desc}")
+        return {"success": True, "message": f"经验已保存（{exp_type}）"}
+
+    def get_experiences(self) -> str:
+        """返回经验库全文（供前端展示）。"""
+        if not os.path.exists(self._experience_file):
+            return ""
+        with open(self._experience_file, "r", encoding="utf-8") as f:
+            return f.read()
