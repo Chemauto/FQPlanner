@@ -41,3 +41,19 @@ If the tasks are sequential, the 'task_order' should be set in the order of exec
 {experience_section}
 # The task to be completed is: {task}. Your output answer:
 """
+
+EXPERIENCE_GENERATION = """你是一个经验总结助手。请根据以下任务执行信息，生成一句简短的经验总结。
+
+任务：{task}
+子任务执行情况：
+{subtask_summary}
+用户反馈：{feedback_type}
+{user_note_section}
+
+要求：
+- 正向反馈时，总结一条可复用的教训（如"导航后再抓取，每个物体单独一个子任务"）
+- 负向反馈时，总结一条需要避免的规则（如"不要把多个物体合成一个子任务"）
+- 控制在30字以内，直击要点，不要废话
+
+输出格式（纯文本，不要JSON，不要markdown）：
+一句话经验总结"""
