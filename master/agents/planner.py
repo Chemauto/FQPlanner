@@ -75,9 +75,17 @@ class GlobalTaskPlanner:
             robot_name_list=all_robots_name, robot_tools_info=all_robots_info, task=task, scene_info=all_environments_info, experience_section=experiences
         )
 
-        messages = []
+        messages = self._build_messages(content, history)
+        return self._call_llm(messages)
 
-        # Add conversation history for context (ensure content is always a string)
+    def generate(self, prompt: str) -> str:
+        """直接调用 LLM，不套任务规划模板。用于经验总结等场景。"""
+        messages = [{"role": "user", "content": prompt}]
+        return self._call_llm(messages)
+
+    def _build_messages(self, content: str, history: list = None) -> list:
+        """构建消息列表。"""
+        messages = []
         if history:
             for msg in history:
                 c = msg.get("content")
@@ -88,18 +96,14 @@ class GlobalTaskPlanner:
                 elif not isinstance(c, str):
                     c = str(c)
                 messages.append({"role": msg["role"], "content": c})
+        messages.append({"role": "user", "content": content})
+        return messages
 
-        messages.append(
-            {
-                "role": "user",
-                "content": content,
-            },
-        )
-
+    def _call_llm(self, messages: list) -> str:
+        """调用 LLM 并返回文本结果。"""
         self.display_profiling_info("messages", messages)
 
         from datetime import datetime
-
         start_inference = datetime.now()
         response = self.global_model.chat.completions.create(
             model=self.model_name,
@@ -119,7 +123,6 @@ class GlobalTaskPlanner:
         self.display_profiling_info("response.usage", response.usage)
 
         raw = response.choices[0].message.content
-        # Qwen API may return content as list or None, ensure it's always a string
         if raw is None:
             raw = ""
         elif isinstance(raw, list):

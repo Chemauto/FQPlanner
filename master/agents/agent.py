@@ -564,54 +564,76 @@ class GlobalAgent:
         return "\n\n## 过往经验（请参考以下经验进行规划）：\n" + "\n".join(parts)
 
     def save_experience(self, task_id: str, exp_type: str, note: str = ""):
-        """保存经验到 md 文件。"""
+        """保存经验到 md 文件，通过 LLM 生成精炼的经验总结。"""
         os.makedirs(self._memory_dir, exist_ok=True)
 
-        # 收集当前任务信息
         task_desc = self.current_task_desc or "未知任务"
         date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+        # 收集子任务执行摘要
+        subtask_summary = "无子任务记录"
+        if self.current_task_queue:
+            lines = []
+            for t in self.current_task_queue.tasks:
+                status = "完成" if t["done"] else "未完成"
+                lines.append(f"  - {t['subtask']}（{status}）")
+            subtask_summary = "\n".join(lines)
+
+        feedback_type = "正向（方案有效）" if exp_type == "positive" else "负向（方案有问题）"
+        user_note_section = f"用户备注：{note}" if note else ""
+
+        # 调用 LLM 生成经验总结
+        from agents.prompts import EXPERIENCE_GENERATION
+        prompt = EXPERIENCE_GENERATION.format(
+            task=task_desc,
+            subtask_summary=subtask_summary,
+            feedback_type=feedback_type,
+            user_note_section=user_note_section,
+        )
+
+        try:
+            response = self.planner.generate(prompt)
+            # 清理 LLM 输出
+            experience_text = response.strip()
+            if experience_text.startswith("```"):
+                experience_text = re.sub(r"^```\w*\n?", "", experience_text)
+                experience_text = experience_text.rstrip("`").strip()
+            if not experience_text:
+                experience_text = note or ("此方案有效，可复用" if exp_type == "positive" else "此方案有问题，需避免")
+        except Exception as e:
+            self.logger.warning(f"[Experience] LLM generation failed, using fallback: {e}")
+            experience_text = note or ("此方案有效，可复用" if exp_type == "positive" else "此方案有问题，需避免")
+
+        # 写入 md 文件
         if exp_type == "positive":
             section = "## 正向经验"
-            # 提取子任务执行摘要
-            task_summary = ""
-            if self.current_task_queue:
-                completed = [t["subtask"] for t in self.current_task_queue.tasks if t["done"]]
-                task_summary = "\n".join(f"  - {s}" for s in completed)
-
             entry = f"\n### {date_str} {task_desc}\n"
             entry += f"- 任务：{task_desc}\n"
-            if task_summary:
-                entry += f"- 子任务：{task_summary}\n"
-            entry += f"- 教训：{note or '此方案有效，可复用'}\n"
-
-        else:  # negative
+            entry += f"- 教训：{experience_text}\n"
+        else:
             section = "## 避免规则"
             entry = f"\n### {date_str} {task_desc}\n"
             entry += f"- 任务：{task_desc}\n"
-            entry += f"- 规则：{note or '此方案有问题，需避免'}\n"
+            entry += f"- 规则：{experience_text}\n"
 
-        # 读取或创建文件
         if os.path.exists(self._experience_file):
             with open(self._experience_file, "r", encoding="utf-8") as f:
                 content = f.read()
         else:
             content = "# 经验库\n\n## 正向经验\n\n## 避免规则\n"
 
-        # 在对应 section 后插入
         section_pos = content.find(section)
         if section_pos == -1:
             content += f"\n{section}\n{entry}"
         else:
-            # 找到该 section 的末尾（下一个 ## 或文件末尾）
             insert_pos = section_pos + len(section)
             content = content[:insert_pos] + "\n" + entry + content[insert_pos:]
 
         with open(self._experience_file, "w", encoding="utf-8") as f:
             f.write(content)
 
-        self.logger.info(f"[Experience] Saved {exp_type}: {note or task_desc}")
-        return {"success": True, "message": f"经验已保存（{exp_type}）"}
+        self.logger.info(f"[Experience] Saved {exp_type}: {experience_text}")
+        return {"success": True, "message": f"经验已保存（{exp_type}）", "experience": experience_text}
 
     def get_experiences(self) -> str:
         """返回经验库全文（供前端展示）。"""
