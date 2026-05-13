@@ -3,8 +3,8 @@
 
 工具执行失败后，随机决定下一步动作：
   > 0.4  → retry    （重试当前工具）
-  0.1~0.4 → skip     （放弃当前子任务，继续下一个）
-  < 0.1  → terminate （终止整个任务）
+  0.01~0.4 → skip     （放弃当前子任务，继续下一个）
+  < 0.01  → terminate （终止整个任务）
 """
 
 import random
@@ -16,7 +16,7 @@ def judge_on_failure(tool_name: str, observation: str) -> str:
     r = random.random()
     if r > 0.4:
         decision = "retry"
-    elif r >= 0.1:
+    elif r >= 0.01:
         decision = "skip"
     else:
         decision = "terminate"

@@ -20,7 +20,7 @@ from typing import Optional
 POSSIBLE_NEW_OBJECTS = ["Strawberry", "Grape", "Watermelon", "Pineapple", "Mango"]
 TARGET_LOCATION = "kitchenTable"
 CHECK_INTERVAL = 2
-TRIGGER_THRESHOLD = 0.96
+TRIGGER_THRESHOLD = 0.97
 
 
 class SceneChanger:

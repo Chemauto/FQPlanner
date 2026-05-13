@@ -16,7 +16,7 @@ def register_tools(mcp):
         机器人抓取指定物体
 
         Args:
-            object_name: 要抓取的物体名称（如 "苹果"、"方块"），可选。
+            object_name: 要抓取的物体名称（如 "苹果"、"方块"），可选。一次只能抓取一个物体。
 
         Returns:
             抓取结果，成功或失败信息。
