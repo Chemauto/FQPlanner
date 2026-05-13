@@ -19,8 +19,11 @@
 # limitations under the License.
 import json
 import logging
+import sys
+import threading
+import time
 from enum import IntEnum
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from rich import box
 from rich.console import Console, Group
@@ -32,7 +35,112 @@ from rich.text import Text
 from rich.tree import Tree
 from slaver.tools.utils import escape_code_brackets
 
-__all__ = ["AgentLogger", "LogLevel", "Monitor"]
+__all__ = ["AgentLogger", "LogLevel", "Monitor", "SceneDetector"]
+
+
+class SceneDetector:
+    """
+    场景变化检测器 - 后台线程定期读取 Redis 场景状态，对比快照发现变化。
+
+    检测到的变化会累积在 self.changes 中，供 Slaver 的 ReAct 循环读取。
+    部署到真实机器人时，将 _read_real_scene() 替换为真实传感器接口即可。
+    """
+
+    def __init__(self, collaborator, interval: int = 2):
+        self.collaborator = collaborator
+        self.interval = interval
+        self._lock = threading.Lock()
+        self._shutdown_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._baseline: Dict[str, list] = {}  # location → contains 快照
+        self.changes: List[Dict] = []
+
+    def start(self):
+        """启动后台检测线程。"""
+        self._capture_baseline()
+        self._thread = threading.Thread(
+            target=self._detect_loop,
+            daemon=True,
+            name="scene_detector",
+        )
+        self._thread.start()
+        print(
+            f"[SceneDetector] Started, checking every {self.interval}s",
+            file=sys.stderr,
+        )
+
+    def stop(self):
+        self._shutdown_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=3)
+        print("[SceneDetector] Stopped", file=sys.stderr)
+
+    def _capture_baseline(self):
+        """记录当前场景快照作为基准。"""
+        all_env = self.collaborator.read_environment(None)
+        if not all_env:
+            return
+        for key, value in all_env.items():
+            if key == "robot":
+                continue
+            if isinstance(value, str):
+                value = json.loads(value)
+            contains = value.get("contains")
+            if isinstance(contains, list):
+                self._baseline[key] = contains[:]
+
+    def _detect_loop(self):
+        while not self._shutdown_event.is_set():
+            try:
+                self._detect_changes()
+            except Exception as e:
+                print(f"[SceneDetector] Error: {e}", file=sys.stderr)
+            self._shutdown_event.wait(self.interval)
+
+    def _detect_changes(self):
+        """对比当前场景与基准快照，记录差异，这个部署的时候可以通过传感器或者VLM模块进行检测"""
+        all_env = self.collaborator.read_environment(None)
+        if not all_env:
+            return
+
+        for key, value in all_env.items():
+            if key == "robot":
+                continue
+            if isinstance(value, str):
+                value = json.loads(value)
+
+            contains = value.get("contains")
+            if not isinstance(contains, list):
+                continue
+
+            baseline = self._baseline.get(key, [])
+            added = [obj for obj in contains if obj not in baseline]
+            removed = [obj for obj in baseline if obj not in contains]
+
+            if added or removed:
+                change = {
+                    "location": key,
+                    "added": added,
+                    "removed": removed,
+                    "current_contains": contains[:],
+                    "timestamp": time.time(),
+                }
+                with self._lock:
+                    self.changes.append(change)
+                # 更新基准，避免重复报告
+                self._baseline[key] = contains[:]
+                print(
+                    f"[SceneDetector] 变化 @ {key}: "
+                    f"+{added} -{removed} | 当前: {contains}",
+                    file=sys.stderr,
+                )
+
+    def get_recent_changes(self) -> List[Dict]:
+        """读取并清空最近的变化记录（供 ReAct 上下文使用）。"""
+        with self._lock:
+            recent = self.changes[:]
+            self.changes.clear()
+        return recent
 
 
 class Monitor:

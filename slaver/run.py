@@ -12,6 +12,9 @@ from contextlib import AsyncExitStack
 from datetime import datetime
 from typing import Dict, List, Optional
 
+# Bypass system proxy for API calls
+os.environ['NO_PROXY'] = '*'
+
 # 配置日志级别，抑制MCP服务器的详细日志输出
 logging.getLogger("mcp").setLevel(logging.WARNING)
 
@@ -27,6 +30,8 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from slaver.tools.utils import Config
 from slaver.tools.tool_matcher import ToolMatcher
+from slaver.tools.SceneChange import SceneChanger
+from slaver.tools.monitoring import SceneDetector
 
 config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
 config = Config.load_config(config_path)
@@ -54,6 +59,12 @@ class RobotManager:
             max_tools=config["tool"]["matching"]["max_tools"],
             min_similarity=config["tool"]["matching"]["min_similarity"]
         )
+
+        # Initialize scene change simulator (disable for real deployment)
+        self.scene_changer = SceneChanger(collaborator)
+
+        # Initialize scene detector
+        self.scene_detector = SceneDetector(collaborator)
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -172,6 +183,8 @@ class RobotManager:
         if self._shutdown_event.is_set():
             return
 
+        scene_changes = self.scene_detector.get_recent_changes()
+
         channel = f"{robot_name}_to_FQPlanner"
         payload = {
             "robot_name": robot_name,
@@ -180,6 +193,7 @@ class RobotManager:
             "tools": tool_call,
             "task_id": task_id,
             "terminated": terminated,
+            "scene_changes": scene_changes,
         }
         self.collaborator.send(channel, json.dumps(payload))
 
@@ -302,6 +316,10 @@ class RobotManager:
             )
             listener_thread.start()
             self.threads.append(listener_thread)
+
+            # Start scene changer (simulation) and scene detector
+            self.scene_changer.start()
+            self.scene_detector.start()
 
     async def cleanup(self):
         """Clean up resources"""

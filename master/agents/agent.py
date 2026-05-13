@@ -17,6 +17,9 @@ from agent.collaboration import Collaborator
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 load_dotenv(os.path.join(_project_root, '.env'))
 
+# Bypass system proxy for API calls
+os.environ['NO_PROXY'] = '*'
+
 
 class GlobalAgent:
     def __init__(self, config_path="config.yaml"):
@@ -29,6 +32,7 @@ class GlobalAgent:
         self.conversation_history = []  # 最近 5 轮对话
         self.max_history = 5
         self.terminated_tasks = set()  # 被 judge 终止的 task_id
+        self.pending_scene_changes = []  # Slaver 上报的场景变化
 
         self.logger.info(f"Configuration loaded from {config_path} ...")
         self.logger.info(f"Master Configuration:\n{self.config}")
@@ -117,6 +121,12 @@ class GlobalAgent:
         subtask_result = data.get("subtask_result")
         terminated = data.get("terminated", False)
         task_id = data.get("task_id")
+        scene_changes = data.get("scene_changes", [])
+
+        # 累积场景变化
+        if scene_changes:
+            self.pending_scene_changes.extend(scene_changes)
+            self.logger.info(f"[Scene Changes] Accumulated: {scene_changes}")
 
         # TODO: Task result should be refered to the next step determination.
         if robot_name and subtask_handle and subtask_result:
@@ -323,3 +333,40 @@ class GlobalAgent:
                 break
 
         self.logger.info(f"Task_id ({task_id}) [{task}] has been sent to all agents.")
+
+        # 任务全部完成后，检查是否有累积的场景变化需要补发任务
+        if self.pending_scene_changes:
+            self.logger.info(
+                f"[Replan] Detected {len(self.pending_scene_changes)} scene changes after task completion, replanning..."
+            )
+            changes_summary = self._summarize_scene_changes()
+            replan_task = f"{task}\n\n注意：执行过程中场景发生了变化：{changes_summary}\n请根据最新场景状态，判断是否需要补充新的子任务。如果原始任务已经完成且无需补充，返回空列表。"
+
+            response = self.planner.forward(replan_task, self.conversation_history)
+            self.logger.info(f"[Replan] Raw response: {response}")
+            reasoning_and_subtasks = self._extract_json(response)
+
+            if reasoning_and_subtasks and reasoning_and_subtasks.get("subtask_list"):
+                self.pending_scene_changes.clear()
+                new_task_id = task_id + "_replan"
+                grouped_new_tasks = self._group_tasks_by_order(reasoning_and_subtasks["subtask_list"])
+                await self._dispath_subtasks_async(replan_task, new_task_id, grouped_new_tasks, refresh)
+            else:
+                self.pending_scene_changes.clear()
+                self.logger.info("[Replan] No additional subtasks needed.")
+
+    def _summarize_scene_changes(self) -> str:
+        """将累积的场景变化格式化为自然语言摘要。"""
+        summary_parts = []
+        for change in self.pending_scene_changes:
+            loc = change.get("location", "未知位置")
+            added = change.get("added", [])
+            removed = change.get("removed", [])
+            parts = []
+            if added:
+                parts.append(f"新增了 {', '.join(added)}")
+            if removed:
+                parts.append(f"移除了 {', '.join(removed)}")
+            if parts:
+                summary_parts.append(f"{loc} 中" + "，".join(parts))
+        return "；".join(summary_parts) if summary_parts else "无变化"
