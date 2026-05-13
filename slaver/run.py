@@ -183,8 +183,6 @@ class RobotManager:
         if self._shutdown_event.is_set():
             return
 
-        scene_changes = self.scene_detector.get_recent_changes()
-
         channel = f"{robot_name}_to_FQPlanner"
         payload = {
             "robot_name": robot_name,
@@ -193,7 +191,6 @@ class RobotManager:
             "tools": tool_call,
             "task_id": task_id,
             "terminated": terminated,
-            "scene_changes": scene_changes,
         }
         self.collaborator.send(channel, json.dumps(payload))
 

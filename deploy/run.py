@@ -117,6 +117,18 @@ def validate_config():
     return jsonify({"success": True, "message": "配置校验通过"})
 
 
+@app.route("/api/task_status", methods=["GET"])
+def task_status():
+    """转发 Master 的任务状态查询"""
+    try:
+        resp = requests.get(f"{MASTER_URL}/api/task_status", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"active": False, "error": "Master 服务未启动"}), 503
+    except Exception as e:
+        return jsonify({"active": False, "error": str(e)}), 500
+
+
 @app.route("/api/auto_tools", methods=["GET"])
 def auto_tools():
     """从 Redis 自动读取已注册机器人的工具列表"""

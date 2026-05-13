@@ -127,6 +127,13 @@ class SceneDetector:
                 }
                 with self._lock:
                     self.changes.append(change)
+                # 立即通过 Redis 推送给 Master
+                try:
+                    self.collaborator.send(
+                        "scene_changes", json.dumps(change)
+                    )
+                except Exception as e:
+                    print(f"[SceneDetector] Failed to push change: {e}", file=sys.stderr)
                 # 更新基准，避免重复报告
                 self._baseline[key] = contains[:]
                 print(

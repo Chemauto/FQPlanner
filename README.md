@@ -33,8 +33,12 @@ model_select: "qwen-plus"
 model_dict:
   cloud_model: "qwen-plus"
   cloud_type: "default"
-  cloud_api_key: "sk-xxxxxxxxxxxxxxx"  # 替换为你的 API Key
+  cloud_api_key: "CLOUD_API_KEY" 
   cloud_server: "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+
+
+ 新建一个.env 里面 写入 CLOUD_API_KEY=sk-xxxxxxxxxxxxxxx
+  # 替换为你的 API Key
 ```
 
 ### 4. 启动 Redis

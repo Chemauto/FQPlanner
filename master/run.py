@@ -66,6 +66,12 @@ def robot_status():
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 
+@app.route("/api/task_status", methods=["GET"])
+def task_status():
+    """返回当前任务的执行进度。"""
+    return jsonify(master_agent.get_task_status()), 200
+
+
 @app.route("/publish_task", methods=["POST", "GET"])
 def publish_task():
     """
