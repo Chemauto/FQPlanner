@@ -9,7 +9,6 @@ slaver/robot/
 └── module/
     ├── base.py           # 底盘控制（导航、移动）
     ├── grasp.py          # 抓取物体
-    ├── swap.py           # 打扫区域
     └── example.py        # 示例模板
 ```
 
@@ -43,17 +42,8 @@ slaver/robot/
 
 **场景状态:** 成功时从 contains 移除物体，更新 robot.holding
 
-### 3. swap.py - 打扫模块
 
-**功能:**
-- `clean_area(area_name)` - 模拟打扫区域（80% 成功率）
-
-**指令示例:**
-```
-"打扫卧室" / "清理客厅"
-```
-
-### 4. example.py - 示例模板
+### 3. example.py - 示例模板
 
 用于参考开发新模块。
 
@@ -127,4 +117,3 @@ python slaver/run.py
 |------|------|---------|---------|
 | base.py | 底盘导航 | "前往卧室" | 更新 robot position/coordinates |
 | grasp.py | 抓取物体 | "抓取苹果" | 移除 contains，更新 holding |
-| swap.py | 打扫区域 | "打扫卧室" | 无场景影响 |

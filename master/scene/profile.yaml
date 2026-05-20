@@ -1,50 +1,60 @@
 scene:
-  - name: kitchenTable
+  # --- 桌子 ---
+  - name: breakfast_table
     type: table
     position: [1.0, 2.0, 0.0]
-    description: "厨房桌子"
+    description: "早餐桌"
     contains:
-      - apple
-      - pear
-      - banana
-      - knife
+      - laptop
+      - pot_plant
 
-  - name: customTable
+  - name: coffee_table
     type: table
     position: [2.0, 1.0, 0.0]
-    description: "自定义桌子"
-    contains:
-      - basket
-      - plate
-      - cup
+    description: "咖啡桌"
 
-  - name: servingTable
+  - name: countertop
     type: table
     position: [3.0, 2.0, 0.0]
-    description: "服务桌"
-    contains:
-      - bowl
-      - fork
-      - spoon
+    description: "厨房台面"
 
-  - name: basket
+  # --- 容器（可打开/关闭） ---
+  - name: fridge
     type: container
-    position: [1.5, 1.5, 0.5]
-    description: "篮子"
-    contains:
-      - egg
-      - object  # 通用物体，用于抓取任务
+    position: [4.0, 1.0, 0.0]
+    description: "冰箱"
 
-  - name: trashCan
+  - name: public_trash_can
     type: container
     position: [4.0, 3.0, 0.0]
     description: "垃圾桶"
 
-  - name: entrance
-    type: location
-    position: [0.0, 0.0, 0.0]
-    description: "入口"
+  - name: bottom_cabinet
+    type: container
+    position: [3.0, 1.0, 0.0]
+    description: "底柜"
 
+  - name: top_cabinet
+    type: container
+    position: [3.0, 2.5, 0.0]
+    description: "顶柜"
+
+  - name: microwave
+    type: container
+    position: [3.5, 1.5, 0.0]
+    description: "微波炉"
+
+  - name: oven
+    type: container
+    position: [3.5, 2.0, 0.0]
+    description: "烤箱"
+
+  - name: dishwasher
+    type: container
+    position: [3.5, 1.0, 0.0]
+    description: "洗碗机"
+
+  # --- 位置 ---
   - name: livingRoom
     type: location
     position: [0.0, 0.4, 0.0]
@@ -63,4 +73,9 @@ scene:
   - name: bathroom
     type: location
     position: [0.4, 0.8, 0.0]
-    description: "厕所"
+    description: "浴室"
+
+  - name: entrance
+    type: location
+    position: [0.0, 0.0, 0.0]
+    description: "入口"
