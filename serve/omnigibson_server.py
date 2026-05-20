@@ -100,6 +100,41 @@ ZH_EN_MAP = {
 }
 
 
+def load_objects_from_profile():
+    """从 profile.yaml 加载可操作的小物体（不加载场景自带的家具）"""
+    import yaml
+    profile_path = os.path.join(os.path.dirname(__file__), "profile.yaml")
+    if not os.path.exists(profile_path):
+        print("[OmniGibson] 警告: profile.yaml 不存在，请先运行 python get_scene_data.py")
+        return []
+
+    with open(profile_path, "r", encoding="utf-8") as f:
+        profile = yaml.safe_load(f)
+
+    objects = []
+    for item in profile.get("scene", []):
+        # 只加载可操作的小物体，不加载桌子、容器、位置（这些是场景自带的）
+        if item.get("type") != "object":
+            continue
+        pos = item.get("position")
+        if not pos or len(pos) < 3:
+            continue
+
+        category = item.get("category", item["name"])
+
+        obj = dict(
+            type="DatasetObject",
+            name=item["name"],
+            category=category,
+            position=pos,
+            orientation=[0, 0, 0, 1],
+        )
+        objects.append(obj)
+
+    print(f"[OmniGibson] 从 profile.yaml 加载 {len(objects)} 个可操作物体")
+    return objects
+
+
 def init_omnigibson(scene_model="Rs_int", task_name=None):
     """初始化 OmniGibson 环境"""
     global env, robot, held_object, current_scene, current_task
@@ -123,6 +158,7 @@ def init_omnigibson(scene_model="Rs_int", task_name=None):
         print(f"[OmniGibson] 加载任务: {task_name}")
     else:
         cfg["task"] = {"type": "DummyTask"}
+        print(f"[OmniGibson] 基础模式（场景自带物体）")
 
     print(f"[OmniGibson] 加载场景: {scene_model}")
 
@@ -141,7 +177,8 @@ def init_omnigibson(scene_model="Rs_int", task_name=None):
 
     print("[OmniGibson] 可用物体:")
     for obj in env.scene.object_registry.objects:
-        print(f"  - {obj.name} (category: {obj.category})")
+        pos, _ = obj.get_position_orientation()
+        print(f"  - {obj.name} ({obj.category}) @ [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}]")
 
     print(f"[OmniGibson] 初始化完成 (任务: {task_name or '无'})")
 
@@ -206,6 +243,8 @@ def _main_thread_loop():
             try:
                 result = action_fn()
                 _action_results[req_id] = result
+                # 同步持有的物体到 EEF 位置
+                _sync_held_object()
                 # 动作执行后 step 一次刷新渲染
                 og.sim.step()
                 # 录制帧
@@ -237,7 +276,7 @@ def _do_navigate(obj):
 
 
 def _do_grasp(obj):
-    """抓取物体（传送到 EEF + 标记持有，不创建物理关节）"""
+    """抓取物体（传送到 EEF，不使用 OmniGibson 的辅助抓取机制）"""
     global held_object
 
     if held_object is not None:
@@ -247,8 +286,7 @@ def _do_grasp(obj):
     eef_pos = robot.get_eef_position(arm)
     obj.set_position_orientation(position=eef_pos)
 
-    # 直接标记为持有（绕过 _establish_grasp 的 create_joint 调用，Flask 下会卡死）
-    robot._ag_obj_in_hand[arm] = obj
+    # 只用全局变量追踪，不设置 robot._ag_obj_in_hand（避免触发辅助抓取机制）
     held_object = obj.name
 
 
@@ -259,12 +297,19 @@ def _do_release():
     if held_object is None:
         raise RuntimeError("没有抓取任何物体")
 
-    obj_name = held_object
-
-    # 直接清除持有状态
-    for arm in robot.arm_names:
-        robot._ag_obj_in_hand[arm] = None
     held_object = None
+
+
+def _sync_held_object():
+    """将持有的物体同步到 EEF 位置（每个物理步进调用）"""
+    if held_object is None:
+        return
+    obj = find_object(held_object)
+    if obj is None:
+        return
+    arm = robot.default_arm
+    eef_pos = robot.get_eef_position(arm)
+    obj.set_position_orientation(position=eef_pos)
 
 
 def _do_place_on_top(target_obj):
@@ -274,10 +319,9 @@ def _do_place_on_top(target_obj):
     if held_object is None:
         raise RuntimeError("没有抓取任何物体，无法放置")
 
-    arm = robot.default_arm
-    obj = robot._ag_obj_in_hand[arm]
+    obj = find_object(held_object)
     if obj is None:
-        raise RuntimeError("内部状态不一致")
+        raise RuntimeError("找不到持有的物体")
 
     # 计算目标上方位置
     target_pos, _ = target_obj.get_position_orientation()
@@ -290,8 +334,6 @@ def _do_place_on_top(target_obj):
     place_pos[2] = top_z + 0.05  # 略高于顶部
 
     obj.set_position_orientation(position=place_pos)
-
-    robot._ag_obj_in_hand[arm] = None
     held_object = None
 
 
@@ -302,10 +344,9 @@ def _do_place_inside(target_obj):
     if held_object is None:
         raise RuntimeError("没有抓取任何物体，无法放置")
 
-    arm = robot.default_arm
-    obj = robot._ag_obj_in_hand[arm]
+    obj = find_object(held_object)
     if obj is None:
-        raise RuntimeError("内部状态不一致")
+        raise RuntimeError("找不到持有的物体")
 
     # 放到目标中心位置
     target_pos, _ = target_obj.get_position_orientation()
@@ -317,7 +358,6 @@ def _do_place_inside(target_obj):
         center = target_pos.clone()
     obj.set_position_orientation(position=center)
 
-    robot._ag_obj_in_hand[arm] = None
     held_object = None
 
 
@@ -497,6 +537,49 @@ def _capture_viewer():
         if img_buf is not None:
             return img_buf, "robot"
     return None, None
+
+
+def _capture_top_down():
+    """捕获俯视视角截图"""
+    try:
+        import torch
+
+        cam = og.sim.viewer_camera
+        # 保存原始位置
+        original_pos, original_ori = cam.get_position_orientation()
+
+        # 设置俯视位置（场景上方，朝下看）
+        # 场景中心大约在 [0, 0, 0]，上方 8 米
+        top_down_pos = torch.tensor([0.0, 0.0, 8.0])
+
+        # 朝下看：使用正确的四元数
+        # OmniGibson 四元数格式：(x, y, z, w)
+        # 绕 X 轴旋转 180 度：(1, 0, 0, 0)
+        top_down_ori = torch.tensor([1.0, 0.0, 0.0, 0.0])
+
+        # 设置相机位置
+        cam.set_position_orientation(top_down_pos, top_down_ori)
+
+        # 强制更新渲染
+        og.sim.render()
+
+        # 多步渲染确保图像更新
+        for _ in range(5):
+            og.sim.step()
+            og.sim.render()
+
+        img_buf = capture_image(cam)
+
+        # 恢复原始位置
+        cam.set_position_orientation(original_pos, original_ori)
+        og.sim.render()
+
+        return img_buf
+    except Exception as e:
+        print(f"[OmniGibson] 俯视截图失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 # ============ API 端点 ============
@@ -679,6 +762,34 @@ def camera_robot_base64():
         img_buf = capture_image(cam)
         if img_buf is None:
             return {"success": False, "result": "无法获取机器人视角"}
+        b64 = base64.b64encode(img_buf.read()).decode("utf-8")
+        return {"success": True, "image": b64, "format": "png"}
+    return jsonify(_execute_on_main(do))
+
+
+@app.route("/camera/top_down", methods=["GET"])
+def camera_top_down():
+    """俯视视角截图"""
+    def do():
+        og.sim.step()
+        img_buf = _capture_top_down()
+        if img_buf is None:
+            return {"success": False, "result": "无法获取俯视截图", "_binary": None}
+        return {"success": True, "_binary": img_buf}
+    result = _execute_on_main(do)
+    if not result.get("success"):
+        return jsonify(result)
+    return send_file(result["_binary"], mimetype="image/png")
+
+
+@app.route("/camera/top_down_base64", methods=["GET"])
+def camera_top_down_base64():
+    """俯视视角截图（base64）"""
+    def do():
+        og.sim.step()
+        img_buf = _capture_top_down()
+        if img_buf is None:
+            return {"success": False, "result": "无法获取俯视截图"}
         b64 = base64.b64encode(img_buf.read()).decode("utf-8")
         return {"success": True, "image": b64, "format": "png"}
     return jsonify(_execute_on_main(do))

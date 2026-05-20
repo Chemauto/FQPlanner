@@ -125,6 +125,20 @@ python deploy/run.py
 
 访问 `http://127.0.0.1:8888`。
 
+## 快速访问链接
+
+系统启动后，可以直接访问以下链接：
+
+| 链接 | 说明 |
+|------|------|
+| http://127.0.0.1:8888 | Web 控制台（主界面） |
+| http://127.0.0.1:5001/camera/viewer | 观察者视角截图（PNG） |
+| http://127.0.0.1:5001/camera/robot | 机器人视角截图（PNG） |
+| http://127.0.0.1:5001/camera/top_down | 俯视视角截图（PNG） |
+| http://127.0.0.1:5001/objects | 查看场景物体（JSON） |
+| http://127.0.0.1:5001/robot/state | 机器人状态（JSON） |
+| http://127.0.0.1:5001/status | 服务器状态检查 |
+
 ## 使用 Web 控制台
 
 ### 发送任务
@@ -147,6 +161,7 @@ Web 控制台提供"刷新画面"按钮，点击后会：
 也可以直接访问：
 - http://127.0.0.1:5001/camera/viewer （观察者视角 PNG）
 - http://127.0.0.1:5001/camera/robot （机器人视角 PNG）
+- http://127.0.0.1:5001/camera/top_down （俯视视角 PNG）
 
 ### 录制视频
 
@@ -368,20 +383,39 @@ FQPlanner/
 
 以下是在 Web 控制台 (`http://127.0.0.1:8888`) 中可以输入的任务示例。
 
+### 当前场景物体
+
+| 物体 | 位置 | 说明 |
+|------|------|------|
+| breakfast_table | [1.47, 0.42, 0.60] | 早餐桌 |
+| coffee_table | [-0.48, -1.22, 0.27] | 咖啡桌（含 laptop） |
+| dining_table | [-0.50, -2.00, 0.00] | 餐桌 |
+| countertop | [-0.81, 1.53, 1.06] | 料理台 |
+| fridge | [0.10, 3.15, 0.74] | 冰箱 |
+| microwave | [-1.78, 3.12, 1.46] | 微波炉 |
+| oven | [-1.66, 2.14, 0.60] | 烤箱 |
+| dishwasher | [-1.80, 3.13, 1.07] | 洗碗机 |
+| public_trash_can | [-1.76, 2.63, 0.21] | 垃圾桶 |
+| bottom_cabinet | 多个位置 | 底柜 |
+| top_cabinet | 多个位置 | 吊柜 |
+| laptop | [-0.58, -1.51, 0.43] | 笔记本电脑（在咖啡桌上） |
+
+---
+
 ### 示例 1：抓取并移动物体
 
 **输入：**
 ```
-把笔记本电脑从早餐桌拿到咖啡桌上
+把笔记本电脑从咖啡桌拿到早餐桌上
 ```
 
 **LLM 自动分解为：**
-1. `navigate_to_target("breakfast_table")` — 导航到早餐桌
+1. `navigate_to_target("coffee_table")` — 导航到咖啡桌
 2. `grasp_object("laptop")` — 抓取笔记本电脑
-3. `navigate_to_target("coffee_table")` — 导航到咖啡桌
-4. `place_on_top("coffee_table")` — 把笔记本电脑放在咖啡桌上
+3. `navigate_to_target("breakfast_table")` — 导航到早餐桌
+4. `place_on_top("breakfast_table")` — 把笔记本电脑放在早餐桌上
 
-**预期结果：** 笔记本电脑从早餐桌被移到咖啡桌上
+**预期结果：** 笔记本电脑从咖啡桌被移到早餐桌
 
 ---
 
@@ -400,21 +434,20 @@ FQPlanner/
 
 ---
 
-### 示例 3：收拾桌面
+### 示例 3：把笔记本电脑放进微波炉
 
 **输入：**
 ```
-把早餐桌上的东西都收拾干净
+把笔记本电脑放进微波炉里
 ```
 
 **LLM 自动分解为：**
-1. `navigate_to_target("breakfast_table")` — 导航到早餐桌
+1. `navigate_to_target("coffee_table")` — 导航到咖啡桌
 2. `grasp_object("laptop")` — 抓取笔记本电脑
-3. `place_inside("bottom_cabinet")` — 放进底柜
-4. `grasp_object("pot_plant")` — 抓取盆栽
-5. `place_on_top("countertop")` — 放在厨房台面上
+3. `navigate_to_target("microwave")` — 导航到微波炉
+4. `place_inside("microwave")` — 放入微波炉
 
-**预期结果：** 早餐桌上的物品被分别放入柜子或移到台面
+**预期结果：** 笔记本电脑被放入微波炉
 
 ---
 
@@ -422,13 +455,13 @@ FQPlanner/
 
 **输入：**
 ```
-去厨房打开微波炉，然后把早餐桌上的笔记本电脑放进去，最后关上微波炉
+去厨房打开微波炉，然后把咖啡桌上的笔记本电脑放进去，最后关上微波炉
 ```
 
 **LLM 自动分解为：**
 1. `navigate_to_target("kitchen")` — 导航到厨房
 2. `open_object("microwave")` — 打开微波炉
-3. `navigate_to_target("breakfast_table")` — 导航到早餐桌
+3. `navigate_to_target("coffee_table")` — 导航到咖啡桌
 4. `grasp_object("laptop")` — 抓取笔记本电脑
 5. `navigate_to_target("microwave")` — 导航回微波炉
 6. `place_inside("microwave")` — 把笔记本电脑放入微波炉
@@ -456,24 +489,42 @@ FQPlanner/
 
 **输入：**
 ```
-把早餐桌上的盆栽扔到垃圾桶里
+把咖啡桌上的笔记本电脑扔到垃圾桶里
 ```
 
 **LLM 自动分解为：**
-1. `navigate_to_target("breakfast_table")` — 导航到早餐桌
-2. `grasp_object("pot_plant")` — 抓取盆栽
+1. `navigate_to_target("coffee_table")` — 导航到咖啡桌
+2. `grasp_object("laptop")` — 抓取笔记本电脑
 3. `navigate_to_target("public_trash_can")` — 导航到垃圾桶
 4. `place_inside("public_trash_can")` — 放入垃圾桶
 
-**预期结果：** 盆栽从早餐桌被丢进垃圾桶
+**预期结果：** 笔记本电脑从咖啡桌被丢进垃圾桶
+
+---
+
+### 示例 7：放入底柜
+
+**输入：**
+```
+把笔记本电脑放进底柜里
+```
+
+**LLM 自动分解为：**
+1. `navigate_to_target("coffee_table")` — 导航到咖啡桌
+2. `grasp_object("laptop")` — 抓取笔记本电脑
+3. `navigate_to_target("bottom_cabinet")` — 导航到底柜
+4. `place_inside("bottom_cabinet")` — 放入底柜
+
+**预期结果：** 笔记本电脑被放入底柜
 
 ---
 
 ### 提示
 
 - 使用中文或英文均可，LLM 会自动理解
-- 物体名称支持中英文自动映射
+- 物体名称支持中英文自动映射（如"笔记本电脑" → "laptop"）
 - 复杂任务会被自动分解为多个子任务，按顺序执行
 - 如果某个子任务失败，LLM 会尝试重试或调整方案
 - 每次只能抓取一个物体，需要先放下当前的才能抓新的
 - 点击"刷新画面"按钮可以查看仿真状态
+- 当前场景中 laptop 在 coffee_table 上，可直接抓取
