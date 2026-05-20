@@ -385,7 +385,19 @@ class ToolCallingAgent(MultiStepAgent):
 
         action_type = model_message.content.strip().lower()
 
-        self.scene.apply_action(action_type, json.loads(memory_input["arguments"]))
+        # 从工具返回结果中提取坐标信息
+        coordinates = None
+        result = memory_input.get("result", "")
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+                if isinstance(parsed, list) and len(parsed) >= 2:
+                    state_updates = parsed[1] if isinstance(parsed[1], dict) else {}
+                    coordinates = state_updates.get("coordinates")
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        self.scene.apply_action(action_type, json.loads(memory_input["arguments"]), coordinates)
 
     async def _get_enhanced_task_with_context(self) -> str:
         """

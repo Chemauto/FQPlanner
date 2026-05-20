@@ -273,18 +273,34 @@ class SceneMemory:
         self.collaborator.record_environment("robot", json.dumps(robot_info))
         self.collaborator.record_environment(redis_key, json.dumps(scene_obj))
 
-    def move_to(self, target: str):
+    def move_to(self, target: str, coordinates: list = None):
         robot_info = self.collaborator.read_environment("robot")
         if not robot_info:
             print("[Error] robot_info not found")
             return
 
+        # 更新位置名称
         robot_info["position"] = target
+
+        # 使用提供的坐标，或者从场景数据获取
+        if coordinates and len(coordinates) >= 3:
+            robot_info["coordinates"] = coordinates
+        else:
+            # 从场景数据获取目标坐标
+            redis_key = self._resolve_position(target)
+            scene_obj = self.collaborator.read_environment(redis_key)
+            if scene_obj:
+                if isinstance(scene_obj, str):
+                    scene_obj = json.loads(scene_obj)
+                coords = scene_obj.get("position", [])
+                if coords and len(coords) >= 3:
+                    robot_info["coordinates"] = coords
+
         success = self.collaborator.record_environment("robot", json.dumps(robot_info))
         if not success:
             print(f"[Error] Failed to update robot position to '{target}'")
 
-    def apply_action(self, action_type: str, args: dict):
+    def apply_action(self, action_type: str, args: dict, coordinates: list = None):
         """
         Apply scene update based on action_type: 'add_object', 'remove_object', or 'position'
         """
@@ -307,7 +323,7 @@ class SceneMemory:
 
             elif "position" in action_type:
                 if target:
-                    self.move_to(target)
+                    self.move_to(target, coordinates)
                 else:
                     print(f"[Scene Update] Missing target key for position, args: {args}")
 
