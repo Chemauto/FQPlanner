@@ -30,7 +30,6 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from slaver.tools.utils import Config
 from slaver.tools.tool_matcher import ToolMatcher
-from slaver.tools.SceneChange import SceneChanger
 from slaver.tools.monitoring import SceneDetector
 
 config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
@@ -59,9 +58,6 @@ class RobotManager:
             max_tools=config["tool"]["matching"]["max_tools"],
             min_similarity=config["tool"]["matching"]["min_similarity"]
         )
-
-        # Initialize scene change simulator (disable for real deployment)
-        self.scene_changer = SceneChanger(collaborator)
 
         # Initialize scene detector
         self.scene_detector = SceneDetector(collaborator)
@@ -314,8 +310,6 @@ class RobotManager:
             listener_thread.start()
             self.threads.append(listener_thread)
 
-            # Start scene changer (simulation) and scene detector
-            self.scene_changer.start()
             self.scene_detector.start()
 
     async def cleanup(self):

@@ -141,6 +141,31 @@
             </div>
             <div class="msg" id="scene-msg"></div>
         </div>
+
+        <!-- 视频录制 -->
+        <div class="card">
+            <h2>视频录制</h2>
+            <p style="font-size:13px;color:#64748b;margin-bottom:12px">任务执行前开启录制，每个动作自动录一帧（1fps），停止后保存为 mp4</p>
+            <div class="btn-row">
+                <button class="btn btn-primary btn-sm" id="btn-record-start" onclick="recordStart()">开始录制</button>
+                <button class="btn btn-danger btn-sm" id="btn-record-stop" onclick="recordStop()" disabled>停止并保存</button>
+            </div>
+            <div class="msg" id="record-msg" style="margin-top:10px"></div>
+            <div id="record-status" style="margin-top:10px;font-size:13px;color:#64748b"></div>
+        </div>
+
+        <!-- 仿真画面 -->
+        <div class="card">
+            <h2>仿真画面</h2>
+            <p style="font-size:13px;color:#64748b;margin-bottom:12px">任务完成后点击刷新，推进仿真一步并截图（约30-60秒）</p>
+            <div class="btn-row">
+                <button class="btn btn-primary btn-sm" id="btn-capture" onclick="stepAndCapture()">刷新画面</button>
+            </div>
+            <div class="msg" id="capture-msg" style="margin-top:10px"></div>
+            <div id="capture-area" style="margin-top:12px;text-align:center;display:none">
+                <img id="capture-img" style="max-width:100%;border-radius:8px;border:1px solid #334155" />
+            </div>
+        </div>
     </div>
 
     <script>
@@ -413,6 +438,110 @@
             } catch (e) {
                 showMsg('scene-msg', false, '请求失败: ' + e.message);
             }
+        }
+
+        // 视频录制
+        let recordPolling = null;
+
+        function updateRecordUI(recording, frames) {
+            const btnStart = document.getElementById('btn-record-start');
+            const btnStop = document.getElementById('btn-record-stop');
+            const status = document.getElementById('record-status');
+            btnStart.disabled = recording;
+            btnStop.disabled = !recording;
+            if (recording) {
+                status.textContent = `录制中... 已录 ${frames} 帧`;
+                status.style.color = '#ef4444';
+            } else if (frames > 0) {
+                status.textContent = `已停止，共 ${frames} 帧`;
+                status.style.color = '#22c55e';
+            } else {
+                status.textContent = '';
+            }
+        }
+
+        async function recordStart() {
+            try {
+                const resp = await fetch('/api/record/start', {method: 'POST'});
+                const data = await resp.json();
+                if (data.success) {
+                    showMsg('record-msg', true, '录制已开始');
+                    updateRecordUI(true, 1);
+                    startRecordPolling();
+                } else {
+                    showMsg('record-msg', false, data.result || '开始录制失败');
+                }
+            } catch (e) {
+                showMsg('record-msg', false, '请求失败: ' + e.message);
+            }
+        }
+
+        async function recordStop() {
+            stopRecordPolling();
+            try {
+                const resp = await fetch('/api/record/stop', {method: 'POST'});
+                const data = await resp.json();
+                if (data.success) {
+                    showMsg('record-msg', true, data.result);
+                    updateRecordUI(false, 0);
+                } else {
+                    showMsg('record-msg', false, data.result || '停止录制失败');
+                }
+            } catch (e) {
+                showMsg('record-msg', false, '请求失败: ' + e.message);
+            }
+        }
+
+        async function pollRecordStatus() {
+            try {
+                const resp = await fetch('/api/record/status');
+                const data = await resp.json();
+                if (data.recording) {
+                    updateRecordUI(true, data.frames);
+                }
+            } catch {}
+        }
+
+        function startRecordPolling() {
+            stopRecordPolling();
+            recordPolling = setInterval(pollRecordStatus, 2000);
+        }
+
+        function stopRecordPolling() {
+            if (recordPolling) {
+                clearInterval(recordPolling);
+                recordPolling = null;
+            }
+        }
+
+        // 仿真画面
+        async function stepAndCapture() {
+            const btn = document.getElementById('btn-capture');
+            const msg = document.getElementById('capture-msg');
+            const area = document.getElementById('capture-area');
+            const img = document.getElementById('capture-img');
+            btn.disabled = true;
+            btn.textContent = '渲染中，请稍候...';
+            msg.className = 'msg msg-ok';
+            msg.textContent = '正在推进仿真并截图，这可能需要30-60秒...';
+            msg.style.display = 'block';
+            try {
+                const resp = await fetch('/api/sim/step_and_capture', {method: 'POST'});
+                const data = await resp.json();
+                if (data.success && data.image) {
+                    img.src = 'data:image/png;base64,' + data.image;
+                    area.style.display = 'block';
+                    msg.textContent = '画面已刷新';
+                } else {
+                    msg.className = 'msg msg-err';
+                    msg.textContent = data.result || '截图失败';
+                }
+            } catch (e) {
+                msg.className = 'msg msg-err';
+                msg.textContent = '请求失败: ' + e.message;
+            }
+            btn.disabled = false;
+            btn.textContent = '刷新画面';
         }
     </script>
 </body>

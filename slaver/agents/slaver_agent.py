@@ -214,7 +214,11 @@ class ToolCallingAgent(MultiStepAgent):
                 pass  # Not a JSON tuple, use as-is
 
         # Check if the tool execution failed
-        is_failed = isinstance(observation, str) and ("失败" in observation or "failed" in observation.lower())
+        is_failed = isinstance(observation, str) and (
+            "失败" in observation or "failed" in observation.lower()
+            or "不在场景中" in observation or "已经抓取" in observation
+            or "没有抓取" in observation or "无法" in observation
+        )
 
         if is_failed:
             # Ask the judge what to do
@@ -322,6 +326,10 @@ class ToolCallingAgent(MultiStepAgent):
             if not current_position:
                 return "Position: Unknown"
 
+            # Read holding state
+            holding = robot_info.get("holding")
+            holding_line = f"\nHolding: {holding}" if holding else ""
+
             # First, try to get coordinates from robot state (if set by navigation)
             robot_coordinates = robot_info.get("coordinates")
             if robot_coordinates and len(robot_coordinates) >= 3:
@@ -335,9 +343,9 @@ class ToolCallingAgent(MultiStepAgent):
                     description = scene_obj.get("description", "")
 
                 if description:
-                    return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
+                    return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: ({x}, {y}, {z}){holding_line}"
                 else:
-                    return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: ({x}, {y}, {z})"
+                    return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: ({x}, {y}, {z}){holding_line}"
 
             # Fallback: Try to get position coordinates from scene
             scene_obj = self.collaborator.read_environment(current_position)
@@ -349,15 +357,15 @@ class ToolCallingAgent(MultiStepAgent):
                 if position_coords and len(position_coords) >= 3:
                     x, y, z = position_coords[0], position_coords[1], position_coords[2]
                     if description:
-                        return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: ({x}, {y}, {z})"
+                        return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: ({x}, {y}, {z}){holding_line}"
                     else:
-                        return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: ({x}, {y}, {z})"
+                        return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: ({x}, {y}, {z}){holding_line}"
                 elif description:
-                    return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: Not available"
+                    return f"[Current Robot Position]\nLocation: {current_position} ({description})\nCoordinates: Not available{holding_line}"
                 else:
-                    return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not available"
+                    return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not available{holding_line}"
             else:
-                return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not found in scene"
+                return f"[Current Robot Position]\nLocation: {current_position}\nCoordinates: Not found in scene{holding_line}"
 
         except Exception as e:
             # print(f"[Get Position Error] `{e}`")

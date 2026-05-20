@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from module.base import register_tools as register_base_tools
 from module.grasp import register_tools as register_grasp_tools
-from module.swap import register_tools as register_swap_tools
+from module.place import register_tools as register_place_tools
 from module.example import register_tools as register_example_tools
 
 mcp = FastMCP("robots")
@@ -30,7 +30,7 @@ def register_all_modules():
 
     register_base_tools(mcp)
     register_grasp_tools(mcp)
-    register_swap_tools(mcp)
+    register_place_tools(mcp)
     # register_example_tools(mcp)
 
     print("[skill.py] ✓ 所有模块注册完成", file=sys.stderr)
