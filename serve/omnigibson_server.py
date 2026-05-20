@@ -540,39 +540,33 @@ def _capture_viewer():
 
 
 def _capture_top_down():
-    """捕获俯视视角截图"""
+    """捕获俯视视角截图 —— 从高处俯瞰场景"""
     try:
-        import torch
+        import torch as th
 
         cam = og.sim.viewer_camera
-        # 保存原始位置
+
+        # 保存原始位置和朝向
         original_pos, original_ori = cam.get_position_orientation()
 
-        # 设置俯视位置（场景上方，朝下看）
-        # 场景中心大约在 [0, 0, 0]，上方 8 米
-        top_down_pos = torch.tensor([0.0, 0.0, 8.0])
+        # 俯视位置：场景中心上方 8 米
+        # 场景范围约 X: -3.5~1.7, Y: -3.8~3.2，中心约 (-0.5, -0.5)
+        top_down_pos = th.tensor([-0.5, -0.5, 8.0])
 
-        # 朝下看：使用正确的四元数
-        # OmniGibson 四元数格式：(x, y, z, w)
-        # 绕 X 轴旋转 180 度：(1, 0, 0, 0)
-        top_down_ori = torch.tensor([1.0, 0.0, 0.0, 0.0])
+        # 设置俯视位置（保持默认朝向）
+        cam.set_position_orientation(position=top_down_pos)
 
-        # 设置相机位置
-        cam.set_position_orientation(top_down_pos, top_down_ori)
-
-        # 强制更新渲染
-        og.sim.render()
-
-        # 多步渲染确保图像更新
-        for _ in range(5):
-            og.sim.step()
+        # 多次渲染确保视口更新
+        for _ in range(10):
             og.sim.render()
 
+        # 捕获图像
         img_buf = capture_image(cam)
 
         # 恢复原始位置
-        cam.set_position_orientation(original_pos, original_ori)
-        og.sim.render()
+        cam.set_position_orientation(position=original_pos, orientation=original_ori)
+        for _ in range(5):
+            og.sim.render()
 
         return img_buf
     except Exception as e:
