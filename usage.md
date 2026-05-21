@@ -134,7 +134,8 @@ python deploy/run.py
 | http://127.0.0.1:8888 | Web 控制台（主界面） |
 | http://127.0.0.1:5001/camera/viewer | 观察者视角截图（PNG） |
 | http://127.0.0.1:5001/camera/robot | 机器人视角截图（PNG） |
-| http://127.0.0.1:5001/camera/top_down | 俯视视角截图（PNG） |
+| http://127.0.0.1:5001/camera/top_down | 俯视跟随视角截图（PNG） |
+| http://127.0.0.1:5001/camera/side | 侧面视角截图（PNG） |
 | http://127.0.0.1:5001/objects | 查看场景物体（JSON） |
 | http://127.0.0.1:5001/robot/state | 机器人状态（JSON） |
 | http://127.0.0.1:5001/status | 服务器状态检查 |
@@ -161,7 +162,8 @@ Web 控制台提供"刷新画面"按钮，点击后会：
 也可以直接访问：
 - http://127.0.0.1:5001/camera/viewer （观察者视角 PNG）
 - http://127.0.0.1:5001/camera/robot （机器人视角 PNG）
-- http://127.0.0.1:5001/camera/top_down （俯视视角 PNG）
+- http://127.0.0.1:5001/camera/top_down （俯视跟随视角 PNG）
+- http://127.0.0.1:5001/camera/side （侧面视角 PNG）
 
 ### 录制视频
 
