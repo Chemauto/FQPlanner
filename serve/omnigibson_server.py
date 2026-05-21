@@ -11,8 +11,10 @@ API 端点:
     GET  /status            - 健康检查
     GET  /objects           - 列出场景物体
     GET  /robot/state       - 机器人状态
-    GET  /camera/viewer     - 观察者视角截图（俯视全景）
+    GET  /camera/viewer     - 观察者视角截图
     GET  /camera/robot      - 机器人视角截图（第一人称）
+    GET  /camera/top_down   - 俯视跟随视角截图（跟随机器人后上方）
+    GET  /camera/side       - 侧面视角截图（房间右侧固定）
     GET  /task/list         - 列出可用 BEHAVIOR 任务
     GET  /task/current      - 当前任务信息
     POST /task/load         - 加载/切换任务
@@ -55,6 +57,8 @@ robot = None
 held_object = None
 current_scene = None
 current_task = None
+top_down_cam = None  # 跟随机器人后上方的俯视相机
+side_cam = None      # 房间右侧固定的侧面相机
 
 # 录制状态
 recording = False
@@ -137,7 +141,7 @@ def load_objects_from_profile():
 
 def init_omnigibson(scene_model="Rs_int", task_name=None):
     """初始化 OmniGibson 环境"""
-    global env, robot, held_object, current_scene, current_task
+    global env, robot, held_object, current_scene, current_task, top_down_cam, side_cam
 
     import yaml
 
@@ -160,6 +164,37 @@ def init_omnigibson(scene_model="Rs_int", task_name=None):
         cfg["task"] = {"type": "DummyTask"}
         print(f"[OmniGibson] 基础模式（场景自带物体）")
 
+    # 外部相机：俯视跟随 + 侧面固定
+    cfg["env"]["external_sensors"] = [
+        {
+            "sensor_type": "VisionSensor",
+            "name": "external_top_down",
+            "relative_prim_path": "/external_top_down",
+            "modalities": ["rgb"],
+            "sensor_kwargs": {
+                "image_height": 480,
+                "image_width": 640,
+            },
+            "position": [0, 0, 2.0],
+            "orientation": [0, 0, 0, 1],
+            "pose_frame": "scene",
+        },
+        {
+            "sensor_type": "VisionSensor",
+            "name": "external_side",
+            "relative_prim_path": "/external_side",
+            "modalities": ["rgb"],
+            "sensor_kwargs": {
+                "image_height": 480,
+                "image_width": 640,
+            },
+            # 房间右侧，朝左看（-Y方向），高度1.5米
+            "position": [-2.0, 0.0, 1.5],
+            "orientation": [0, -0.707, 0, 0.707],
+            "pose_frame": "scene",
+        }
+    ]
+
     print(f"[OmniGibson] 加载场景: {scene_model}")
 
     if env is not None:
@@ -174,6 +209,21 @@ def init_omnigibson(scene_model="Rs_int", task_name=None):
     held_object = None
 
     robot = env.robots[0]
+
+    # 获取外部相机引用
+    if hasattr(env, '_external_sensors') and env._external_sensors:
+        top_down_cam = env._external_sensors.get("external_top_down")
+        side_cam = env._external_sensors.get("external_side")
+        if top_down_cam is not None:
+            print("[OmniGibson] 外部俯视跟随相机已加载")
+        if side_cam is not None:
+            print("[OmniGibson] 外部侧面相机已加载")
+        if top_down_cam is None and side_cam is None:
+            print("[OmniGibson] 警告: 未找到外部相机")
+    else:
+        top_down_cam = None
+        side_cam = None
+        print("[OmniGibson] 警告: 外部传感器未加载")
 
     print("[OmniGibson] 可用物体:")
     for obj in env.scene.object_registry.objects:
@@ -190,6 +240,7 @@ def find_object(name):
 
     # 先尝试中文翻译
     search_name = ZH_EN_MAP.get(name, name)
+    search_name = search_name.replace(" ", "_")
 
     # 策略1: 精确名称匹配
     obj = env.scene.object_registry("name", search_name)
@@ -245,11 +296,13 @@ def _main_thread_loop():
                 _action_results[req_id] = result
                 # 同步持有的物体到 EEF 位置
                 _sync_held_object()
+                # 同步俯视跟随相机
+                _sync_top_down_cam()
                 # 动作执行后 step 一次刷新渲染
                 og.sim.step()
-                # 录制帧
+                # 录制帧（四视角拼接）
                 if recording:
-                    frame = _capture_frame_for_recording()
+                    frame = _capture_4view_frame()
                     if frame is not None:
                         record_frames.append(frame)
                         print(f"[record] 帧 #{len(record_frames)}")
@@ -310,6 +363,19 @@ def _sync_held_object():
     arm = robot.default_arm
     eef_pos = robot.get_eef_position(arm)
     obj.set_position_orientation(position=eef_pos)
+
+
+def _sync_top_down_cam():
+    """同步俯视相机到机器人正上方"""
+    if top_down_cam is None or robot is None:
+        return
+    robot_pos, _ = robot.get_position_orientation()
+    cam_pos = robot_pos.clone()
+    cam_pos[2] = 2.0  # 正上方2米
+    top_down_cam.set_position_orientation(
+        position=cam_pos,
+        orientation=th.tensor([0, 0, 0, 1]),
+    )
 
 
 def _do_place_on_top(target_obj):
@@ -374,46 +440,16 @@ def _do_close(obj):
 # ============ 辅助函数 ============
 
 
-def capture_image(sensor):
-    """从 VisionSensor 捕获 RGB 图像并编码为 PNG bytes"""
+def _sensor_to_rgb_array(sensor):
+    """从 VisionSensor 获取 RGB numpy 数组 (H, W, 3)"""
     import numpy as np
-    import cv2
-
-    obs, _ = sensor.get_obs()
-    rgb = obs.get("rgb")
-    if rgb is None:
+    if sensor is None:
         return None
-    if rgb.shape[-1] == 4:
-        rgb = rgb[..., :3]
     try:
-        arr = rgb.cpu().numpy()
-    except AttributeError:
-        arr = np.array(rgb)
-    arr = arr.astype("uint8")
-    arr_bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
-    success, encoded = cv2.imencode(".png", arr_bgr)
-    if not success:
-        return None
-    buf = io.BytesIO(encoded.tobytes())
-    buf.seek(0)
-    return buf
-
-
-def _capture_frame_for_recording():
-    """捕获一帧 RGB numpy 数组用于录制（不 step，直接取当前渲染状态）"""
-    import numpy as np
-    try:
-        cam = og.sim.viewer_camera
-        obs, _ = cam.get_obs()
+        obs, _ = sensor.get_obs()
         rgb = obs.get("rgb")
         if rgb is None:
-            cam = _get_robot_camera()
-            if cam is None:
-                return None
-            obs, _ = cam.get_obs()
-            rgb = obs.get("rgb")
-            if rgb is None:
-                return None
+            return None
         if rgb.shape[-1] == 4:
             rgb = rgb[..., :3]
         try:
@@ -425,11 +461,77 @@ def _capture_frame_for_recording():
         return None
 
 
+def capture_image(sensor):
+    """从 VisionSensor 捕获 RGB 图像并编码为 PNG bytes"""
+    import numpy as np
+    import cv2
+
+    arr = _sensor_to_rgb_array(sensor)
+    if arr is None:
+        return None
+    arr_bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    success, encoded = cv2.imencode(".png", arr_bgr)
+    if not success:
+        return None
+    buf = io.BytesIO(encoded.tobytes())
+    buf.seek(0)
+    return buf
+
+
+def _capture_4view_frame():
+    """捕获四视角拼接帧：左上viewer、右上robot、左下top_down、右下side"""
+    import numpy as np
+    import cv2
+
+    images = []
+
+    # 左上：viewer
+    viewer_img = _sensor_to_rgb_array(og.sim.viewer_camera)
+    if viewer_img is None:
+        viewer_img = _sensor_to_rgb_array(_get_robot_camera())
+    images.append(viewer_img)
+
+    # 右上：robot
+    robot_img = _sensor_to_rgb_array(_get_robot_camera())
+    images.append(robot_img)
+
+    # 左下：top_down（跟随）
+    top_down_img = _sensor_to_rgb_array(top_down_cam)
+    images.append(top_down_img)
+
+    # 右下：side（侧面固定）
+    side_img = _sensor_to_rgb_array(side_cam)
+    images.append(side_img)
+
+    # 统一尺寸：取第一个有效图像的尺寸作为目标
+    target_h, target_w = 240, 320
+    resized = []
+    for img in images:
+        if img is not None:
+            resized.append(cv2.resize(img, (target_w, target_h)))
+        else:
+            resized.append(np.zeros((target_h, target_w, 3), dtype=np.uint8))
+
+    # 拼接 2x2
+    top_row = np.hstack([resized[0], resized[1]])
+    bottom_row = np.hstack([resized[2], resized[3]])
+    grid = np.vstack([top_row, bottom_row])
+
+    # 添加标签
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    labels = ["Viewer", "Robot", "TopDown", "Side"]
+    positions = [(10, 25), (target_w + 10, 25), (10, target_h + 25), (target_w + 10, target_h + 25)]
+    for label, pos in zip(labels, positions):
+        cv2.putText(grid, label, pos, font, 0.6, (255, 255, 255), 2)
+
+    return grid
+
+
 def _after_action(action_name):
     """动作执行后的钩子：录制帧 + 打印日志"""
     global record_frames
     if recording:
-        frame = _capture_frame_for_recording()
+        frame = _capture_4view_frame()
         if frame is not None:
             record_frames.append(frame)
             print(f"[record] 录制帧 #{len(record_frames)} ({action_name})")
@@ -454,7 +556,6 @@ def _save_recording():
     record_frames = []
     print(f"[record] 视频已保存: {fpath} ({n_frames} 帧)")
     return fpath
-    return path_saved
 
 
 def get_object_category_type(category):
@@ -540,37 +641,30 @@ def _capture_viewer():
 
 
 def _capture_top_down():
-    """捕获俯视视角截图 —— 从高处俯瞰场景"""
+    """捕获俯视跟随视角截图"""
+    if top_down_cam is None:
+        print("[OmniGibson] 俯视跟随相机未初始化")
+        return None
     try:
-        import torch as th
-
-        cam = og.sim.viewer_camera
-
-        # 保存原始位置和朝向
-        original_pos, original_ori = cam.get_position_orientation()
-
-        # 俯视位置：场景中心上方 8 米
-        # 场景范围约 X: -3.5~1.7, Y: -3.8~3.2，中心约 (-0.5, -0.5)
-        top_down_pos = th.tensor([-0.5, -0.5, 8.0])
-
-        # 设置俯视位置（保持默认朝向）
-        cam.set_position_orientation(position=top_down_pos)
-
-        # 多次渲染确保视口更新
-        for _ in range(10):
-            og.sim.render()
-
-        # 捕获图像
-        img_buf = capture_image(cam)
-
-        # 恢复原始位置
-        cam.set_position_orientation(position=original_pos, orientation=original_ori)
-        for _ in range(5):
-            og.sim.render()
-
+        img_buf = capture_image(top_down_cam)
         return img_buf
     except Exception as e:
         print(f"[OmniGibson] 俯视截图失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def _capture_side():
+    """捕获侧面视角截图"""
+    if side_cam is None:
+        print("[OmniGibson] 侧面相机未初始化")
+        return None
+    try:
+        img_buf = capture_image(side_cam)
+        return img_buf
+    except Exception as e:
+        print(f"[OmniGibson] 侧面截图失败: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -706,7 +800,7 @@ def scene_profile():
 @app.route("/camera/viewer", methods=["GET"])
 def camera_viewer():
     def do():
-        og.sim.step()  # 刷新渲染
+        og.sim.step()
         img_buf, source = _capture_viewer()
         if img_buf is None:
             return {"success": False, "result": "无法获取截图", "_binary": None}
@@ -763,9 +857,10 @@ def camera_robot_base64():
 
 @app.route("/camera/top_down", methods=["GET"])
 def camera_top_down():
-    """俯视视角截图"""
+    """俯视跟随视角截图"""
     def do():
         og.sim.step()
+        _sync_top_down_cam()
         img_buf = _capture_top_down()
         if img_buf is None:
             return {"success": False, "result": "无法获取俯视截图", "_binary": None}
@@ -778,12 +873,41 @@ def camera_top_down():
 
 @app.route("/camera/top_down_base64", methods=["GET"])
 def camera_top_down_base64():
-    """俯视视角截图（base64）"""
+    """俯视跟随视角截图（base64）"""
     def do():
         og.sim.step()
+        _sync_top_down_cam()
         img_buf = _capture_top_down()
         if img_buf is None:
             return {"success": False, "result": "无法获取俯视截图"}
+        b64 = base64.b64encode(img_buf.read()).decode("utf-8")
+        return {"success": True, "image": b64, "format": "png"}
+    return jsonify(_execute_on_main(do))
+
+
+@app.route("/camera/side", methods=["GET"])
+def camera_side():
+    """侧面视角截图"""
+    def do():
+        og.sim.step()
+        img_buf = _capture_side()
+        if img_buf is None:
+            return {"success": False, "result": "无法获取侧面截图", "_binary": None}
+        return {"success": True, "_binary": img_buf}
+    result = _execute_on_main(do)
+    if not result.get("success"):
+        return jsonify(result)
+    return send_file(result["_binary"], mimetype="image/png")
+
+
+@app.route("/camera/side_base64", methods=["GET"])
+def camera_side_base64():
+    """侧面视角截图（base64）"""
+    def do():
+        og.sim.step()
+        img_buf = _capture_side()
+        if img_buf is None:
+            return {"success": False, "result": "无法获取侧面截图"}
         b64 = base64.b64encode(img_buf.read()).decode("utf-8")
         return {"success": True, "image": b64, "format": "png"}
     return jsonify(_execute_on_main(do))
@@ -822,7 +946,7 @@ def record_start():
     global recording, record_frames
     recording = True
     record_frames = []
-    return jsonify({"success": True, "result": "录制已开始"})
+    return jsonify({"success": True, "result": "录制已开始（四视角拼接模式）"})
 
 
 @app.route("/record/stop", methods=["POST"])
