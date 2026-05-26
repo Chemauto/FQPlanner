@@ -45,16 +45,18 @@ python scene/utils/get_available_object.py --search apple
 ## 抓取与放置机制
 
 ### grasp（抓取）
-1. `move_to` 到物体位置，误差 < 0.15m 停止
-2. 吸附：修改物体 qpos 瞬移到夹爪位置
+1. `move_arm` 到物体位置，误差 < 0.15m 停止
+2. 吸附：使用 `set_joint_qpos` 将物体瞬移到夹爪位置
 3. 关夹爪 10 步
 4. 提起 0.2m
 
 ### place（放置）
-1. `move_to` 到目标位置，误差 < 0.15m 停止
-2. 开夹爪 10 步（先松开物体）
-3. 瞬移：修改物体 qpos 到目标点
+1. `move_arm` 到目标位置，误差 < 0.15m 停止
+2. 瞬移：使用 `set_joint_qpos` 将物体移到目标位置
+3. 开夹爪 10 步
 4. 提起 0.2m
+
+**重要**：`place` 函数需要传入 `obj_name` 参数，用于定位要放置的物体。
 
 ## 控制器参数
 
@@ -65,4 +67,4 @@ python scene/utils/get_available_object.py --search apple
 | `output_max` | 0.10 | 每步最大位移 10cm |
 | `ramp_ratio` | 1.0 | 无加速延迟 |
 
-`arm.py` 中 `move_to` 的 `max_step` 必须与 `output_max` 一致。
+`arm.py` 中 `move_arm` 的 `max_delta` 必须与 `output_max` 一致。

@@ -1022,19 +1022,37 @@ FQPlanner/serve/
 
 提供以下函数，所有操作通过 `env.step(action)` 直接控制，不依赖 ROS2：
 
+#### 状态查询
+
 | 函数 | 说明 |
 |------|------|
-| `get_ee_pos(env)` | 获取末端执行器位置 [x, y, z] |
-| `get_obj_pos(env, obj_name)` | 获取物体位置 |
-| `get_arm_state(env)` | 获取机械臂状态（末端位置、夹爪状态） |
-| `move_to(env, target_pos)` | 移动末端到目标位置（PD 控制 + 坐标变换） |
-| `open_gripper(env)` | 打开夹爪 |
-| `close_gripper(env)` | 关闭夹爪 |
+| `get_arm_info(env)` | 获取机械臂全部状态（末端位姿、夹爪、关节位置/速度、底座、躯干） |
+| `get_obj_pos(env, obj_name)` | 获取物体位置 [x, y, z] |
 | `is_grasped(env, obj_name)` | 检查是否抓住物体 |
-| `grasp(env, obj_name)` | 抓取：移近→吸附(0.15m)→关爪→提起 |
-| `place(env, obj_name, target_pos)` | 放置：移近→开爪→瞬移物体→提起 |
 
-`_make_arm_action` 构建 12 维动作向量，始终设置 `action[11] = -1.0`（手臂模式）。
+#### 移动控制
+
+| 函数 | 说明 |
+|------|------|
+| `move_arm(env, target_pos, max_steps, pos_threshold, gain)` | 移动末端到目标位置（delta 控制模式） |
+| `move_arm_OSC_POSE(env, target_pos, target_rot)` | 移动末端到目标位置（OSC_POSE absolute 模式） |
+| `get_osc_pose_controller_config()` | 获取 OSC_POSE absolute 模式的控制器配置 |
+
+#### 夹爪控制
+
+| 函数 | 说明 |
+|------|------|
+| `open_gripper(env, steps)` | 打开夹爪 |
+| `close_gripper(env, steps)` | 关闭夹爪 |
+
+#### 高级操作
+
+| 函数 | 说明 |
+|------|------|
+| `grasp(env, obj_name, snap_threshold)` | 抓取物体：移近→吸附→关夹爪→提起 |
+| `place(env, obj_name, target_pos, snap_threshold)` | 放置物体：移近→瞬移物体→开夹爪→提起 |
+
+**重要**：`place` 函数需要传入 `obj_name` 参数，用于定位要放置的物体。
 
 ### tools/move.py — 底盘导航
 
