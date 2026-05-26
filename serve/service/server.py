@@ -9,8 +9,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from tools.arm import (
-    get_ee_pos, get_obj_pos, get_arm_state,
-    move_to, grasp, release, pick_and_place,
+    get_arm_info, get_obj_pos,
+    move_arm, grasp, place,
     open_gripper, close_gripper, is_grasped,
 )
 from tools.move import get_base_info, nav
@@ -84,15 +84,13 @@ def process_commands(env):
             if cmd_type == "grasp":
                 success = grasp(env, **params)
                 result = {"success": success}
-            elif cmd_type == "release":
-                release(env, **params)
-                result = {"success": True}
-            elif cmd_type == "move_to":
-                reached = move_to(env, **params)
-                result = {"reached": reached, "ee_pos": get_ee_pos(env).tolist()}
-            elif cmd_type == "pick_and_place":
-                success = pick_and_place(env, **params)
+            elif cmd_type == "place":
+                success = place(env, **params)
                 result = {"success": success}
+            elif cmd_type == "move_to":
+                reached = move_arm(env, **params)
+                info = get_arm_info(env)
+                result = {"reached": reached, "ee_pos": info["ee_pos"]}
             elif cmd_type == "open_gripper":
                 open_gripper(env, **params)
                 result = {"success": True}
@@ -121,7 +119,7 @@ def api_status():
     env = _get_env()
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
-    state = get_arm_state(env)
+    state = get_arm_info(env)
     return jsonify(_np_to_list(state))
 
 
@@ -153,19 +151,32 @@ def api_objects():
 @app.route("/grasp", methods=["POST"])
 def api_grasp():
     data = request.json or {}
+    obj_name = data.get("obj_name")
+    if not obj_name:
+        return jsonify({"error": "缺少 obj_name 参数"}), 400
     params = {
-        "obj_name": data.get("obj_name", "pot"),
-        "snap_threshold": data.get("snap_threshold", 0.2),
-        "approach_height": data.get("approach_height", 0.15),
+        "obj_name": obj_name,
+        "snap_threshold": data.get("snap_threshold", 0.15),
     }
     return jsonify(submit_command("grasp", params))
 
 
-@app.route("/release", methods=["POST"])
-def api_release():
+@app.route("/place", methods=["POST"])
+def api_place():
     data = request.json or {}
-    params = {"lift_height": data.get("lift_height", 0.1)}
-    return jsonify(submit_command("release", params))
+    obj_name = data.get("obj_name")
+    target = data.get("target")
+    if not obj_name:
+        return jsonify({"error": "缺少 obj_name 参数"}), 400
+    if target is None:
+        return jsonify({"error": "缺少 target 参数"}), 400
+    params = {
+        "obj_name": obj_name,
+        "target_pos": target,
+    }
+    if data.get("snap_threshold") is not None:
+        params["snap_threshold"] = data["snap_threshold"]
+    return jsonify(submit_command("place", params))
 
 
 @app.route("/move_to", methods=["POST"])
@@ -176,24 +187,10 @@ def api_move_to():
         return jsonify({"error": "缺少 target 参数"}), 400
     params = {
         "target_pos": target,
-        "steps": data.get("steps", 300),
-        "threshold": data.get("threshold", 0.03),
+        "max_steps": data.get("max_steps", 200),
+        "pos_threshold": data.get("pos_threshold", 0.03),
     }
     return jsonify(submit_command("move_to", params))
-
-
-@app.route("/pick_and_place", methods=["POST"])
-def api_pick_and_place():
-    data = request.json or {}
-    target = data.get("target")
-    if target is None:
-        return jsonify({"error": "缺少 target 参数"}), 400
-    params = {
-        "obj_name": data.get("obj_name", "pot"),
-        "target_pos": target,
-        "approach_height": data.get("approach_height", 0.15),
-    }
-    return jsonify(submit_command("pick_and_place", params))
 
 
 @app.route("/nav", methods=["POST"])

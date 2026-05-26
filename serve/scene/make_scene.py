@@ -18,7 +18,7 @@ class MyKitchen(Kitchen):
         super().__init__(*args, **kwargs)
 
     def _setup_model(self):
-        # ① 机器人初始化（与父类一致，kitchen.py 564-588 行）
+        # ① 机器人初始化
         from robosuite.models.robots import PandaOmron
 
         for robot in self.robots:
