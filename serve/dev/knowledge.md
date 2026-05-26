@@ -618,22 +618,52 @@ obj_quat = env.sim.data.body_xquat[env.obj_body_id["obj"]]
 PandaOmron = Franka Panda 7-DOF 机械臂 + Omron 移动底座
 
 **Body 名称**：
-- `robot0_base` — 底座
+- `mobilebase0_base` — **移动底座**（唯一会动的底座 body，body_id=4, jntadr=0, jntnum=3）
+- `robot0_base` — **固定底座**（body_id=3, jntadr=-1, jntnum=0，位置永远不变，不要用它读位置！）
 - `robot0_link0` ~ `robot0_link7` — 机械臂关节
 - `robot0_right_hand` — 末端执行器（夹爪）
-- `gripper0_right_right_gripper` / `gripper0_right_leftfinger` — 夹爪手指
 
-### 动作空间
+**关键发现**：`robot0_base` 是固定 body（jntadr=-1），其 body_xpos 不会随机器人移动而变化。必须用 `mobilebase0_base` 读取底座真实位置。
 
-动作是 12 维向量（对应 composite controller）：
+### 动作空间（12 维）
 
 ```
-action[0:3]   → 末端执行器位置增量 [dx, dy, dz]
+action[0:3]   → 末端执行器位置增量 [dx, dy, dz]（归一化到 [-1, 1]）
 action[3:6]   → 末端执行器旋转增量 [droll, dpitch, dyaw]
-action[6:7]   → 夹爪 [0=打开, 1=关闭]
-action[7:11]  → 底座移动 [dx, dy, drot, ?]
-action[11:12] → 控制模式切换
+action[6:7]   → 夹爪 [负数=打开, 正数=关闭]
+action[7:8]   → 底座前进/后退（body 坐标系 X 轴方向）
+action[8:9]   → 底座左右移动（body 坐标系 Y 轴方向）
+action[9:10]  → 底座偏航旋转
+action[10:11] → 躯干升降
+action[11:12] → 控制模式切换 [负数=手臂模式, 正数=底座模式]
 ```
+
+**重要**：action[11] 的正负决定当前步控制哪个模块：
+- `action[11] = -1.0` → 手臂模式（action[0:6] 生效）
+- `action[11] = 1.0` → 底座模式（action[7:10] 生效）
+
+**重要**：前进（vf）和旋转（vw）不能同时使用——旋转会消除前进效果。必须分步执行：先纯旋转，再纯前进。
+
+### 底座坐标系
+
+底座的 body X 轴 = 前进方向。世界坐标到 body 坐标的转换：
+
+```
+Vx_body = Vx_world * cos(yaw) + Vy_world * sin(yaw)
+Vy_body = -Vx_world * sin(yaw) + Vy_world * cos(yaw)
+```
+
+- yaw=0° 时：body_X = world+X, body_Y = world+Y
+- yaw=90° 时：body_X = world+Y, body_Y = world-X
+
+### qpos 布局
+
+底座的 3 个关节在 qpos 中的位置：
+- `qpos[0]` = 前进关节
+- `qpos[1]` = 侧移关节
+- `qpos[2]` = 偏航关节
+
+注意 qpos 的坐标系与 body_xpos 不同——qpos[0] 是前进方向（body X），而 body_xpos 是世界坐标。
 
 ### 控制器
 
@@ -665,12 +695,15 @@ config = load_composite_controller_config(robot="PandaOmron")
 ee_id = env.sim.model.body_name2id("robot0_right_hand")
 ee_pos = env.sim.data.body_xpos[ee_id].copy()
 
-# 底座位置
-base_id = env.sim.model.body_name2id("robot0_base")
+# 底座位置（必须用 mobilebase0_base！）
+base_id = env.sim.model.body_name2id("mobilebase0_base")
 base_pos = env.sim.data.body_xpos[base_id].copy()
+base_quat = env.sim.data.body_xquat[base_id]  # [w, x, y, z]
 
-# 末端执行器朝向
-ee_quat = env.sim.data.body_xquat[ee_id].copy()
+# 从四元数计算偏航角
+w, x, y, z = base_quat
+yaw_rad = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+yaw_deg = np.rad2deg(yaw_rad)
 ```
 
 ---
@@ -894,15 +927,25 @@ env.reset()
 # env.fixtures 字典可用
 ```
 
-### 6. PandaOmron 的末端执行器名称
+### 6. PandaOmron 的 body 名称
 
 ```python
 # ❌ 不存在 "robot0_left_hand"
 ee_id = env.sim.model.body_name2id("robot0_left_hand")  # ValueError
 
-# ✅ 正确名称
+# ✅ 末端执行器
 ee_id = env.sim.model.body_name2id("robot0_right_hand")
+
+# ❌ robot0_base 是固定 body，位置永远不变！
+base_id = env.sim.model.body_name2id("robot0_base")
+env.sim.data.body_xpos[base_id]  # 永远返回初始值，不会随移动变化
+
+# ✅ 必须用 mobilebase0_base 获取真实底座位置
+base_id = env.sim.model.body_name2id("mobilebase0_base")
+env.sim.data.body_xpos[base_id]  # 正确反映当前位置
 ```
+
+`robot0_base`（body_id=3）的 jntadr=-1, jntnum=0，是固定 body。`mobilebase0_base`（body_id=4）的 jntadr=0, jntnum=3，是真正连接到关节的移动 body。
 
 ### 7. KitchenArena 支持 dict 传入
 
@@ -951,18 +994,90 @@ camera_config = CamUtils.LAYOUT_CAMS.get(self.layout_id, CamUtils.DEFAULT_LAYOUT
 
 ```
 FQPlanner/serve/
-├── main.py               # 主程序入口
+├── main.py               # 主程序入口（启动仿真 + Flask API + mjviewer）
+├── tools/
+│   ├── arm.py             # 机械臂控制（move_to, grasp, release, pick_and_place）
+│   └── move.py            # 底盘导航（get_base_info, move, nav）
+├── service/
+│   ├── __init__.py
+│   ├── server.py          # Flask API 服务（命令队列架构）
+│   └── web.py             # Web UI 控制界面（localhost:8080）
 ├── utils/
 │   └── utils.py           # 工具函数（create_scene、init_device 等）
-└── scene/
-    ├── make_scene.py      # MyKitchen 子类（核心）
-    ├── config/
-    │   ├── layout.yaml    # 布局配置（从 robocasa layout07 复制）
-    │   ├── style.yaml     # 风格配置（从 robocasa style01 复制）
-    │   └── objects.yaml   # 物体配置（自定义）
-    └── utils/
-        └── get_available_object.py  # 物体类别查询工具
+├── scene/
+│   ├── make_scene.py      # MyKitchen 子类（核心）
+│   ├── config/
+│   │   ├── layout.yaml    # 布局配置（从 robocasa layout07 复制）
+│   │   ├── style.yaml     # 风格配置（从 robocasa style01 复制）
+│   │   └── objects.yaml   # 物体配置（自定义）
+│   └── utils/
+│       └── get_available_object.py  # 物体类别查询工具
+└── dev/
+    └── knowledge.md       # 本文档
 ```
+
+### tools/arm.py — 机械臂控制
+
+提供以下函数，所有操作通过 `env.step(action)` 直接控制，不依赖 ROS2：
+
+| 函数 | 说明 |
+|------|------|
+| `get_ee_pos(env)` | 获取末端执行器位置 [x, y, z] |
+| `get_obj_pos(env, obj_name)` | 获取物体位置 |
+| `get_arm_state(env)` | 获取机械臂状态（末端位置、夹爪状态） |
+| `move_to(env, target_pos)` | 移动末端到目标位置（PD 控制 + 坐标变换） |
+| `open_gripper(env)` | 打开夹爪 |
+| `close_gripper(env)` | 关闭夹爪 |
+| `is_grasped(env, obj_name)` | 检查是否抓住物体 |
+| `grasp(env, obj_name)` | 完整抓取流程（接近→下降→吸附→关夹爪→提起） |
+| `release(env)` | 释放物体（开夹爪→提起） |
+| `pick_and_place(env, obj_name, target_pos)` | 抓取并放置 |
+
+`_make_arm_action` 构建 12 维动作向量，始终设置 `action[11] = -1.0`（手臂模式）。
+
+### tools/move.py — 底盘导航
+
+| 函数 | 说明 |
+|------|------|
+| `get_base_info(env)` | 获取底座完整信息（位置、偏航角、qpos、qvel、ctrl） |
+| `move(env, Vx, Vy, Vw)` | 单步移动（直接发送速度指令） |
+| `nav(env, x, y, w, yaw)` | 导航到目标位置（PD 控制，分阶段消除误差） |
+
+`nav` 的三阶段控制：
+1. 消除 X 误差（世界坐标→body 坐标变换）
+2. 消除 Y 误差
+3. 消除偏航角误差
+
+### service/server.py — Flask API
+
+使用**命令队列架构**避免多线程同时调用 `env.step()`：
+- Flask 请求线程通过 `submit_command()` 提交命令到队列并等待结果
+- 仿真器主循环线程调用 `process_commands()` 执行队列中的命令
+
+**API 端点**：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/status` | GET | 查询机械臂状态（末端位置、夹爪） |
+| `/base_status` | GET | 查询底座状态（位置、偏航角） |
+| `/objects` | GET | 查询所有物体位置和抓取状态 |
+| `/grasp` | POST | 抓取物体 |
+| `/release` | POST | 释放物体 |
+| `/move_to` | POST | 移动末端到目标位置 |
+| `/pick_and_place` | POST | 抓取并放置 |
+| `/nav` | POST | 底盘导航到目标位置 |
+| `/open_gripper` | POST | 打开夹爪 |
+| `/close_gripper` | POST | 关闭夹爪 |
+
+### service/web.py — Web UI
+
+浏览器控制界面（localhost:8080），提供：
+- 物体列表（实时刷新）
+- 抓取/释放控制
+- 末端移动控制
+- 底盘导航控制（X、Y、Yaw）
+- Pick & Place 一键操作
+- 状态显示（末端位置、底座位置、偏航角）
 
 ### MyKitchen 类的设计
 

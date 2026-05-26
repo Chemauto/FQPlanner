@@ -1,0 +1,165 @@
+"""
+move.py - 机器人底座移动控制
+
+动作空间（12维）：
+  action[7]  → forward（body X 轴，前进/后退）
+  action[8]  → side（body Y 轴，左/右平移）
+  action[9]  → yaw（原地旋转）
+  action[11] → 模式（正=底座模式）
+
+body 坐标系随 yaw 旋转：
+  yaw=0°:  body_X = 世界+X,  body_Y = 世界+Y
+  yaw=90°: body_X = 世界+Y,  body_Y = 世界-X
+"""
+
+import numpy as np
+
+
+def _normalize_angle_deg(angle):
+    """角度归一化到 [-180, 180]"""
+    while angle > 180:
+        angle -= 360
+    while angle < -180:
+        angle += 360
+    return angle
+
+
+def _world_to_body(Vx_world, Vy_world, yaw_rad):
+    """
+    世界坐标系速度 → body 坐标系速度
+
+    yaw=0° 时: body_X = 世界+X, body_Y = 世界+Y
+    """
+    c = np.cos(yaw_rad)
+    s = np.sin(yaw_rad)
+    Vx_body = Vx_world * c + Vy_world * s
+    Vy_body = -Vx_world * s + Vy_world * c
+    return Vx_body, Vy_body
+
+
+def get_base_info(env):
+    """
+    获取底座全部运动相关数据
+
+    Returns:
+        dict:
+            pos:       世界坐标 [x, y, z]
+            yaw_deg:   朝向（度，0-360）
+            yaw_rad:   朝向（弧度）
+            qpos:      关节值 [forward, side, yaw]
+            qvel:      关节速度 [forward, side, yaw]
+            ctrl:      控制信号 [forward, side, yaw]
+    """
+    base_id = env.sim.model.body_name2id("mobilebase0_base")
+
+    # 世界坐标
+    pos = env.sim.data.body_xpos[base_id].copy()
+    quat = env.sim.data.body_xquat[base_id]  # [w, x, y, z]
+    w, x, y, z = quat
+    yaw_rad = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+    yaw_deg = np.rad2deg(yaw_rad)
+
+    # 关节值
+    qpos = env.sim.data.qpos[0:3].copy()
+    qvel = env.sim.data.qvel[0:3].copy()
+    ctrl = env.sim.data.ctrl[7:10].copy()
+
+    return {
+        "pos": pos.tolist(),
+        "yaw_deg": round(float(yaw_deg), 2),
+        "yaw_rad": round(float(yaw_rad), 4),
+        "qpos": qpos.tolist(),
+        "qvel": qvel.tolist(),
+        "ctrl": ctrl.tolist(),
+    }
+
+
+def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
+    """
+    底座速度控制（一步）
+
+    Args:
+        env: 环境对象
+        Vx:  前进速度 [-1, 1]，body X 轴方向（前进为正）
+        Vy:  侧移速度 [-1, 1]，body Y 轴方向（右移为正）
+        Vw:  旋转速度 [-1, 1]，顺时针为正
+
+    Returns:
+        dict: 执行后的底座状态（同 get_base_info）
+    """
+    Vx = np.clip(Vx, -1.0, 1.0)
+    Vy = np.clip(Vy, -1.0, 1.0)
+    Vw = np.clip(Vw, -1.0, 1.0)
+
+    action = np.zeros(env.action_dim)
+    action[7] = Vx
+    action[8] = Vy
+    action[9] = Vw
+    action[11] = 1.0  # 底座模式
+
+    env.step(action)
+
+    return get_base_info(env)
+
+
+def nav(env, x, y, w, yaw, Kp=2, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=500):
+    """
+    导航到世界坐标系目标点（顺序消除误差：x → y → w）
+
+    Args:
+        env:            环境对象
+        x:              目标世界坐标 x
+        y:              目标世界坐标 y
+        w:              目标偏航角（度）
+        yaw:            当前偏航角（度）
+        Kp:             比例增益
+        Kd:             微分增益
+        pos_threshold:  位置误差阈值（米），默认 0.1
+        yaw_threshold:  偏航角误差阈值（度），默认 3.0
+        max_steps:      每个阶段最大步数
+
+    Returns:
+        dict: 最终底座状态
+    """
+    # 阶段 1：消除 x 误差
+    prev_err = 0.0
+    for step in range(max_steps):
+        info = get_base_info(env)
+        x_now = info["pos"][0]
+        err = x - x_now
+        if abs(err) < pos_threshold:
+            break
+        d_err = err - prev_err
+        prev_err = err
+        Vx_world = np.clip(Kp * err + Kd * d_err, -1.0, 1.0)
+        Vx_body, Vy_body = _world_to_body(Vx_world, 0.0, info["yaw_rad"])
+        move(env, Vx=Vx_body, Vy=Vy_body)
+
+    # 阶段 2：消除 y 误差
+    prev_err = 0.0
+    for step in range(max_steps):
+        info = get_base_info(env)
+        y_now = info["pos"][1]
+        err = y - y_now
+        if abs(err) < pos_threshold:
+            break
+        d_err = err - prev_err
+        prev_err = err
+        Vy_world = np.clip(Kp * err + Kd * d_err, -1.0, 1.0)
+        Vx_body, Vy_body = _world_to_body(0.0, Vy_world, info["yaw_rad"])
+        move(env, Vx=Vx_body, Vy=Vy_body)
+
+    # 阶段 3：消除 w 误差
+    prev_err = 0.0
+    for step in range(max_steps):
+        info = get_base_info(env)
+        w_now = info["yaw_deg"]
+        err = _normalize_angle_deg(w - w_now)
+        if abs(err) < yaw_threshold:
+            break
+        d_err = err - prev_err
+        prev_err = err
+        Vw = np.clip(Kp * (err / 180.0) + Kd * (d_err / 180.0), -1.0, 1.0)
+        move(env, Vw=Vw)
+
+    return get_base_info(env)
