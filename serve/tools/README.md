@@ -5,6 +5,46 @@
 - **arm.py** — 机械臂控制（抓取、放置、移动、夹爪）
 - **move.py** — 底盘导航（移动、路径控制）
 
+## arm.py 函数列表
+
+### 状态查询
+
+| 函数 | 说明 |
+|------|------|
+| `get_arm_info(env)` | 获取机械臂全部状态（末端位姿、夹爪、关节位置/速度、底座、躯干） |
+| `get_obj_pos(env, obj_name)` | 获取物体位置 [x, y, z] |
+| `is_grasped(env, obj_name)` | 检查是否抓住物体 |
+
+### 移动控制
+
+| 函数 | 说明 |
+|------|------|
+| `move_arm(env, target_pos, max_steps, pos_threshold, gain)` | 移动末端到目标位置（delta 控制模式） |
+| `move_arm_OSC_POSE(env, target_pos, target_rot)` | 移动末端到目标位置（OSC_POSE absolute 模式） |
+| `get_osc_pose_controller_config()` | 获取 OSC_POSE absolute 模式的控制器配置 |
+
+### 夹爪控制
+
+| 函数 | 说明 |
+|------|------|
+| `open_gripper(env, steps)` | 打开夹爪 |
+| `close_gripper(env, steps)` | 关闭夹爪 |
+
+### 高级操作
+
+| 函数 | 说明 |
+|------|------|
+| `grasp(env, obj_name, snap_threshold)` | 抓取物体：移近→吸附→关夹爪→提起 |
+| `place(env, obj_name, target_pos, snap_threshold)` | 放置物体：移近→瞬移物体→开夹爪→提起 |
+
+## move.py 函数列表
+
+| 函数 | 说明 |
+|------|------|
+| `get_base_info(env)` | 获取底座完整信息（位置、偏航角、qpos、qvel、ctrl） |
+| `move(env, Vx, Vy, Vw)` | 单步移动（直接发送速度指令） |
+| `nav(env, x, y, w, yaw)` | 导航到目标位置（PD 控制，分阶段消除误差） |
+
 ## 修改记录
 
 ### PandaOmron 控制器参数调整
