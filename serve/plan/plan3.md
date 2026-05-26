@@ -2,12 +2,14 @@
 
 ## 一、目标
 
-在 `serve/tools/robot_control.py` 中提供程序化的机器人控制函数，替代键盘遥操作，支持：
+在 `serve/tools/` 下提供程序化的机器人控制函数，替代键盘遥操作，支持：
 1. 移动末端执行器到指定位置
 2. 抓取物体
 3. 释放物体
 4. 移动底座到指定位置
 5. 查询机器人和物体状态
+
+**当前状态**：原 `robot_control.py` 已拆分为 `arm.py`（机械臂控制）和 `move.py`（底盘导航）。
 
 ## 二、背景：PandaOmron 动作空间
 
@@ -46,7 +48,7 @@ env.step(action)  # action 是 12 维 numpy 数组
 
 ## 三、函数设计
 
-### robot_control.py 提供的函数
+### arm.py 提供的函数（机械臂控制）
 
 ```python
 def get_ee_pos(env):
@@ -55,70 +57,42 @@ def get_ee_pos(env):
 def get_obj_pos(env, obj_name):
     """获取物体位置 [x, y, z]"""
 
-def get_robot_state(env):
-    """获取机器人完整状态：末端位置、底座位置、夹爪状态"""
+def get_arm_state(env):
+    """获取机械臂状态：末端位置、夹爪状态"""
 
-def move_to(env, target_pos, steps=50, threshold=0.02):
-    """
-    移动末端执行器到目标位置
+def move_to(env, target_pos, steps=300, threshold=0.03, gain=1.5):
+    """移动末端到目标位置（PD 控制 + 世界→body 坐标变换）"""
 
-    Args:
-        env: 环境对象
-        target_pos: 目标位置 [x, y, z]
-        steps: 最大步数
-        threshold: 到达判定阈值（米）
+def open_gripper(env, steps=10):
+    """打开夹爪"""
 
-    Returns:
-        bool: 是否到达目标
-    """
+def close_gripper(env, steps=10):
+    """关闭夹爪"""
 
-def move_base(env, target_pos, steps=50):
-    """
-    移动底座到目标位置附近
+def is_grasped(env, obj_name, threshold=0.035):
+    """检查是否抓住物体"""
 
-    Args:
-        env: 环境对象
-        target_pos: 目标位置 [x, y, z]
-        steps: 最大步数
-    """
+def grasp(env, obj_name, approach_height=0.15, snap_threshold=0.2):
+    """抓取：移到上方→下降→吸附修正→关夹爪→提起"""
 
-def grasp(env, obj_name, approach_height=0.15, grasp_steps=30):
-    """
-    抓取物体：移动到物体上方 → 下降 → 关闭夹爪 → 提起
-
-    Args:
-        env: 环境对象
-        obj_name: 物体名称（如 "pot"）
-        approach_height: 接近高度（物体上方多少米开始下降）
-        grasp_steps: 每个阶段的仿真步数
-
-    Returns:
-        bool: 是否成功抓取
-    """
-
-def release(env, lift_height=0.2, steps=30):
-    """
-    释放物体：当前位置打开夹爪 → 可选提起
-
-    Args:
-        env: 环境对象
-        lift_height: 释放后提起高度
-        steps: 仿真步数
-    """
+def release(env, lift_height=0.1, steps=20):
+    """释放：开夹爪→提起"""
 
 def pick_and_place(env, obj_name, target_pos, approach_height=0.15):
-    """
-    抓取并放置：抓取物体 → 移动到目标位置 → 释放
+    """抓取并放置"""
+```
 
-    Args:
-        env: 环境对象
-        obj_name: 物体名称
-        target_pos: 放置目标位置 [x, y, z]
-        approach_height: 接近高度
+### move.py 提供的函数（底盘导航）
 
-    Returns:
-        bool: 是否成功
-    """
+```python
+def get_base_info(env):
+    """获取底座完整信息：位置、偏航角、qpos、qvel、ctrl"""
+
+def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
+    """单步移动（直接发送速度指令）"""
+
+def nav(env, x, y, w, yaw, Kp=1.5, Kd=0.3):
+    """导航到目标位置（三阶段 PD 控制：消除 X→Y→Yaw 误差）"""
 ```
 
 ## 四、实现细节
@@ -157,17 +131,19 @@ def move_to(env, target_pos, steps=50, threshold=0.02):
 
 ### 关键注意事项
 
-1. **坐标系**：action 中的增量是相对于末端执行器的，不是世界坐标系。需要通过 `env.robots[0].controller.ee_pos` 获取当前末端位置来计算误差
-2. **归一化**：action 值需要在 [-1, 1] 范围内，OSC_POSE 控制器内部会乘以 output_max
-3. **底座移动**：如果物体太远，需要先移动底座再操作手臂
-4. **仿真步进**：每次 `env.step()` 后需要等待物理仿真稳定，特别是抓取后
+1. **坐标系**：action 中的增量是 body 坐标系下的，需要世界→body 坐标变换
+2. **归一化**：action 值需要在 [-1, 1] 范围内
+3. **底座 body**：必须用 `mobilebase0_base` 读取底座位置，`robot0_base` 是固定 body 不会动
+4. **前进+旋转不能同时**：action[7]（前进）和 action[9]（旋转）不能同时使用，旋转会消除前进效果
+5. **仿真步进**：每次 `env.step()` 后需要等待物理仿真稳定
 
 ## 五、文件结构
 
 ```
 serve/tools/
 ├── __init__.py
-└── robot_control.py    # 机器人控制工具函数
+├── arm.py           # 机械臂控制（move_to, grasp, release, pick_and_place）
+└── move.py          # 底盘导航（get_base_info, move, nav）
 ```
 
 ## 六、验证方法
@@ -180,7 +156,6 @@ serve/tools/
 
 ## 七、不包含的功能（后续可扩展）
 
-- 路径规划（避障）
+- 路径规划（避障）— 当前 nav 只走直线
 - 逆运动学求解（当前用增量控制近似）
-- 自动底座导航（需要地图和路径规划）
 - 视觉伺服（基于相机观测的抓取）
