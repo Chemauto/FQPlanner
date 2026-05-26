@@ -9,6 +9,25 @@
 #   placement.size:           放置区域大小 [宽, 深]
 #   placement.pos:            [横向, 纵向]  null=随机, 1.0=靠前, -1.0=靠后
 #   placement.sample_region_kwargs.ref: 参照哪个家具放置（引用 fixture_refs 中的 name）
+  # - name: pot
+  #   obj_groups: pot
+  #   graspable: true
+  #   placement:
+  #     fixture: counter
+  #     sample_region_kwargs:
+  #       ref: stove
+  #     size: [0.50, 0.30]
+  #     pos: ["ref", -1.0]
+
+  # - name: canned_food
+  #   obj_groups: canned_food
+  #   graspable: true
+  #   placement:
+  #     fixture: counter
+  #     sample_region_kwargs:
+  #       ref: stove
+  #     size: [0.20, 0.20]
+  #     pos: ["ref", 1.0]
 
 # 家具引用注册
 # id 使用 FixtureType 枚举名: COUNTER, ISLAND, STOVE, SINK, CABINET, FRIDGE, MICROWAVE 等
@@ -83,3 +102,19 @@ objects:
     placement:
       fixture: island
       size: [0.20, 0.20]
+
+  # # 在台面上放一个罐头
+  # - name: canned_food
+  #   obj_groups: canned_food
+  #   graspable: true
+  #   placement:
+  #     fixture: counter
+  #     size: [0.20, 0.20]
+
+  # # 在台面上放一瓶水
+  # - name: bottled_water
+  #   obj_groups: bottled_water
+  #   graspable: true
+  #   placement:
+  #     fixture: counter
+  #     size: [0.20, 0.20]

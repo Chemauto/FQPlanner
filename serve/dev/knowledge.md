@@ -996,8 +996,9 @@ camera_config = CamUtils.LAYOUT_CAMS.get(self.layout_id, CamUtils.DEFAULT_LAYOUT
 FQPlanner/serve/
 ├── main.py               # 主程序入口（启动仿真 + Flask API + mjviewer）
 ├── tools/
-│   ├── arm.py             # 机械臂控制（move_to, grasp, release, pick_and_place）
-│   └── move.py            # 底盘导航（get_base_info, move, nav）
+│   ├── arm.py             # 机械臂控制（move_to, grasp, place）
+│   ├── move.py            # 底盘导航（get_base_info, move, nav）
+│   └── README.md          # 控制器参数修改记录
 ├── service/
 │   ├── __init__.py
 │   ├── server.py          # Flask API 服务（命令队列架构）
@@ -1009,7 +1010,8 @@ FQPlanner/serve/
 │   ├── config/
 │   │   ├── layout.yaml    # 布局配置（从 robocasa layout07 复制）
 │   │   ├── style.yaml     # 风格配置（从 robocasa style01 复制）
-│   │   └── objects.yaml   # 物体配置（自定义）
+│   │   ├── objects.yaml   # 物体配置（自定义）
+│   │   └── target.yaml    # 物体放置目标点配置
 │   └── utils/
 │       └── get_available_object.py  # 物体类别查询工具
 └── dev/
@@ -1029,9 +1031,8 @@ FQPlanner/serve/
 | `open_gripper(env)` | 打开夹爪 |
 | `close_gripper(env)` | 关闭夹爪 |
 | `is_grasped(env, obj_name)` | 检查是否抓住物体 |
-| `grasp(env, obj_name)` | 完整抓取流程（接近→下降→吸附→关夹爪→提起） |
-| `release(env)` | 释放物体（开夹爪→提起） |
-| `pick_and_place(env, obj_name, target_pos)` | 抓取并放置 |
+| `grasp(env, obj_name)` | 抓取：移近→吸附(0.15m)→关爪→提起 |
+| `place(env, obj_name, target_pos)` | 放置：移近→开爪→瞬移物体→提起 |
 
 `_make_arm_action` 构建 12 维动作向量，始终设置 `action[11] = -1.0`（手臂模式）。
 
@@ -1062,9 +1063,8 @@ FQPlanner/serve/
 | `/base_status` | GET | 查询底座状态（位置、偏航角） |
 | `/objects` | GET | 查询所有物体位置和抓取状态 |
 | `/grasp` | POST | 抓取物体 |
-| `/release` | POST | 释放物体 |
+| `/place` | POST | 放置物体（瞬移到 target.yaml 或自定义坐标） |
 | `/move_to` | POST | 移动末端到目标位置 |
-| `/pick_and_place` | POST | 抓取并放置 |
 | `/nav` | POST | 底盘导航到目标位置 |
 | `/open_gripper` | POST | 打开夹爪 |
 | `/close_gripper` | POST | 关闭夹爪 |

@@ -49,11 +49,15 @@ HTML_PAGE = f"""<!DOCTYPE html>
 </div>
 
 <div class="section">
-  <b>抓取</b><br>
-  物体名: <input id="grasp-obj" value="pot" style="width:80px">
+  <b>抓取 & 放置</b><br>
+  物体: <select id="grasp-obj"></select>
   吸附阈值: <input id="snap-th" value="0.2" style="width:60px"> m
   <button onclick="doGrasp()">抓取</button>
-  <button onclick="doRelease()">释放</button>
+  <button onclick="doPlace()">放置(配置文件)</button>
+  <button onclick="doPlaceCustom()">放置(自定义坐标)</button><br>
+  目标 X: <input id="pl-x" value="0">
+  Y: <input id="pl-y" value="0">
+  Z: <input id="pl-z" value="0.5">
 </div>
 
 <div class="section">
@@ -73,15 +77,6 @@ HTML_PAGE = f"""<!DOCTYPE html>
   Y: <input id="mb-y" value="0">
   Yaw(度): <input id="mb-yaw" value="0" style="width:50px">
   <button onclick="doMoveBase()">移动底座</button>
-</div>
-
-<div class="section">
-  <b>Pick & Place</b><br>
-  物体: <input id="pp-obj" value="pot" style="width:80px">
-  目标 X: <input id="pp-x" value="0">
-  Y: <input id="pp-y" value="0">
-  Z: <input id="pp-z" value="0">
-  <button onclick="doPickPlace()">执行</button>
 </div>
 
 <div class="section">
@@ -125,11 +120,19 @@ async function refreshObjects() {{
   if (!data) return;
   const table = document.getElementById('obj-table');
   table.innerHTML = '<tr><th>名称</th><th>位置</th><th>已抓取</th></tr>';
+  // 更新物体下拉框
+  const sel = document.getElementById('grasp-obj');
+  const prev = sel.value;
+  sel.innerHTML = '';
   for (const [name, info] of Object.entries(data)) {{
     const pos = info.pos.map(v => v.toFixed(3)).join(', ');
     const grasped = info.grasped ? '✓' : '';
     table.innerHTML += `<tr><td>${{name}}</td><td>[${{pos}}]</td><td>${{grasped}}</td></tr>`;
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
   }}
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
 }}
 
 async function doGrasp() {{
@@ -140,8 +143,22 @@ async function doGrasp() {{
   refreshObjects();
 }}
 
-async function doRelease() {{
-  await api('/release', 'POST', {{}});
+async function doPlace() {{
+  const obj = document.getElementById('grasp-obj').value;
+  const x = parseFloat(document.getElementById('pl-x').value);
+  const y = parseFloat(document.getElementById('pl-y').value);
+  const z = parseFloat(document.getElementById('pl-z').value);
+  await api('/place', 'POST', {{obj_name: obj, target: [x, y, z]}});
+  refreshStatus();
+  refreshObjects();
+}}
+
+async function doPlaceCustom() {{
+  const obj = document.getElementById('grasp-obj').value;
+  const x = parseFloat(document.getElementById('pl-x').value);
+  const y = parseFloat(document.getElementById('pl-y').value);
+  const z = parseFloat(document.getElementById('pl-z').value);
+  await api('/place', 'POST', {{obj_name: obj, target: [x, y, z]}});
   refreshStatus();
   refreshObjects();
 }}
@@ -164,16 +181,6 @@ async function doMoveBase() {{
   const currentYaw = baseData.yaw_deg || 0;
   await api('/nav', 'POST', {{x: x, y: y, w: yaw, yaw: currentYaw}});
   refreshStatus();
-}}
-
-async function doPickPlace() {{
-  const obj = document.getElementById('pp-obj').value;
-  const x = parseFloat(document.getElementById('pp-x').value);
-  const y = parseFloat(document.getElementById('pp-y').value);
-  const z = parseFloat(document.getElementById('pp-z').value);
-  await api('/pick_and_place', 'POST', {{obj_name: obj, target: [x, y, z]}});
-  refreshStatus();
-  refreshObjects();
 }}
 
 function doOpenGripper() {{ api('/open_gripper', 'POST', {{}}); }}
