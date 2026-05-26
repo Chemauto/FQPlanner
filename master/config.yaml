@@ -29,14 +29,14 @@ tts:
 # Cloud Server Infos
 model:
   # Model name for the cloud server
-  model_select: "MiniMax-M2.5"
+  model_select: "qwen3.6-35b-a3b"
   # model_select: "robobrain"
 
   # Number of retries for planning
   model_retry_planning: 5
   model_dict:
     # Model name for the cloud server
-    cloud_model: "MiniMax-M2.5"
+    cloud_model: "qwen3.6-35b-a3b"
     # cloud_model: "robobrain"
 
     # Deploy for the cloud server

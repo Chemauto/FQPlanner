@@ -1,14 +1,13 @@
 """
-抓取控制模块 - OmniGibson 真实仿真
-
-替换原版 /home/fangqi/WorkXCJ/FQPlanner/slaver/robot/module/grasp.py
+抓取控制模块 - RoboCasa 仿真
 """
 
-import json
+import os
 import sys
 
-# 将 omnigibson_client.py 复制到同目录后使用:
-from .omnigibson_client import call_omnigibson
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+from serve.sim import grasp_object as _grasp_object
 
 
 def register_tools(mcp):
@@ -18,10 +17,10 @@ def register_tools(mcp):
         """抓取物体。
 
         机器人抓取指定物体。仅当机器人当前没有抓取任何物体时使用。
-        如果已经抓取了物体，需要先使用 release_object 释放，或使用 place_on_top/place_inside 放置。
+        如果已经抓取了物体，需要先使用 release_object 释放。
 
         Args:
-            object_name: 要抓取的物体名称，支持中英文（如 "laptop"、"笔记本电脑"、"apple"、"苹果"）。一次只能抓取一个物体。
+            object_name: 要抓取的物体名称（如 "mug"、"apple"）。一次只能抓取一个物体。
 
         Returns:
             抓取结果，成功或失败信息。
@@ -29,11 +28,10 @@ def register_tools(mcp):
         target = object_name or "unknown_object"
         print(f"[grasp] 开始抓取 '{target}'...", file=sys.stderr)
 
-        result = call_omnigibson("/action/grasp", {"object_name": target})
+        result = _grasp_object(target)
 
         if result.get("success"):
-            response = result.get("result")
-            # result 已经是 JSON 字符串格式 ["消息", {状态}]
+            response = result.get("result", f"成功抓取 {target}")
             print(f"[grasp] ✓ {response}", file=sys.stderr)
             return response
         else:
@@ -41,4 +39,4 @@ def register_tools(mcp):
             print(f"[grasp] ✗ {msg}", file=sys.stderr)
             return msg
 
-    print("[grasp.py] 抓取控制模块已注册 (OmniGibson)", file=sys.stderr)
+    print("[grasp.py] 抓取控制模块已注册 (RoboCasa)", file=sys.stderr)

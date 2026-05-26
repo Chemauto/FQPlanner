@@ -1,13 +1,14 @@
 """
-底盘控制模块 - OmniGibson 真实仿真
-
-替换原版 /home/fangqi/WorkXCJ/FQPlanner/slaver/robot/module/base.py
+底盘控制模块 - RoboCasa 仿真
 """
 
-import json
+import os
 import sys
 
-from .omnigibson_client import call_omnigibson
+# 添加项目根目录到 sys.path，以便导入 serve 模块
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+from serve.sim import navigate, get_base_status
 
 
 def register_tools(mcp):
@@ -16,25 +17,38 @@ def register_tools(mcp):
     async def navigate_to_target(target: str) -> str:
         """导航到目标位置。
 
-        将机器人底盘导航到场景中的指定位置，目标位置需匹配场景配置中的预定义位置。
-        支持中英文位置名称，支持物体名称（自动导航到物体附近）。
+        将机器人底盘导航到场景中的指定位置。
+        支持坐标格式："(x, y)" 或 "x, y"
 
         Args:
-            target: 导航目标位置或物体名称，支持中英文（如 "breakfast_table"、"早餐桌"、"laptop"、"笔记本电脑"）。
+            target: 导航目标位置坐标，格式为 "(x, y)" 或 "x, y"
 
         Returns:
             包含结果消息和状态更新的 JSON 字符串。
 
         Examples:
-            navigate_to_target(target="breakfast_table")
-            navigate_to_target(target="早餐桌")
+            navigate_to_target(target="(1.5, -0.5)")
+            navigate_to_target(target="1.5, -0.5")
         """
         print(f"[base] 导航到 '{target}'...", file=sys.stderr)
 
-        result = call_omnigibson("/action/navigate", {"target_name": target})
+        # 解析坐标
+        try:
+            target = target.strip().strip("()")
+            parts = [float(x.strip()) for x in target.split(",")]
+            if len(parts) < 2:
+                return "错误：坐标格式不正确，需要 (x, y) 格式"
+            x, y = parts[0], parts[1]
+            w = parts[2] if len(parts) > 2 else 0
+        except ValueError as e:
+            return f"错误：无法解析坐标 '{target}': {e}"
+
+        result = navigate(x, y, w)
 
         if result.get("success"):
-            response = result.get("result")
+            pos = result.get("pos", [0, 0, 0])
+            yaw = result.get("yaw", 0)
+            response = f"导航成功，当前位置: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}], 朝向: {yaw:.1f}°"
             print(f"[base] ✓ {response}", file=sys.stderr)
             return response
         else:
@@ -42,4 +56,4 @@ def register_tools(mcp):
             print(f"[base] ✗ {msg}", file=sys.stderr)
             return msg
 
-    print("[base.py] 底盘控制模块已注册 (OmniGibson)", file=sys.stderr)
+    print("[base.py] 底盘控制模块已注册 (RoboCasa)", file=sys.stderr)
