@@ -145,6 +145,24 @@ class GlobalAgent:
                 self.collaborator.record_environment(scene_name, json.dumps(scene_info))
             else:
                 print("Warning: Missing 'name' in scene_info:", scene_info)
+                
+    def _refresh_scene_to_redis(self):
+        """从仿真拉取最新物体坐标，更新到 Redis 供 Slaver 读取。"""
+        try:
+            import requests
+            resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
+            if resp.status_code == 200:
+                sim_objects = resp.json()
+                for obj_name, obj_data in sim_objects.items():
+                    pos = obj_data.get("pos", [])
+                    info = {
+                        "position": f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" if pos else "unknown",
+                        "grasped": obj_data.get("grasped", False),
+                    }
+                    self.collaborator.record_environment(obj_name, json.dumps(info))
+                self.logger.info(f"[SceneRefresh] Updated {len(sim_objects)} objects in Redis")
+        except Exception as e:
+            self.logger.warning(f"[SceneRefresh] Failed: {e}")
 
     def _handle_register(self, robot_name: Dict) -> None:
         robot_info = self.collaborator.read_agent_info(robot_name)
@@ -354,6 +372,7 @@ class GlobalAgent:
             if refresh:
                 self.collaborator.clear_agent_status(robot_name)
 
+            self._refresh_scene_to_redis()
             self.logger.info(f"Sending: {current['subtask']}")
             self.collaborator.send(
                 f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
