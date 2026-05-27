@@ -9,14 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 from serve.sim import grasp_object as _grasp_object
 
-OBJECT_NAME_MAP = {
-    "苹果": "apple",
-    "杯子": "cup",
-    "碗": "bowl",
-    "锅": "pot",
-    "马克杯": "mug",
-    "海绵": "sponge",
-}
 
 def register_tools(mcp):
 
@@ -34,7 +26,6 @@ def register_tools(mcp):
             抓取结果，成功或失败信息。
         """
         target = object_name or "unknown_object"
-        target = OBJECT_NAME_MAP.get(target, target)  # 中文转英文
         print(f"[grasp] 开始抓取 '{target}'...", file=sys.stderr)
 
         result = _grasp_object(target)

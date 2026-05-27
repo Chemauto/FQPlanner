@@ -5,15 +5,6 @@
 import os
 import sys
 
-OBJECT_NAME_MAP = {
-    "苹果": "apple",
-    "杯子": "cup",
-    "碗": "bowl",
-    "锅": "pot",
-    "马克杯": "mug",
-    "海绵": "sponge",
-}
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 from serve.sim import (
@@ -36,8 +27,6 @@ def register_tools(mcp):
         Returns:
             放置结果，成功或失败信息。
         """
-        obj_name = OBJECT_NAME_MAP.get(obj_name, obj_name)      # 中英文转换
-        target_name = OBJECT_NAME_MAP.get(target_name, target_name)  # 中英文转换
         print(f"[place] 将 '{obj_name}' 放在 '{target_name}' 上面...", file=sys.stderr)
 
         objects = get_objects()
@@ -74,7 +63,6 @@ def register_tools(mcp):
         Returns:
             放置结果，成功或失败信息。
         """
-        obj_name = OBJECT_NAME_MAP.get(obj_name, obj_name) #中英文转换
         target_pos = [x, y, z]
         print(f"[place] 将 '{obj_name}' 放到 {target_pos}...", file=sys.stderr)
 

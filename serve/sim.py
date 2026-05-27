@@ -82,7 +82,7 @@ def get_objects():
 # 机械臂控制
 # ============================================================
 
-def grasp_object(obj_name, snap_threshold=0.15):
+def grasp_object(obj_name, snap_threshold=0.5):
     """
     抓取物体
 
