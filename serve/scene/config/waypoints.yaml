@@ -1,0 +1,28 @@
+waypoints:
+  - name: counter_front
+    pos: [1.7, -0.9]
+    serves: [counter, apple, mug, pot, cup]
+
+  - name: counter_left_front
+    pos: [0.5, -0.9]
+    serves: [cabinet, microwave, oven]
+
+  - name: stove_front
+    pos: [3.7, -0.9]
+    serves: [stove]
+
+  - name: island_north
+    pos: [3.2, -1.8]
+    serves: [island, sink, sponge]
+
+  - name: island_east
+    pos: [4.8, -2.7]
+    serves: [island, bowl, cup]
+
+  - name: island_south
+    pos: [3.2, -3.8]
+    serves: [island]
+
+  - name: entrance
+    pos: [0.0, 0.0]
+    serves: []
