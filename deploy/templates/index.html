@@ -99,21 +99,13 @@
             </div>
         </div>
 
-        <!-- 仿真画面 -->
+        <!-- 视频录制 -->
         <div class="card">
-            <h2>仿真画面 <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="saveSnapshot()">保存截图</button></h2>
-            <div style="text-align:center">
-                <img id="sim-cam" src="" alt="仿真画面加载中..." style="width:100%;max-width:640px;border-radius:8px;background:#0f172a;display:block;margin:0 auto">
+            <h2>视频录制</h2>
+            <div class="btn-row" style="justify-content:center">
+                <button class="btn btn-sm" id="btn-record" style="background:#dc2626;color:#fff" onclick="toggleRecord()">开始录制</button>
             </div>
-            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;justify-content:center">
-                <label style="font-size:12px;color:#64748b">刷新频率</label>
-                <select id="cam-fps" onchange="updateCamInterval()" style="padding:4px 8px;border:1px solid #334155;border-radius:4px;background:#0f172a;color:#e2e8f0;font-size:12px">
-                    <option value="2000">0.5秒</option>
-                    <option value="1000" selected>1秒</option>
-                    <option value="500">2帧/秒</option>
-                    <option value="0">暂停</option>
-                </select>
-            </div>
+            <div id="record-info" style="text-align:center;font-size:12px;color:#64748b;margin-top:6px"></div>
         </div>
 
         <!-- 任务发布 -->
@@ -504,29 +496,67 @@
         loadRobotStatus();
         setInterval(loadRobotStatus, 2000);
 
-        // 仿真画面
-        let camTimer = null;
-        function refreshCam() {
-            const img = document.getElementById('sim-cam');
-            img.src = '/api/screenshot?' + Date.now();
-        }
-        function updateCamInterval() {
-            if (camTimer) clearInterval(camTimer);
-            const ms = parseInt(document.getElementById('cam-fps').value);
-            if (ms > 0) {
-                refreshCam();
-                camTimer = setInterval(refreshCam, ms);
+        // 视频录制
+        let isRecording = false;
+        let recordPollTimer = null;
+
+        async function toggleRecord() {
+            const btn = document.getElementById('btn-record');
+            if (!isRecording) {
+                // 开始录制
+                try {
+                    const resp = await fetch('/api/record/start', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fps: 1})});
+                    const data = await resp.json();
+                    if (data.success) {
+                        isRecording = true;
+                        btn.textContent = '停止录制';
+                        btn.style.background = '#16a34a';
+                        pollRecordStatus();
+                    } else {
+                        alert(data.message || '启动录制失败');
+                    }
+                } catch (e) {
+                    alert('请求失败: ' + e.message);
+                }
+            } else {
+                // 停止录制
+                btn.disabled = true;
+                btn.textContent = '保存中...';
+                try {
+                    const resp = await fetch('/api/record/stop', {method: 'POST'});
+                    const data = await resp.json();
+                    if (data.success) {
+                        const info = document.getElementById('record-info');
+                        info.innerHTML = `<span style="color:#22c55e">已保存 ${data.frames} 帧 (${data.duration}s)</span> ` +
+                            `<a href="/api/record/download/${data.filename}" style="color:#38bdf8" download>下载视频</a>`;
+                    } else {
+                        alert(data.message || '录制失败');
+                    }
+                } catch (e) {
+                    alert('请求失败: ' + e.message);
+                }
+                isRecording = false;
+                if (recordPollTimer) { clearInterval(recordPollTimer); recordPollTimer = null; }
+                btn.textContent = '开始录制';
+                btn.style.background = '#dc2626';
+                btn.disabled = false;
             }
         }
-        function saveSnapshot() {
-            const img = document.getElementById('sim-cam');
-            if (!img.src || img.src === '') return;
-            const a = document.createElement('a');
-            a.href = img.src;
-            a.download = 'sim_snapshot_' + new Date().toISOString().replace(/[:.]/g, '-') + '.jpg';
-            a.click();
+
+        async function pollRecordStatus() {
+            if (recordPollTimer) clearInterval(recordPollTimer);
+            recordPollTimer = setInterval(async () => {
+                if (!isRecording) return;
+                try {
+                    const resp = await fetch('/api/record/status');
+                    const data = await resp.json();
+                    if (data.active) {
+                        document.getElementById('record-info').innerHTML =
+                            `<span style="color:#f59e0b">● 录制中... ${data.frames} 帧</span>`;
+                    }
+                } catch (e) {}
+            }, 1000);
         }
-        updateCamInterval();
     </script>
 </body>
 </html>

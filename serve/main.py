@@ -11,7 +11,7 @@ import time
 import numpy as np
 from termcolor import colored
 from utils.utils import create_scene
-from service.server import start_server, process_commands
+from service.server import start_server, process_commands, try_record_frame
 
 
 if __name__ == "__main__":
@@ -41,6 +41,7 @@ if __name__ == "__main__":
     try:
         while True:
             process_commands(env)
+            try_record_frame()
             env.step(idle_action)
             time.sleep(0.01)
     except KeyboardInterrupt:
