@@ -71,8 +71,46 @@ class GlobalTaskPlanner:
         all_robots_info = self.collaborator.read_all_agents_info()
         all_environments_info = self.collaborator.read_environment(name=None)
 
+        # ===== 注入真实物体坐标 =====
+        try:
+            import requests
+            resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
+            if resp.status_code == 200:
+                sim_objects = resp.json()
+                if isinstance(all_environments_info, dict):
+                    for obj_name, obj_data in sim_objects.items():
+                        if obj_name in all_environments_info:
+                            import json as _json
+                            info = _json.loads(all_environments_info[obj_name]) if isinstance(all_environments_info[obj_name], str) else all_environments_info[obj_name]
+                            pos = obj_data.get("pos", [])
+                            info["position"] = f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" if pos else "unknown"
+                            info["grasped"] = obj_data.get("grasped", False)
+                            all_environments_info[obj_name] = info
+        except Exception as e:
+            print(f"[Planner] Warning: could not fetch sim object positions: {e}")
+
+        # ===== 注入工作点信息 =====
+        try:
+            import yaml, os
+            wp_path = os.path.join(
+                os.path.dirname(__file__), '..', '..', 'serve', 'scene', 'config', 'waypoints.yaml'
+            )
+            with open(wp_path) as f:
+                waypoints = yaml.safe_load(f)['waypoints']
+            all_environments_info['_waypoints'] = {
+                w['name']: {'pos': w['pos'], 'serves': w['serves']}
+                for w in waypoints
+            }
+        except Exception as e:
+            print(f"[Planner] Warning: could not load waypoints: {e}")
+        # ===== 注入结束 =====
+
         content = MASTER_PLANNING_PLANNING.format(
-            robot_name_list=all_robots_name, robot_tools_info=all_robots_info, task=task, scene_info=all_environments_info, experience_section=experiences
+            robot_name_list=all_robots_name,
+            robot_tools_info=all_robots_info,
+            task=task,
+            scene_info=all_environments_info,
+            experience_section=experiences
         )
 
         messages = self._build_messages(content, history)

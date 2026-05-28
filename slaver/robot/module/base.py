@@ -1,14 +1,15 @@
 """
-底盘控制模块 - RoboCasa 仿真
+底盘导航模块 - 导航到工作点而非精确坐标
 """
 
 import os
 import sys
 
-# 添加项目根目录到 sys.path，以便导入 serve 模块
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-
 from serve.sim import navigate, get_base_status
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from waypoint_manager import find_waypoint
 
 
 def register_tools(mcp):
@@ -19,40 +20,31 @@ def register_tools(mcp):
 
         将机器人底盘导航到场景中的指定位置。
         支持坐标格式："(x, y)" 或 "x, y"
+        也支持物体名称："apple"、"counter" 等
 
         Args:
-            target: 导航目标位置坐标，格式为 "(x, y)" 或 "x, y"
+            target: 导航目标，可以是物体名称或坐标字符串
 
         Returns:
             包含结果消息和状态更新的 JSON 字符串。
-
-        Examples:
-            navigate_to_target(target="(1.5, -0.5)")
-            navigate_to_target(target="1.5, -0.5")
         """
-        print(f"[base] 导航到 '{target}'...", file=sys.stderr)
+        print(f"[base] 导航请求: '{target}'", file=sys.stderr)
 
-        # 解析坐标
-        try:
-            target = target.strip().strip("()")
-            parts = [float(x.strip()) for x in target.split(",")]
-            if len(parts) < 2:
-                return "错误：坐标格式不正确，需要 (x, y) 格式"
-            x, y = parts[0], parts[1]
-            w = parts[2] if len(parts) > 2 else 0
-        except ValueError as e:
-            return f"错误：无法解析坐标 '{target}': {e}"
+        # 找到最近工作点
+        waypoint = find_waypoint(target)
+        wp_name = waypoint['name']
+        wp_pos = waypoint['pos']
 
-        result = navigate(x, y, w)
+        print(f"[base] 目标工作点: {wp_name} @ {wp_pos}", file=sys.stderr)
 
-        if result.get("success"):
-            pos = result.get("pos", [0, 0, 0])
-            yaw = result.get("yaw", 0)
-            response = f"导航成功，当前位置: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}], 朝向: {yaw:.1f}°"
+        result = _navigate(wp_pos[0], wp_pos[1])
+
+        if result.get('success'):
+            response = f"导航成功，到达工作点 [{wp_name}]，位置: {wp_pos}"
             print(f"[base] ✓ {response}", file=sys.stderr)
             return response
         else:
-            msg = result.get("result", f"导航到 {target} 失败，请重试。")
+            msg = result.get('result', f"导航到工作点 {wp_name} 失败，请重试。")
             print(f"[base] ✗ {msg}", file=sys.stderr)
             return msg
 

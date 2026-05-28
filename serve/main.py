@@ -13,6 +13,7 @@ from termcolor import colored
 from utils.utils import create_scene
 from service.server import start_server, process_commands
 
+
 if __name__ == "__main__":
     # 1. 创建固定场景
     print(colored("正在从 scene/ 加载厨房场景...", "yellow"))
