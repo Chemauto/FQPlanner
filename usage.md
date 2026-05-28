@@ -19,7 +19,7 @@ redis-server
 ```bash
 conda activate robocasa
 cd /home/fangqi/WorkXCJ/FQPlanner/serve
-python main.py
+python sim.py
 ```
 
 验证：
@@ -108,4 +108,4 @@ FQPlanner/
 CLOUD_API_KEY=your_api_key_here
 ```
 
-`slaver/config.yaml` 中 `omnigibson.server_url` 需指向仿真服务地址（默认 `http://127.0.0.1:5001`）。
+`slaver/config.yaml` 中 `robocasa.server_url` 需指向仿真服务地址（默认 `http://127.0.0.1:5001`）。

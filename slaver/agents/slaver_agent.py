@@ -11,9 +11,14 @@ from agent.collaboration import Collaborator
 from mcp import ClientSession
 from rich.panel import Panel
 from rich.text import Text
-from slaver.tools.memory import ActionStep, AgentMemory, SceneMemory
+from slaver.tools.memory import ActionStep, AgentMemory
 from slaver.tools.monitoring import AgentLogger, LogLevel, Monitor
+import os
+
 from slaver.tools.judge import judge_on_failure
+
+# 添加项目根目录到 sys.path，以便导入 serve 模块
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 
 class TaskTerminatedException(Exception):
@@ -58,12 +63,12 @@ class MultiStepAgent:
         self.step_number = 0
         self.state = {}
         self.memory = AgentMemory()
-        self.scene = SceneMemory(collaborator)
         self.logger = AgentLogger(level=verbosity_level, log_file=log_file)
         self.monitor = Monitor(self.model, self.logger)
         self.step_callbacks = step_callbacks if step_callbacks is not None else []
         self.step_callbacks.append(self.monitor.update_metrics)
         self.last_tool_result = None  # Store the last tool execution result
+        self._scene_context = None  # 缓存场景上下文
 
     async def run(
         self,
@@ -94,6 +99,7 @@ class MultiStepAgent:
         if reset:
             self.memory.reset()
             self.step_number = 1
+            self._scene_context = None
 
         self.logger.log_task(
             content=self.task.strip(),
@@ -267,19 +273,6 @@ class ToolCallingAgent(MultiStepAgent):
         # Log to file
         self.logger.log2file(f"Observations: {enhanced_observation}", level=LogLevel.INFO)
 
-        # Only update scene memory on success
-        if not is_failed:
-            memory_input = {
-                "tool_name": tool_name,
-                "arguments": tool_arguments,
-                "result": observation,
-            }
-            try:
-                await self.memory_predict(memory_input)
-            except Exception as e:
-                # print(f"[Scene Update Error] `{e}`")
-                pass
-
         return enhanced_observation
 
     async def _update_robot_state(self, state_updates: dict):
@@ -371,52 +364,74 @@ class ToolCallingAgent(MultiStepAgent):
             # print(f"[Get Position Error] `{e}`")
             return None
 
-    async def memory_predict(self, memory_input: dict) -> str:
-        """
-        Use the model to predict the scene-level effect of the current tool execution.
-        Possible effects: add_object, remove_object, move_object, position.
-        """
-
-        prompt = self.scene.get_action_type_prompt(memory_input)
-
-        model_message: ChatMessage = self.model(
-            task=prompt, current_status="", model_path=self.model_path
-        )
-
-        action_type = model_message.content.strip().lower()
-
-        # 从工具返回结果中提取坐标信息
-        coordinates = None
-        result = memory_input.get("result", "")
-        if isinstance(result, str):
-            try:
-                parsed = json.loads(result)
-                if isinstance(parsed, list) and len(parsed) >= 2:
-                    state_updates = parsed[1] if isinstance(parsed[1], dict) else {}
-                    coordinates = state_updates.get("coordinates")
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        self.scene.apply_action(action_type, json.loads(memory_input["arguments"]), coordinates)
-
     async def _get_enhanced_task_with_context(self) -> str:
         """
-        增强任务描述，添加当前位置和场景信息，帮助 LLM 做出更好的决策。
-
-        Returns:
-            增强后的任务描述字符串
+        增强任务描述，添加场景信息（物体、家具、机器人位置），帮助 LLM 做出更好的决策。
+        场景信息在第一次调用时查询，后续复用缓存。
         """
-        # 获取当前位置信息
-        position_info = await self._get_current_position_info()
+        if self._scene_context is None:
+            self._scene_context = self._build_scene_context()
 
-        # 构建增强的任务描述
-        enhanced_task = self.task
+        parts = []
+        if self._scene_context:
+            parts.append(self._scene_context)
 
-        # 如果有位置信息，添加到任务描述中
-        if position_info:
-            enhanced_task = f"{position_info}\n\nTask: {self.task}"
+        parts.append(f"Task: {self.task}")
+        return "\n\n".join(parts)
 
-        return enhanced_task
+    def _build_scene_context(self) -> str:
+        """查询仿真后端，构建场景上下文文字"""
+        try:
+            from serve.sim import get_scene
+            scene = get_scene()
+            if not scene or "error" in scene:
+                return None
+        except Exception as e:
+            print(f"[SceneContext] 查询场景失败: {e}", file=sys.stderr)
+            return None
+
+        lines = ["## Current Scene"]
+
+        # 家具
+        fixtures = scene.get("fixtures", {})
+        if fixtures:
+            lines.append("\nFixtures:")
+            for name, info in fixtures.items():
+                pos = info.get("pos", [])
+                size = info.get("size", [])
+                ftype = info.get("type", "")
+                # 计算表面高度 = 中心z + 半高
+                if len(pos) >= 3 and len(size) >= 3:
+                    surface_z = pos[2] + size[2] / 2
+                    lines.append(
+                        f"- {name} ({ftype}): pos [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}], "
+                        f"size [{size[0]:.2f}, {size[1]:.2f}, {size[2]:.2f}], "
+                        f"surface_z={surface_z:.2f}"
+                    )
+                else:
+                    lines.append(f"- {name} ({ftype})")
+
+        # 物体
+        objects = scene.get("objects", {})
+        if objects:
+            lines.append("\nObjects:")
+            for name, info in objects.items():
+                pos = info.get("pos", [])
+                grasped = info.get("grasped", False)
+                status = "grasped" if grasped else "free"
+                lines.append(f"- {name}: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}] ({status})")
+
+        # 机器人
+        robot = scene.get("robot", {})
+        if robot:
+            bp = robot.get("base_pos", [])
+            ep = robot.get("ee_pos", [])
+            yaw = robot.get("yaw", 0)
+            lines.append("\nRobot:")
+            lines.append(f"- base: [{bp[0]:.2f}, {bp[1]:.2f}, {bp[2]:.2f}], yaw={yaw:.1f}")
+            lines.append(f"- end-effector: [{ep[0]:.2f}, {ep[1]:.2f}, {ep[2]:.2f}]")
+
+        return "\n".join(lines)
 
     async def step(self, memory_step: ActionStep) -> Union[None, Any]:
         """

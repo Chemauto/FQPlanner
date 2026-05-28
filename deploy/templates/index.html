@@ -70,6 +70,18 @@
         .btn-success:hover { background: #15803d; }
         .btn-danger { background: #dc2626; color: #fff; }
         .btn-danger:hover { background: #b91c1c; }
+        .robot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .robot-info-box { background: #0f172a; border-radius: 8px; padding: 12px; }
+        .robot-info-box h3 { font-size: 13px; color: #94a3b8; margin-bottom: 8px; }
+        .robot-coord { font-family: monospace; font-size: 14px; color: #22c55e; }
+        .robot-yaw { font-family: monospace; font-size: 14px; color: #38bdf8; }
+        .robot-objects { margin-top: 10px; background: #0f172a; border-radius: 8px; padding: 12px; }
+        .robot-objects h3 { font-size: 13px; color: #94a3b8; margin-bottom: 8px; }
+        .obj-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; font-family: monospace; border-bottom: 1px solid #1e293b; }
+        .obj-row:last-child { border-bottom: none; }
+        .obj-name { color: #38bdf8; }
+        .obj-pos { color: #94a3b8; }
+        .obj-grasped { color: #f59e0b; font-size: 11px; }
     </style>
 </head>
 <body>
@@ -78,6 +90,31 @@
         <div class="subtitle">Master-Slaver 机器人协作系统</div>
 
         <div class="status-bar" id="status"></div>
+
+        <!-- 机器人实时坐标 -->
+        <div class="card">
+            <h2>机器人坐标 <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="loadRobotStatus()">刷新</button></h2>
+            <div id="robot-status-content">
+                <div style="color:#64748b;font-size:13px">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 仿真画面 -->
+        <div class="card">
+            <h2>仿真画面 <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="saveSnapshot()">保存截图</button></h2>
+            <div style="text-align:center">
+                <img id="sim-cam" src="" alt="仿真画面加载中..." style="width:100%;max-width:640px;border-radius:8px;background:#0f172a;display:block;margin:0 auto">
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;justify-content:center">
+                <label style="font-size:12px;color:#64748b">刷新频率</label>
+                <select id="cam-fps" onchange="updateCamInterval()" style="padding:4px 8px;border:1px solid #334155;border-radius:4px;background:#0f172a;color:#e2e8f0;font-size:12px">
+                    <option value="2000">0.5秒</option>
+                    <option value="1000" selected>1秒</option>
+                    <option value="500">2帧/秒</option>
+                    <option value="0">暂停</option>
+                </select>
+            </div>
+        </div>
 
         <!-- 任务发布 -->
         <div class="card">
@@ -140,31 +177,6 @@
                 <button class="btn btn-primary btn-sm" onclick="updateScene()">更新</button>
             </div>
             <div class="msg" id="scene-msg"></div>
-        </div>
-
-        <!-- 视频录制 -->
-        <div class="card">
-            <h2>视频录制</h2>
-            <p style="font-size:13px;color:#64748b;margin-bottom:12px">任务执行前开启录制，每个动作自动录一帧（1fps），停止后保存为 mp4</p>
-            <div class="btn-row">
-                <button class="btn btn-primary btn-sm" id="btn-record-start" onclick="recordStart()">开始录制</button>
-                <button class="btn btn-danger btn-sm" id="btn-record-stop" onclick="recordStop()" disabled>停止并保存</button>
-            </div>
-            <div class="msg" id="record-msg" style="margin-top:10px"></div>
-            <div id="record-status" style="margin-top:10px;font-size:13px;color:#64748b"></div>
-        </div>
-
-        <!-- 仿真画面 -->
-        <div class="card">
-            <h2>仿真画面</h2>
-            <p style="font-size:13px;color:#64748b;margin-bottom:12px">任务完成后点击刷新，推进仿真一步并截图（约30-60秒）</p>
-            <div class="btn-row">
-                <button class="btn btn-primary btn-sm" id="btn-capture" onclick="stepAndCapture()">刷新画面</button>
-            </div>
-            <div class="msg" id="capture-msg" style="margin-top:10px"></div>
-            <div id="capture-area" style="margin-top:12px;text-align:center;display:none">
-                <img id="capture-img" style="max-width:100%;border-radius:8px;border:1px solid #334155" />
-            </div>
         </div>
     </div>
 
@@ -440,109 +452,81 @@
             }
         }
 
-        // 视频录制
-        let recordPolling = null;
-
-        function updateRecordUI(recording, frames) {
-            const btnStart = document.getElementById('btn-record-start');
-            const btnStop = document.getElementById('btn-record-stop');
-            const status = document.getElementById('record-status');
-            btnStart.disabled = recording;
-            btnStop.disabled = !recording;
-            if (recording) {
-                status.textContent = `录制中... 已录 ${frames} 帧`;
-                status.style.color = '#ef4444';
-            } else if (frames > 0) {
-                status.textContent = `已停止，共 ${frames} 帧`;
-                status.style.color = '#22c55e';
-            } else {
-                status.textContent = '';
-            }
-        }
-
-        async function recordStart() {
+        // 机器人实时坐标
+        async function loadRobotStatus() {
+            const el = document.getElementById('robot-status-content');
             try {
-                const resp = await fetch('/api/record/start', {method: 'POST'});
+                const resp = await fetch('/api/robot_status');
                 const data = await resp.json();
-                if (data.success) {
-                    showMsg('record-msg', true, '录制已开始');
-                    updateRecordUI(true, 1);
-                    startRecordPolling();
-                } else {
-                    showMsg('record-msg', false, data.result || '开始录制失败');
+                if (data.error) {
+                    el.innerHTML = `<div style="color:#ef4444;font-size:13px">${data.error}</div>`;
+                    return;
                 }
+
+                const robot = data.robot || {};
+                const bp = robot.base_pos || [0, 0, 0];
+                const ep = robot.ee_pos || [0, 0, 0];
+                const yaw = (robot.yaw || 0).toFixed(1);
+
+                let html = `<div class="robot-grid">
+                    <div class="robot-info-box">
+                        <h3>底盘位置</h3>
+                        <div class="robot-coord">[${bp.map(v => v.toFixed(3)).join(', ')}]</div>
+                    </div>
+                    <div class="robot-info-box">
+                        <h3>末端位置</h3>
+                        <div class="robot-coord">[${ep.map(v => v.toFixed(3)).join(', ')}]</div>
+                    </div>
+                </div>
+                <div style="margin-top:8px;font-size:13px;color:#94a3b8">朝向: <span class="robot-yaw">${yaw}°</span></div>`;
+
+                // 物体列表
+                const objects = data.objects || {};
+                const objNames = Object.keys(objects);
+                if (objNames.length > 0) {
+                    html += `<div class="robot-objects"><h3>物体</h3>`;
+                    for (const [name, info] of Object.entries(objects)) {
+                        const pos = (info.pos || []).map(v => v.toFixed(3)).join(', ');
+                        const grasped = info.grasped ? '<span class="obj-grasped"> grasped</span>' : '';
+                        html += `<div class="obj-row">
+                            <span class="obj-name">${name}${grasped}</span>
+                            <span class="obj-pos">[${pos}]</span>
+                        </div>`;
+                    }
+                    html += `</div>`;
+                }
+
+                el.innerHTML = html;
             } catch (e) {
-                showMsg('record-msg', false, '请求失败: ' + e.message);
+                el.innerHTML = `<div style="color:#ef4444;font-size:13px">加载失败: ${e.message}</div>`;
             }
         }
-
-        async function recordStop() {
-            stopRecordPolling();
-            try {
-                const resp = await fetch('/api/record/stop', {method: 'POST'});
-                const data = await resp.json();
-                if (data.success) {
-                    showMsg('record-msg', true, data.result);
-                    updateRecordUI(false, 0);
-                } else {
-                    showMsg('record-msg', false, data.result || '停止录制失败');
-                }
-            } catch (e) {
-                showMsg('record-msg', false, '请求失败: ' + e.message);
-            }
-        }
-
-        async function pollRecordStatus() {
-            try {
-                const resp = await fetch('/api/record/status');
-                const data = await resp.json();
-                if (data.recording) {
-                    updateRecordUI(true, data.frames);
-                }
-            } catch {}
-        }
-
-        function startRecordPolling() {
-            stopRecordPolling();
-            recordPolling = setInterval(pollRecordStatus, 2000);
-        }
-
-        function stopRecordPolling() {
-            if (recordPolling) {
-                clearInterval(recordPolling);
-                recordPolling = null;
-            }
-        }
+        loadRobotStatus();
+        setInterval(loadRobotStatus, 2000);
 
         // 仿真画面
-        async function stepAndCapture() {
-            const btn = document.getElementById('btn-capture');
-            const msg = document.getElementById('capture-msg');
-            const area = document.getElementById('capture-area');
-            const img = document.getElementById('capture-img');
-            btn.disabled = true;
-            btn.textContent = '渲染中，请稍候...';
-            msg.className = 'msg msg-ok';
-            msg.textContent = '正在推进仿真并截图，这可能需要30-60秒...';
-            msg.style.display = 'block';
-            try {
-                const resp = await fetch('/api/sim/step_and_capture', {method: 'POST'});
-                const data = await resp.json();
-                if (data.success && data.image) {
-                    img.src = 'data:image/png;base64,' + data.image;
-                    area.style.display = 'block';
-                    msg.textContent = '画面已刷新';
-                } else {
-                    msg.className = 'msg msg-err';
-                    msg.textContent = data.result || '截图失败';
-                }
-            } catch (e) {
-                msg.className = 'msg msg-err';
-                msg.textContent = '请求失败: ' + e.message;
-            }
-            btn.disabled = false;
-            btn.textContent = '刷新画面';
+        let camTimer = null;
+        function refreshCam() {
+            const img = document.getElementById('sim-cam');
+            img.src = '/api/screenshot?' + Date.now();
         }
+        function updateCamInterval() {
+            if (camTimer) clearInterval(camTimer);
+            const ms = parseInt(document.getElementById('cam-fps').value);
+            if (ms > 0) {
+                refreshCam();
+                camTimer = setInterval(refreshCam, ms);
+            }
+        }
+        function saveSnapshot() {
+            const img = document.getElementById('sim-cam');
+            if (!img.src || img.src === '') return;
+            const a = document.createElement('a');
+            a.href = img.src;
+            a.download = 'sim_snapshot_' + new Date().toISOString().replace(/[:.]/g, '-') + '.jpg';
+            a.click();
+        }
+        updateCamInterval();
     </script>
 </body>
 </html>

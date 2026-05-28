@@ -1,7 +1,7 @@
 """
 sim.py - RoboCasa 仿真接口
 
-提供与 OmniGibson 兼容的 API 接口，供 MCP 工具调用。
+提供统一的仿真 API 接口，供 MCP 工具调用。
 使用 urllib 标准库，无需额外安装依赖。
 
 使用方式:
@@ -76,6 +76,11 @@ def get_base_status():
 def get_objects():
     """获取所有物体位置和抓取状态"""
     return call_sim("/objects")
+
+
+def get_scene():
+    """获取完整场景信息：物体、家具、机器人位置"""
+    return call_sim("/scene")
 
 
 # ============================================================

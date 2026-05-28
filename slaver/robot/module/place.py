@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 from serve.sim import (
     place_object as _place_object,
     open_gripper as _open_gripper,
-    get_objects,
+    get_scene,
 )
 
 
@@ -29,15 +29,30 @@ def register_tools(mcp):
         """
         print(f"[place] 将 '{obj_name}' 放在 '{target_name}' 上面...", file=sys.stderr)
 
-        objects = get_objects()
-        if not objects or "error" in objects:
-            return f"无法获取物体信息，请检查仿真状态"
+        scene = get_scene()
+        if not scene or "error" in scene:
+            return f"无法获取场景信息，请检查仿真状态"
 
-        if target_name not in objects:
-            return f"未找到目标物体 '{target_name}'"
-
-        target_pos = objects[target_name]["pos"]
-        place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.05]
+        # 在 objects 中查找
+        objects = scene.get("objects", {})
+        if target_name in objects:
+            target_pos = objects[target_name]["pos"]
+            place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.05]
+        else:
+            # 在 fixtures 中查找（支持模糊匹配）
+            fixtures = scene.get("fixtures", {})
+            matched = None
+            for fname in fixtures:
+                if target_name in fname or fname in target_name:
+                    matched = fname
+                    break
+            if not matched:
+                return f"未找到目标 '{target_name}'（不在物体或家具列表中）"
+            fpos = fixtures[matched]["pos"]
+            fsize = fixtures[matched]["size"]
+            # 放在家具表面：x, y 取家具中心，z 取表面高度
+            surface_z = fpos[2] + fsize[2] / 2
+            place_pos = [fpos[0], fpos[1], surface_z + 0.05]
 
         result = _place_object(obj_name, place_pos)
 

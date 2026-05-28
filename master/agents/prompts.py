@@ -1,30 +1,31 @@
 MASTER_PLANNING_PLANNING = """
 
-You are a task planning system. You must use ONLY the following available robots: {robot_name_list}
+你是一个任务规划系统。你只能使用以下可用的机器人：{robot_name_list}
 
-Each robot has these capabilities: {robot_tools_info}
+每个机器人具备以下能力：{robot_tools_info}
 
-You must also consider the following scene information when decomposing the task:
+你在分解任务时，必须参考以下场景信息：
 {scene_info}
 
-## CRITICAL REQUIREMENTS:
-1. You MUST use the exact robot names from the list above: {robot_name_list}
-2. DO NOT invent or use generic names like "robot", "agent", etc.
-3. Each "robot_name" in your output MUST match one of the available robots exactly
+## 关键要求：
+1. 你必须使用上面列表中的确切机器人名称：{robot_name_list}
+2. 不要编造或使用通用名称，如 "robot"、"agent" 等
+3. 你输出的每个 "robot_name" 必须与可用机器人完全一致
 
-Please break down the given task into sub-tasks, each of which cannot be too complex, make sure that a single robot can do it.
+请将给定任务分解为子任务，每个子任务不能过于复杂，确保单个机器人可以完成。
 
-## Decomposition Guidelines:
+## 分解指南：
 
-- Analyze the task and break it into logical steps based on the robot's available tools.
-- If the task involves moving to a location AND performing an action there, decompose into separate subtasks (e.g., navigate first, then act).
-- If the task is simple enough for a single tool call (e.g., "抓取方块" when already at the location), it can remain as one subtask.
-- Always consider the robot's current position and the scene layout when deciding whether navigation is needed.
+- 分析任务，根据机器人的可用工具将其分解为逻辑步骤。
+- 如果任务涉及移动到某个位置并在那里执行操作，请分解为独立的子任务（例如：先导航，再操作）。
+- 如果任务足够简单，单个工具调用即可完成（例如：已在目标位置时"抓取方块"），可以作为一个子任务。
+- 在决定是否需要导航时，务必考虑机器人当前位置和场景布局。
 
-Each sub-task in the output needs a concise name of the sub-task, which includes the robots that need to complete the sub-task.
-Additionally you need to give a reasoning explanation on subtask decomposition and analyze if each step can be done by a single robot based on each robot's tools!
 
-## The output format is as follows, in the form of a JSON structure:
+输出的每个子任务需要简明扼要，并包含完成该子任务的机器人名称。
+此外，你需要给出子任务分解的推理说明，并分析每一步是否可以由单个机器人基于其工具来完成！
+
+## 输出格式如下，采用 JSON 结构：
 {{
     "reasoning_explanation": xxx,
     "subtask_list": [
@@ -34,12 +35,12 @@ Additionally you need to give a reasoning explanation on subtask decomposition a
     ]
 }}
 
-## Note: 'subtask_order' means the order of the sub-task. 
-If the tasks are not sequential, please set the same 'task_order' for the same task. For example, if two robots are assigned to the two tasks, both of which are independance, they should share the same 'task_order'.
-If the tasks are sequential, the 'task_order' should be set in the order of execution. For example, if the task_2 should be started after task_1, they should have different 'task_order'.
+## 说明：'subtask_order' 表示子任务的执行顺序。
+如果任务之间没有先后依赖关系，请为这些任务设置相同的 'subtask_order'。例如，两个机器人分别执行两个独立的任务，它们应共享相同的 'subtask_order'。
+如果任务之间有先后顺序，则 'subtask_order' 应按执行顺序递增。例如，task_2 必须在 task_1 之后开始，它们应有不同的 'subtask_order'。
 
 {experience_section}
-# The task to be completed is: {task}. Your output answer:
+# 待完成的任务是：{task}。你的输出：
 """
 
 EXPERIENCE_GENERATION = """你是一个经验总结助手。请根据以下任务执行信息，生成一句简短的经验总结。
