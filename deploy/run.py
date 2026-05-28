@@ -6,6 +6,7 @@ FQPlanner 任务控制台
 """
 
 import ast
+import io
 import json
 import os
 from pathlib import Path
@@ -13,12 +14,12 @@ from pathlib import Path
 import redis
 import requests
 import yaml
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 app = Flask(__name__)
 
 MASTER_URL = "http://127.0.0.1:5000"
-OG_URL = "http://127.0.0.1:5001"
+SIM_URL = "http://127.0.0.1:5001"
 REDIS_CFG = {"host": "127.0.0.1", "port": 6379, "db": 0, "password": None}
 
 
@@ -285,67 +286,32 @@ def get_tool_config():
             return jsonify({"success": False, "message": f"MCP 服务不可达: {e}", "data": []}), 400
 
 
-# ============ 录制代理 ============
-
-
-@app.route("/api/record/start", methods=["POST"])
-def record_start():
-    """转发录制开始请求到 OmniGibson"""
+@app.route("/api/robot_status", methods=["GET"])
+def robot_status():
+    """代理仿真后端的场景信息（机器人坐标、物体、家具）"""
     try:
-        resp = requests.post(f"{OG_URL}/record/start", timeout=10)
+        resp = requests.get(f"{SIM_URL}/scene", timeout=5)
         return jsonify(resp.json()), resp.status_code
     except requests.exceptions.ConnectionError:
-        return jsonify({"success": False, "result": "OmniGibson 服务器未启动"}), 503
+        return jsonify({"error": "仿真服务未启动"}), 503
     except Exception as e:
-        return jsonify({"success": False, "result": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/record/stop", methods=["POST"])
-def record_stop():
-    """转发录制停止请求到 OmniGibson"""
+@app.route("/api/screenshot", methods=["GET"])
+def screenshot():
+    """代理仿真后端的截图"""
     try:
-        resp = requests.post(f"{OG_URL}/record/stop", timeout=30)
-        return jsonify(resp.json()), resp.status_code
+        w = request.args.get("width", 640)
+        h = request.args.get("height", 480)
+        resp = requests.get(f"{SIM_URL}/screenshot", params={"width": w, "height": h}, timeout=15)
+        if resp.status_code == 200:
+            return send_file(io.BytesIO(resp.content), mimetype="image/jpeg")
+        return jsonify({"error": "截图失败"}), resp.status_code
     except requests.exceptions.ConnectionError:
-        return jsonify({"success": False, "result": "OmniGibson 服务器未启动"}), 503
+        return jsonify({"error": "仿真服务未启动"}), 503
     except Exception as e:
-        return jsonify({"success": False, "result": str(e)}), 500
-
-
-@app.route("/api/record/status", methods=["GET"])
-def record_status():
-    """转发录制状态查询到 OmniGibson"""
-    try:
-        resp = requests.get(f"{OG_URL}/record/status", timeout=5)
-        return jsonify(resp.json()), resp.status_code
-    except requests.exceptions.ConnectionError:
-        return jsonify({"success": False, "recording": False, "frames": 0}), 503
-    except Exception as e:
-        return jsonify({"success": False, "recording": False, "frames": 0}), 500
-
-
-@app.route("/api/sim/step", methods=["POST"])
-def proxy_sim_step():
-    """转发仿真步进请求到 OmniGibson（较慢，超时 300 秒）"""
-    try:
-        resp = requests.post(f"{OG_URL}/sim/step", timeout=300)
-        return jsonify(resp.json()), resp.status_code
-    except requests.exceptions.ConnectionError:
-        return jsonify({"success": False, "result": "OmniGibson 服务器未启动"}), 503
-    except Exception as e:
-        return jsonify({"success": False, "result": str(e)}), 500
-
-
-@app.route("/api/sim/step_and_capture", methods=["POST"])
-def proxy_sim_step_capture():
-    """转发仿真步进+截图请求到 OmniGibson（较慢，超时 300 秒）"""
-    try:
-        resp = requests.post(f"{OG_URL}/sim/step_and_capture", timeout=300)
-        return jsonify(resp.json()), resp.status_code
-    except requests.exceptions.ConnectionError:
-        return jsonify({"success": False, "result": "OmniGibson 服务器未启动"}), 503
-    except Exception as e:
-        return jsonify({"success": False, "result": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

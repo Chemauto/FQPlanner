@@ -3,9 +3,10 @@ server.py - Flask API 服务
 通过命令队列与仿真器主循环通信，避免多线程同时调用 env.step()
 """
 
+import io
 import threading
 import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 from tools.arm import (
@@ -14,6 +15,7 @@ from tools.arm import (
     open_gripper, close_gripper, is_grasped,
 )
 from tools.move import get_base_info, nav
+from utils.utils import get_fixture_detail
 
 app = Flask(__name__)
 CORS(app)
@@ -22,6 +24,8 @@ _env_holder = {"env": None}
 _cmd_queue = []      # 命令队列
 _results = {}        # 命令结果缓存
 _lock = threading.Lock()
+_last_screenshot = None      # 缓存最近一帧截图（JPEG bytes）
+_screenshot_lock = threading.Lock()
 
 
 def get_lock():
@@ -100,6 +104,20 @@ def process_commands(env):
             elif cmd_type == "nav":
                 info = nav(env, **params)
                 result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
+            elif cmd_type == "screenshot":
+                width = params.get("width", 640)
+                height = params.get("height", 480)
+                try:
+                    img = env.sim.render(width, height, camera_name="frontview")
+                    from PIL import Image
+                    pil_img = Image.fromarray(img)
+                    buf = io.BytesIO()
+                    pil_img.save(buf, format="JPEG", quality=85)
+                    with _screenshot_lock:
+                        _last_screenshot = buf.getvalue()
+                    result = {"success": True}
+                except Exception as e:
+                    result = {"success": False, "error": str(e)}
             else:
                 result = {"error": f"未知命令: {cmd_type}"}
         except Exception as e:
@@ -142,6 +160,79 @@ def api_objects():
         pos = get_obj_pos(env, name)
         result[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
     return jsonify(result)
+
+
+@app.route("/scene", methods=["GET"])
+def api_scene():
+    """返回完整场景信息：物体、家具、机器人"""
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+
+    # 物体
+    objects = {}
+    for name in env.objects:
+        pos = get_obj_pos(env, name)
+        objects[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
+
+    # 家具
+    fixtures = {}
+    for name in env.fixtures:
+        detail = get_fixture_detail(env, name)
+        for fname, info in detail.items():
+            fixtures[fname] = {
+                "pos": info["pos"].tolist(),
+                "size": info["size"].tolist(),
+                "type": info["type"],
+            }
+
+    # 机器人
+    arm_info = get_arm_info(env)
+    base_info = get_base_info(env)
+    robot = {
+        "base_pos": base_info["pos"],
+        "ee_pos": arm_info["ee_pos"],
+        "yaw": base_info.get("yaw_deg", 0),
+    }
+
+    return jsonify(_np_to_list({
+        "objects": objects,
+        "fixtures": fixtures,
+        "robot": robot,
+    }))
+
+
+# ============================================================
+# 截图（主循环渲染，Flask 返回）
+# ============================================================
+
+@app.route("/screenshot", methods=["GET"])
+def api_screenshot():
+    """获取当前仿真画面截图（JPEG）"""
+    event = threading.Event()
+
+    def on_rendered():
+        event.set()
+
+    cmd = {
+        "id": id(event),
+        "type": "screenshot",
+        "params": {
+            "width": int(request.args.get("width", 640)),
+            "height": int(request.args.get("height", 480)),
+        },
+        "event": event,
+    }
+    with _lock:
+        _cmd_queue.append(cmd)
+    event.wait(timeout=10)
+
+    with _screenshot_lock:
+        img_data = _last_screenshot
+
+    if img_data:
+        return send_file(io.BytesIO(img_data), mimetype="image/jpeg")
+    return jsonify({"error": "截图失败"}), 500
 
 
 # ============================================================

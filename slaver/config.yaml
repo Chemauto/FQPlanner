@@ -63,7 +63,7 @@ robot:
 # Output reasoning context, time cost and other information
 profiling: true
 
-# OmniGibson Simulation Server
-omnigibson:
+# RoboCasa Simulation Server
+robocasa:
   server_url: "http://127.0.0.1:5001"
   timeout: 120
