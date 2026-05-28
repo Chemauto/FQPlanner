@@ -19,45 +19,54 @@ from serve.sim import (
     open_gripper as _open_gripper,
     get_objects,
 )
-
+def _find_fixture_pos(target_name):
+    """在 fixtures 里找最匹配的家具位置"""
+    import requests
+    resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
+    if resp.status_code != 200:
+        return None
+    fixtures = resp.json()
+    
+    # 精确匹配
+    if target_name in fixtures:
+        return fixtures[target_name]["pos"]
+    
+    # 模糊匹配：找包含 target_name 且包含 "main" 的键
+    candidates = [k for k in fixtures if target_name in k and "main" in k]
+    if not candidates:
+        candidates = [k for k in fixtures if target_name in k]
+    if candidates:
+        return fixtures[candidates[0]]["pos"]
+    return None
 
 def register_tools(mcp):
 
     @mcp.tool()
     async def place_on_top(obj_name: str, target_name: str) -> str:
-        """将物体放置在目标物体上面。
-
-        Args:
-            obj_name: 要放置的物体名称（如 "mug"）
-            target_name: 目标物体名称（如 "table"、"plate"）
-
-        Returns:
-            放置结果，成功或失败信息。
-        """
-        obj_name = OBJECT_NAME_MAP.get(obj_name, obj_name)      # 加这行
-        target_name = OBJECT_NAME_MAP.get(target_name, target_name)  # 加这行
-        print(f"[place] 将 '{obj_name}' 放在 '{target_name}' 上面...", file=sys.stderr)
-
+        obj_name = OBJECT_NAME_MAP.get(obj_name, obj_name)
+        target_name = OBJECT_NAME_MAP.get(target_name, target_name)
+        
+        import requests
+        
+        # 先查可操作物体
         objects = get_objects()
-        if not objects or "error" in objects:
-            return f"无法获取物体信息，请检查仿真状态"
-
-        if target_name not in objects:
-            return f"未找到目标物体 '{target_name}'"
-
-        target_pos = objects[target_name]["pos"]
-        place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.05]
-
-        result = _place_object(obj_name, place_pos)
-
-        if result.get("success"):
-            response = result.get("result", f"成功将 {obj_name} 放在 {target_name} 上面")
-            print(f"[place] ✓ {response}", file=sys.stderr)
-            return response
+        target_pos = None
+        
+        if objects and target_name in objects:
+            target_pos = objects[target_name]["pos"]
+            place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.05]
         else:
-            msg = result.get("result", f"放置失败，请重试。")
-            print(f"[place] ✗ {msg}", file=sys.stderr)
-            return msg
+            # fallback 到 fixtures 模糊匹配
+            target_pos = _find_fixture_pos(target_name)
+            if target_pos is None:
+                return f"未找到目标 '{target_name}'"
+            place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.15]
+        
+        result = _place_object(obj_name, place_pos)
+        if result.get("success"):
+            return result.get("result", f"成功将 {obj_name} 放在 {target_name} 上面")
+        else:
+            return result.get("result", "放置失败，请重试。")
 
     @mcp.tool()
     async def place_object(obj_name: str, x: float, y: float, z: float) -> str:

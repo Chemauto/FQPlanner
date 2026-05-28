@@ -143,6 +143,20 @@ def api_objects():
         result[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
     return jsonify(result)
 
+@app.route("/fixtures", methods=["GET"])
+def api_fixtures():
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+    result = {}
+    for name, fixture in env.fixtures.items():
+        try:
+            body_id = env.sim.model.body_name2id(fixture.root_body)
+            pos = env.sim.data.body_xpos[body_id].copy()
+            result[name] = {"pos": pos.tolist()}
+        except Exception:
+            pass
+    return jsonify(result)
 
 # ============================================================
 # 控制命令（走队列）

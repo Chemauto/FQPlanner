@@ -145,7 +145,7 @@ class GlobalAgent:
                 self.collaborator.record_environment(scene_name, json.dumps(scene_info))
             else:
                 print("Warning: Missing 'name' in scene_info:", scene_info)
-                
+
     def _refresh_scene_to_redis(self):
         """从仿真拉取最新物体坐标，更新到 Redis 供 Slaver 读取。"""
         try:
@@ -372,7 +372,7 @@ class GlobalAgent:
             if refresh:
                 self.collaborator.clear_agent_status(robot_name)
 
-            self._refresh_scene_to_redis()
+            #self._refresh_scene_to_redis()
             self.logger.info(f"Sending: {current['subtask']}")
             self.collaborator.send(
                 f"fqplanner_to_{robot_name}", json.dumps(subtask_data)

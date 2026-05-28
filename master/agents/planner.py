@@ -160,3 +160,52 @@ class GlobalTaskPlanner:
         elif not isinstance(raw, str):
             raw = str(raw)
         return raw
+
+    def _get_simplified_fixtures(self) -> dict:
+        """动态从 /fixtures 拉取，用语义匹配归纳成简单名字"""
+        if hasattr(self, '_fixture_cache'):
+            return self._fixture_cache
+        
+        try:
+            import requests
+            resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
+            if resp.status_code != 200:
+                return {}
+            
+            fixtures = resp.json()
+            
+            candidates = {
+                k: v for k, v in fixtures.items()
+            }
+            
+            # 用 LLM 归纳简单名字
+            prompt = f"""Below is a list of fixture names from a kitchen simulation. 
+    Group them by the type of furniture they represent and give each group a simple English name (like "counter", "island", "stove", "sink", "cabinet", "fridge", "microwave").
+    For each simple name, pick the single most representative fixture key (prefer keys with "main" in the name).
+
+    Fixture keys: {list(candidates.keys())}
+
+    Return ONLY a JSON object like:
+    {{"counter": "counter_1_main_group", "island": "island_island_group", "stove": "stovetop_main_group"}}
+    No explanation, no markdown."""
+
+            messages = [{"role": "user", "content": prompt}]
+            result = self._call_llm(messages)
+            
+            import json, re
+            # 提取 JSON
+            match = re.search(r'\{.*\}', result, re.DOTALL)
+            if match:
+                mapping = json.loads(match.group())
+                # 把坐标填进去
+                simplified = {}
+                for simple_name, fixture_key in mapping.items():
+                    if fixture_key in fixtures:
+                        simplified[simple_name] = fixtures[fixture_key]
+                self._fixture_cache = simplified
+                return simplified
+        except Exception as e:
+            print(f"[Planner] fixture simplification failed: {e}")
+        
+        self._fixture_cache = {}
+        return {}
