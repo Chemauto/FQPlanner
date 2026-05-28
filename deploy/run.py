@@ -298,20 +298,46 @@ def robot_status():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/screenshot", methods=["GET"])
-def screenshot():
-    """代理仿真后端的截图"""
+@app.route("/api/record/start", methods=["POST"])
+def record_start():
+    """代理仿真后端：开始录制"""
     try:
-        w = request.args.get("width", 640)
-        h = request.args.get("height", 480)
-        resp = requests.get(f"{SIM_URL}/screenshot", params={"width": w, "height": h}, timeout=15)
+        resp = requests.post(f"{SIM_URL}/record/start", json=request.json or {}, timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"success": False, "message": "仿真服务未启动"}), 503
+
+
+@app.route("/api/record/stop", methods=["POST"])
+def record_stop():
+    """代理仿真后端：停止录制"""
+    try:
+        resp = requests.post(f"{SIM_URL}/record/stop", timeout=30)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"success": False, "message": "仿真服务未启动"}), 503
+
+
+@app.route("/api/record/status", methods=["GET"])
+def record_status():
+    """代理仿真后端：录制状态"""
+    try:
+        resp = requests.get(f"{SIM_URL}/record/status", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"active": False}), 503
+
+
+@app.route("/api/record/download/<filename>", methods=["GET"])
+def record_download(filename):
+    """代理仿真后端：下载视频"""
+    try:
+        resp = requests.get(f"{SIM_URL}/record/download/{filename}", timeout=30, stream=True)
         if resp.status_code == 200:
-            return send_file(io.BytesIO(resp.content), mimetype="image/jpeg")
-        return jsonify({"error": "截图失败"}), resp.status_code
+            return send_file(io.BytesIO(resp.content), mimetype="video/mp4", as_attachment=True, download_name=filename)
+        return jsonify({"error": "下载失败"}), resp.status_code
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "仿真服务未启动"}), 503
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

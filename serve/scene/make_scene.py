@@ -56,6 +56,26 @@ class MyKitchen(Kitchen):
         self.mujoco_arena.set_origin([0, 0, 0])
         CamUtils.set_cameras(self)
 
+        # 添加世界坐标固定的俯视相机
+        import xml.etree.ElementTree as ET
+        overhead_cam = ET.Element(
+            "camera",
+            name="overhead_cam",
+            pos="3 -2 3",
+            fovy="60",
+        )
+        self.mujoco_arena.worldbody.append(overhead_cam)
+
+        # 侧面相机：朝 +y 方向看
+        side_cam = ET.Element(
+            "camera",
+            name="side_cam",
+            pos="3 -4.5 1",
+            quat="0.707 0.707 0 0",
+            fovy="60",
+        )
+        self.mujoco_arena.worldbody.append(side_cam)
+
         if self.renderer == "mjviewer":
             camera_config = CamUtils.LAYOUT_CAMS.get(
                 self.layout_id, CamUtils.DEFAULT_LAYOUT_CAM

@@ -3,7 +3,8 @@ server.py - Flask API 服务
 通过命令队列与仿真器主循环通信，避免多线程同时调用 env.step()
 """
 
-import io
+import os
+import time
 import threading
 import numpy as np
 from flask import Flask, request, jsonify, send_file
@@ -24,8 +25,69 @@ _env_holder = {"env": None}
 _cmd_queue = []      # 命令队列
 _results = {}        # 命令结果缓存
 _lock = threading.Lock()
-_last_screenshot = None      # 缓存最近一帧截图（JPEG bytes）
-_screenshot_lock = threading.Lock()
+
+# 录制状态
+_recording = {
+    "active": False,
+    "frames": [],
+    "fps": 1,
+    "view_height": 240,
+    "view_width": 320,
+    "last_capture": 0,
+    "interval": 1.0,
+}
+
+RECORD_CAMERAS = [
+    ("overhead_cam",       "Top",   False),
+    ("side_cam",           "Side",  True),
+    ("robot0_frontview",   "Front", True),
+    ("robot0_eye_in_hand", "Eye",   False),
+]
+
+_video_dir = os.path.join(os.path.dirname(__file__), "..", "videos")
+
+
+def _render_combined_frame(env, view_w, view_h):
+    from PIL import Image, ImageDraw
+    panels = []
+    for cam_name, label, flip in RECORD_CAMERAS:
+        try:
+            img = env.sim.render(view_w, view_h, camera_name=cam_name)
+            if img is None:
+                img = np.zeros((view_h, view_w, 3), dtype=np.uint8)
+            elif flip:
+                img = np.flipud(img)
+        except Exception:
+            img = np.zeros((view_h, view_w, 3), dtype=np.uint8)
+        pil_img = Image.fromarray(img)
+        draw = ImageDraw.Draw(pil_img)
+        draw.rectangle([0, 0, len(label) * 8 + 12, 18], fill=(0, 0, 0))
+        draw.text((5, 2), label, fill=(255, 255, 255))
+        panels.append(np.array(pil_img))
+    top = np.hstack([panels[0], panels[1]])
+    bottom = np.hstack([panels[2], panels[3]])
+    return np.vstack([top, bottom])
+
+
+def try_record_frame():
+    if not _recording["active"]:
+        return
+    now = time.time()
+    if now - _recording["last_capture"] < _recording["interval"]:
+        return
+    env = _get_env()
+    if env is None:
+        return
+    try:
+        combined = _render_combined_frame(
+            env, _recording["view_width"], _recording["view_height"]
+        )
+        _recording["frames"].append(combined)
+        _recording["last_capture"] = now
+        if len(_recording["frames"]) == 1:
+            print(f"[record] 首帧捕获成功: shape={combined.shape}", flush=True)
+    except Exception as e:
+        print(f"[record] 渲染帧失败: {e}", flush=True)
 
 
 def get_lock():
@@ -104,20 +166,6 @@ def process_commands(env):
             elif cmd_type == "nav":
                 info = nav(env, **params)
                 result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
-            elif cmd_type == "screenshot":
-                width = params.get("width", 640)
-                height = params.get("height", 480)
-                try:
-                    img = env.sim.render(width, height, camera_name="frontview")
-                    from PIL import Image
-                    pil_img = Image.fromarray(img)
-                    buf = io.BytesIO()
-                    pil_img.save(buf, format="JPEG", quality=85)
-                    with _screenshot_lock:
-                        _last_screenshot = buf.getvalue()
-                    result = {"success": True}
-                except Exception as e:
-                    result = {"success": False, "error": str(e)}
             else:
                 result = {"error": f"未知命令: {cmd_type}"}
         except Exception as e:
@@ -203,36 +251,90 @@ def api_scene():
 
 
 # ============================================================
-# 截图（主循环渲染，Flask 返回）
+# 视频录制（工具函数内主动调用 record_hook.try_record_frame）
 # ============================================================
 
-@app.route("/screenshot", methods=["GET"])
-def api_screenshot():
-    """获取当前仿真画面截图（JPEG）"""
-    event = threading.Event()
+@app.route("/record/start", methods=["POST"])
+def api_record_start():
+    """开始录制"""
+    if _recording["active"]:
+        return jsonify({"success": False, "message": "已在录制中"})
 
-    def on_rendered():
-        event.set()
+    data = request.json or {}
+    _recording["fps"] = data.get("fps", 1)
+    _recording["interval"] = 1.0 / _recording["fps"]
+    _recording["frames"] = []
+    _recording["last_capture"] = 0
+    _recording["active"] = True
 
-    cmd = {
-        "id": id(event),
-        "type": "screenshot",
-        "params": {
-            "width": int(request.args.get("width", 640)),
-            "height": int(request.args.get("height", 480)),
-        },
-        "event": event,
-    }
-    with _lock:
-        _cmd_queue.append(cmd)
-    event.wait(timeout=10)
+    total_w = _recording["view_width"] * 2
+    total_h = _recording["view_height"] * 2
+    print(f"[record] 开始录制 ({_recording['fps']}fps, 4视角, {total_w}x{total_h})", flush=True)
+    return jsonify({"success": True, "message": "录制已开始"})
 
-    with _screenshot_lock:
-        img_data = _last_screenshot
 
-    if img_data:
-        return send_file(io.BytesIO(img_data), mimetype="image/jpeg")
-    return jsonify({"error": "截图失败"}), 500
+@app.route("/record/stop", methods=["POST"])
+def api_record_stop():
+    """停止录制并保存为视频文件"""
+    if not _recording["active"]:
+        return jsonify({"success": False, "message": "未在录制中"})
+
+    _recording["active"] = False
+    frames = list(_recording["frames"])
+    _recording["frames"] = []
+
+    if not frames:
+        return jsonify({"success": False, "message": "未采集到画面"})
+
+    os.makedirs(_video_dir, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    filename = f"recording_{ts}.mp4"
+    filepath = os.path.join(_video_dir, filename)
+
+    h, w = frames[0].shape[:2]
+    fps = _recording["fps"]
+
+    try:
+        import imageio
+        writer = imageio.get_writer(filepath, fps=fps)
+        for f in frames:
+            writer.append_data(f)
+        writer.close()
+    except ImportError:
+        import cv2
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(filepath, fourcc, fps, (w, h))
+        for f in frames:
+            writer.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
+        writer.release()
+
+    print(f"[record] 录制完成: {filename} ({len(frames)} 帧, {len(frames)/fps:.1f}s)", flush=True)
+    return jsonify({
+        "success": True,
+        "message": f"已保存 {len(frames)} 帧",
+        "filename": filename,
+        "frames": len(frames),
+        "duration": round(len(frames) / fps, 1),
+    })
+
+
+@app.route("/record/download/<filename>", methods=["GET"])
+def api_record_download(filename):
+    """下载录制的视频文件"""
+    filepath = os.path.join(_video_dir, filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(filepath, mimetype="video/mp4", as_attachment=True)
+
+
+@app.route("/record/status", methods=["GET"])
+def api_record_status():
+    """查询录制状态"""
+    return jsonify({
+        "active": _recording["active"],
+        "frames": len(_recording["frames"]),
+        "fps": _recording["fps"],
+    })
 
 
 # ============================================================
