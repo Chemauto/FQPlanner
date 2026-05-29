@@ -39,7 +39,7 @@ def create_scene(scene_dir="scene", seed=42):
         scene_dir=os.path.abspath(scene_dir),
         robots="PandaOmron",
         controller_configs=load_composite_controller_config(robot="PandaOmron"),
-        has_renderer=True,  
+        has_renderer=False,  
         has_offscreen_renderer=True,
         render_camera=None,
         ignore_done=True,
