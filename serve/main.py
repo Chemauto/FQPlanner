@@ -11,7 +11,13 @@ import time
 import numpy as np
 from termcolor import colored
 from utils.utils import create_scene
-from service.server import start_server, process_commands, try_record_frame
+from service.server import (
+    start_server,
+    process_commands,
+    try_record_frame,
+    get_lock,
+    get_base_action,
+)
 
 
 if __name__ == "__main__":
@@ -37,12 +43,12 @@ if __name__ == "__main__":
     print("按 Ctrl+C 退出\n")
 
     # 5. 主循环
-    idle_action = np.zeros(env.action_dim)
     try:
         while True:
-            process_commands(env)
-            try_record_frame()
-            env.step(idle_action)
+            with get_lock():
+                process_commands(env)
+                try_record_frame()
+                env.step(get_base_action(env.action_dim))
             time.sleep(0.01)
     except KeyboardInterrupt:
         pass

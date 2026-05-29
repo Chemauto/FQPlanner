@@ -1,0 +1,12 @@
+services:
+  nav2:
+    build: .
+    container_name: fqplanner_nav2
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=0
+      - MUJOCO_API_URL=http://127.0.0.1:5001
+      - BRIDGE_PORT=5002
+    volumes:
+      - ./maps:/nav2/maps
+    restart: unless-stopped

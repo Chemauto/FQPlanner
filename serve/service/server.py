@@ -15,7 +15,7 @@ from tools.arm import (
     move_arm, grasp, place,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav
+from tools.move import get_base_info, nav, move, follow_path, nav_nav2, nav2_available
 from utils.utils import get_fixture_detail
 
 app = Flask(__name__)
@@ -24,7 +24,16 @@ CORS(app)
 _env_holder = {"env": None}
 _cmd_queue = []      # 命令队列
 _results = {}        # 命令结果缓存
-_lock = threading.Lock()
+_queue_lock = threading.Lock()
+_env_lock = threading.RLock()
+_base_cmd = {
+    "Vx": 0.0,
+    "Vy": 0.0,
+    "Vw": 0.0,
+    "expires_at": 0.0,
+    "last_log_at": 0.0,
+}
+_base_status_cache = {}
 
 # 录制状态
 _recording = {
@@ -91,11 +100,47 @@ def try_record_frame():
 
 
 def get_lock():
-    return _lock
+    return _env_lock
+
+
+def set_base_velocity(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
+    """Store the latest velocity command for the main simulation loop."""
+    with _queue_lock:
+        _base_cmd["Vx"] = float(Vx)
+        _base_cmd["Vy"] = float(Vy)
+        _base_cmd["Vw"] = float(Vw)
+        _base_cmd["expires_at"] = time.time() + timeout
+        now = time.time()
+        if now - _base_cmd["last_log_at"] > 1.0:
+            print(
+                f"[cmd_vel] Vx={_base_cmd['Vx']:.3f}, Vy={_base_cmd['Vy']:.3f}, Vw={_base_cmd['Vw']:.3f}",
+                flush=True,
+            )
+            _base_cmd["last_log_at"] = now
+
+
+def get_base_action(action_dim):
+    """Build the current base action, expiring to zero if cmd_vel stops."""
+    action = np.zeros(action_dim)
+    with _queue_lock:
+        if time.time() > _base_cmd["expires_at"]:
+            return action
+        action[7] = np.clip(_base_cmd["Vx"], -1.0, 1.0)
+        action[8] = np.clip(_base_cmd["Vy"], -1.0, 1.0)
+        action[9] = np.clip(_base_cmd["Vw"], -1.0, 1.0)
+        action[11] = 1.0
+    return action
 
 
 def _get_env():
     return _env_holder["env"]
+
+
+def _read_base_info(env):
+    info = get_base_info(env)
+    _base_status_cache.clear()
+    _base_status_cache.update(_np_to_list(info))
+    return info
 
 
 def _np_to_list(obj):
@@ -125,10 +170,10 @@ def submit_command(cmd_type, params):
         "params": params,
         "event": event,
     }
-    with _lock:
+    with _queue_lock:
         _cmd_queue.append(cmd)
     event.wait(timeout=120)  # 最多等 120 秒
-    with _lock:
+    with _queue_lock:
         result = _results.pop(cmd_id, {"error": "超时"})
     return result
 
@@ -138,7 +183,7 @@ def process_commands(env):
     主循环调用：处理队列中的所有命令
     在主循环线程中执行，不需要锁
     """
-    with _lock:
+    with _queue_lock:
         cmds = list(_cmd_queue)
         _cmd_queue.clear()
 
@@ -147,31 +192,43 @@ def process_commands(env):
         cmd_type = cmd["type"]
         params = cmd["params"]
         try:
-            if cmd_type == "grasp":
-                success = grasp(env, **params)
-                result = {"success": success}
-            elif cmd_type == "place":
-                success = place(env, **params)
-                result = {"success": success}
-            elif cmd_type == "move_to":
-                reached = move_arm(env, **params)
-                info = get_arm_info(env)
-                result = {"reached": reached, "ee_pos": info["ee_pos"]}
-            elif cmd_type == "open_gripper":
-                open_gripper(env, **params)
-                result = {"success": True}
-            elif cmd_type == "close_gripper":
-                close_gripper(env, **params)
-                result = {"success": True}
-            elif cmd_type == "nav":
-                info = nav(env, **params)
-                result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
-            else:
-                result = {"error": f"未知命令: {cmd_type}"}
+            with _env_lock:
+                if cmd_type == "grasp":
+                    success = grasp(env, **params)
+                    result = {"success": success}
+                elif cmd_type == "place":
+                    success = place(env, **params)
+                    result = {"success": success}
+                elif cmd_type == "move_to":
+                    reached = move_arm(env, **params)
+                    info = get_arm_info(env)
+                    result = {"reached": reached, "ee_pos": info["ee_pos"]}
+                elif cmd_type == "open_gripper":
+                    open_gripper(env, **params)
+                    result = {"success": True}
+                elif cmd_type == "close_gripper":
+                    close_gripper(env, **params)
+                    result = {"success": True}
+                elif cmd_type == "nav":
+                    info = nav(env, **params)
+                    result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
+                elif cmd_type == "nav_path":
+                    result = follow_path(env, **params)
+                elif cmd_type == "cmd_vel":
+                    info = move(env, **params)
+                    result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
+                else:
+                    result = {"error": f"未知命令: {cmd_type}"}
         except Exception as e:
             result = {"error": str(e)}
 
-        with _lock:
+        if cmd_type in ("nav", "nav_path", "cmd_vel"):
+            try:
+                _read_base_info(env)
+            except Exception:
+                pass
+
+        with _queue_lock:
             _results[cmd_id] = result
         cmd["event"].set()
 
@@ -185,7 +242,8 @@ def api_status():
     env = _get_env()
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
-    state = get_arm_info(env)
+    with _env_lock:
+        state = get_arm_info(env)
     return jsonify(_np_to_list(state))
 
 
@@ -194,7 +252,14 @@ def api_base_status():
     env = _get_env()
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
-    info = get_base_info(env)
+    if not _env_lock.acquire(blocking=False):
+        if _base_status_cache:
+            return jsonify(_base_status_cache)
+        return jsonify({"error": "仿真器忙"}), 503
+    try:
+        info = _read_base_info(env)
+    finally:
+        _env_lock.release()
     return jsonify(_np_to_list(info))
 
 
@@ -203,10 +268,11 @@ def api_objects():
     env = _get_env()
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
-    result = {}
-    for name in env.objects:
-        pos = get_obj_pos(env, name)
-        result[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
+    with _env_lock:
+        result = {}
+        for name in env.objects:
+            pos = get_obj_pos(env, name)
+            result[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
     return jsonify(result)
 
 
@@ -217,31 +283,32 @@ def api_scene():
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
 
-    # 物体
-    objects = {}
-    for name in env.objects:
-        pos = get_obj_pos(env, name)
-        objects[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
+    with _env_lock:
+        # 物体
+        objects = {}
+        for name in env.objects:
+            pos = get_obj_pos(env, name)
+            objects[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
 
-    # 家具
-    fixtures = {}
-    for name in env.fixtures:
-        detail = get_fixture_detail(env, name)
-        for fname, info in detail.items():
-            fixtures[fname] = {
-                "pos": info["pos"].tolist(),
-                "size": info["size"].tolist(),
-                "type": info["type"],
-            }
+        # 家具
+        fixtures = {}
+        for name in env.fixtures:
+            detail = get_fixture_detail(env, name)
+            for fname, info in detail.items():
+                fixtures[fname] = {
+                    "pos": info["pos"].tolist(),
+                    "size": info["size"].tolist(),
+                    "type": info["type"],
+                }
 
-    # 机器人
-    arm_info = get_arm_info(env)
-    base_info = get_base_info(env)
-    robot = {
-        "base_pos": base_info["pos"],
-        "ee_pos": arm_info["ee_pos"],
-        "yaw": base_info.get("yaw_deg", 0),
-    }
+        # 机器人
+        arm_info = get_arm_info(env)
+        base_info = get_base_info(env)
+        robot = {
+            "base_pos": base_info["pos"],
+            "ee_pos": arm_info["ee_pos"],
+            "yaw": base_info.get("yaw_deg", 0),
+        }
 
     return jsonify(_np_to_list({
         "objects": objects,
@@ -395,8 +462,49 @@ def api_nav():
     yaw = data.get("yaw", 0)
     if x is None or y is None:
         return jsonify({"error": "缺少 x 或 y 参数"}), 400
+
+    # Nav2 优先：检测桥接节点是否在线
+    if nav2_available():
+        result = nav_nav2(x, y, w)
+        return jsonify(result)
+
+    # Fallback：PD 控制器
     params = {"x": x, "y": y, "w": w, "yaw": yaw}
     return jsonify(submit_command("nav", params))
+
+
+@app.route("/cmd_vel", methods=["POST"])
+def api_cmd_vel():
+    """接收速度命令，单步执行（供 Nav2 桥接节点调用）"""
+    data = request.json or {}
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+    set_base_velocity(
+        Vx=data.get("vx", 0.0),
+        Vy=data.get("vy", 0.0),
+        Vw=data.get("vw", 0.0),
+        timeout=data.get("duration", 0.25),
+    )
+    with _env_lock:
+        info = get_base_info(env)
+    return jsonify({"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]})
+
+
+@app.route("/nav_path", methods=["POST"])
+def api_nav_path():
+    """接收 Nav2 全局路径，由 MuJoCo 端全向 PD 跟踪"""
+    data = request.json or {}
+    path = data.get("path")
+    if not path:
+        return jsonify({"success": False, "result": "缺少 path 参数"}), 400
+    params = {
+        "path": path,
+        "w": data.get("w", 0),
+    }
+    if data.get("max_steps") is not None:
+        params["max_steps"] = data["max_steps"]
+    return jsonify(submit_command("nav_path", params))
 
 
 @app.route("/open_gripper", methods=["POST"])
@@ -407,6 +515,63 @@ def api_open_gripper():
 @app.route("/close_gripper", methods=["POST"])
 def api_close_gripper():
     return jsonify(submit_command("close_gripper", {}))
+
+
+# ============================================================
+# 地图生成数据（供 map_generator.py --from-sim 使用）
+# ============================================================
+
+@app.route("/map_data", methods=["GET"])
+def api_map_data():
+    """返回场景中所有障碍物的世界坐标位置和尺寸，供地图生成使用"""
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+
+    with _env_lock:
+        obstacles = []
+
+        for name, fixture in env.fixtures.items():
+            name_lower = name.lower()
+            fixture_type = type(fixture).__name__.lower()
+            if any(skip in name_lower for skip in ("backing", "floor", "window", "outlet", "switch")):
+                continue
+            if any(skip in fixture_type for skip in ("accessory",)):
+                continue
+
+            try:
+                pos = np.array(fixture.pos, dtype=float)
+                size = np.array(fixture.size, dtype=float)
+            except Exception:
+                continue
+
+            if pos.size < 2 or size.size < 2:
+                continue
+            if pos.size == 2:
+                pos = np.array([pos[0], pos[1], 0.0])
+            if size.size == 2:
+                size = np.array([size[0], size[1], 0.1])
+
+            # Wall/furniture sizes from RoboCasa fixtures are full extents.
+            # map_generator expects MuJoCo-style half extents.
+            half_size = (size / 2.0).tolist()
+            z_rot = float(getattr(fixture, "rot", 0.0) or getattr(fixture, "z_rot", 0.0) or 0.0)
+            c, s = np.cos(z_rot), np.sin(z_rot)
+            xmat = [
+                c, -s, 0.0,
+                s, c, 0.0,
+                0.0, 0.0, 1.0,
+            ]
+
+            obstacles.append({
+                "name": name,
+                "pos": pos.tolist(),
+                "size": half_size,
+                "xmat": xmat,
+                "type": 6,
+            })
+
+    return jsonify(obstacles)
 
 
 # ============================================================
