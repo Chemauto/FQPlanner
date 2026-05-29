@@ -503,9 +503,11 @@ class ToolCallingAgent(MultiStepAgent):
 
         current_call = {"tool_name": tool_name, "tool_arguments": tool_arguments}
 
-        if self.tool_call and self.tool_call[-1] == current_call:
+        recent = self.tool_call[-3:] if len(self.tool_call) >= 3 else []
+        if len(recent) == 3 and all(c == current_call for c in recent):
             return "final_answer"
         else:
             self.tool_call.append(current_call)
 
         return await self._execute_tool_call(tool_name, tool_arguments, memory_step)
+    

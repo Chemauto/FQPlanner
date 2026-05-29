@@ -39,8 +39,8 @@ def create_scene(scene_dir="scene", seed=42):
         scene_dir=os.path.abspath(scene_dir),
         robots="PandaOmron",
         controller_configs=load_composite_controller_config(robot="PandaOmron"),
-        has_renderer=False,  
-        has_offscreen_renderer=True,
+        has_renderer=True,  
+        has_offscreen_renderer=False, #改了这里mac可以跑了
         render_camera=None,
         ignore_done=True,
         use_camera_obs=False,

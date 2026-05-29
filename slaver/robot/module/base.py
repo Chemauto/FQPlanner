@@ -4,6 +4,7 @@
 
 import os
 import sys
+import math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 from serve.sim import navigate, get_base_status, get_scene
@@ -39,32 +40,31 @@ def register_tools(mcp):
             cleaned = target.strip().strip("()")
             parts = [float(x.strip()) for x in cleaned.split(",")]
             if len(parts) >= 2:
-                # 是坐标，直接导航（不走工作点）
                 x, y = parts[0], parts[1]
                 w = parts[2] if len(parts) > 2 else 0
                 return await _do_navigate(x, y, w, target)
         except ValueError:
-            pass  # 不是坐标，走工作点逻辑
+            pass
 
-        # 是物体/家具名称，找最近工作点
-        waypoint = find_waypoint(target)
-        wp_name = waypoint['name']
-        wp_pos = waypoint['pos']
-        print(f"[base] 目标工作点: {wp_name} @ {wp_pos}", file=sys.stderr)
-        return await _do_navigate(wp_pos[0], wp_pos[1], 0, target)
+        # 是物体名称，找最佳工作点
+        wp = find_waypoint(target)
+        return await _do_navigate(wp['x'], wp['y'], wp['yaw_deg'], target)
 
-    async def _do_navigate(x, y, w, target):
-        result = navigate(x, y, w)
-
+# _do_navigate 里，yaw 已经是度了
+    async def _do_navigate(x, y, yaw_deg, target):
+        result = navigate(x, y, w=yaw_deg)
         if result.get("success"):
             pos = result.get("pos", [0, 0, 0])
             yaw = result.get("yaw", 0)
             response = f"导航成功，当前位置: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}], 朝向: {yaw:.1f}°"
-            print(f"[base] ✓ {response}", file=sys.stderr)
-            return response
+            # 把状态更新打包成 JSON tuple，让 slaver_agent 捡到
+            import json
+            return json.dumps([response, {
+                "position": target,
+                "coordinates": pos,
+            }])
         else:
             msg = result.get("result", f"导航到 {target} 失败，请重试。")
-            print(f"[base] ✗ {msg}", file=sys.stderr)
             return msg
 
     print("[base.py] 底盘控制模块已注册 (RoboCasa)", file=sys.stderr)

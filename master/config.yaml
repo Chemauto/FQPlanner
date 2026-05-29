@@ -29,14 +29,14 @@ tts:
 # Cloud Server Infos
 model:
   # Model name for the cloud server
-  model_select: "qwen3.6-plus-2026-04-02"
+  model_select: "deepseek-chat"
   # model_select: "robobrain"
 
   # Number of retries for planning
   model_retry_planning: 5
   model_dict:
     # Model name for the cloud server
-    cloud_model: "qwen3.6-plus-2026-04-02"
+    cloud_model: "deepseek-chat"
     # cloud_model: "robobrain"
 
     # Deploy for the cloud server
@@ -46,7 +46,7 @@ model:
     # cloud_api_key: "EMPTY"
 
     # URL of the cloud server
-    cloud_server: "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+    cloud_server: "https://api.deepseek.com/"
     # cloud_server: "http://localhost:4567/v1/"
 
     # Maximum number of chat messages to keep in memory

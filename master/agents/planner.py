@@ -91,15 +91,12 @@ class GlobalTaskPlanner:
 
         # ===== 注入工作点信息 =====
         try:
-            import yaml, os
-            wp_path = os.path.join(
-                os.path.dirname(__file__), '..', '..', 'serve', 'scene', 'config', 'waypoints.yaml'
-            )
-            with open(wp_path) as f:
-                waypoints = yaml.safe_load(f)['waypoints']
-            all_environments_info['_waypoints'] = {
-                w['name']: {'pos': w['pos'], 'serves': w['serves']}
-                for w in waypoints
+            all_environments_info['_navigation_guide'] = {
+                '说明': '导航时使用以下简单名称，不要使用fixture原始名称',
+                'counter': {'工作点': 'counter_front', '可服务物体': ['apple', 'mug', 'pot', 'cup']},
+                'sink': {'工作点': 'island_north', '可服务物体': ['sink', 'sponge', 'bowl']},
+                'island': {'工作点': 'island_north', '可服务物体': ['island', 'bowl', 'sponge']},
+                'stove': {'工作点': 'stove_front', '可服务物体': ['stove']},
             }
         except Exception as e:
             print(f"[Planner] Warning: could not load waypoints: {e}")
