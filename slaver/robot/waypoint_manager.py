@@ -4,12 +4,12 @@ waypoint_manager.py - 工作点管理器
 """
 
 import os
+import sys
+import math
 import numpy as np
 import requests
 import yaml
 
-
-# 工作点配置路径（相对于 slaver/）
 _WAYPOINTS_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', 'serve', 'scene', 'config', 'waypoints.yaml'
 )
@@ -22,12 +22,14 @@ def load_waypoints():
     if _waypoints_cache is not None:
         return _waypoints_cache
     with open(_WAYPOINTS_PATH, 'r') as f:
-        _waypoints_cache = yaml.safe_load(f)['waypoints']
+        data = yaml.safe_load(f)
+    _waypoints_cache = data['waypoints']
+    print(f"[waypoint] 加载了 {len(_waypoints_cache)} 个工作点", file=sys.stderr)
     return _waypoints_cache
 
 
 def get_object_pos(obj_name):
-    """从仿真查询物体或家具坐标"""
+    """查询单个物体或家具的实时坐标，返回 [x, y, z]"""
     try:
         # 先查可操作物体
         resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
@@ -36,79 +38,101 @@ def get_object_pos(obj_name):
             if obj_name in objects:
                 return objects[obj_name]['pos']
 
-        # 再查家具
+        # 再查 fixtures 模糊匹配
         resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
         if resp.status_code == 200:
             fixtures = resp.json()
-            # 模糊匹配
+            if obj_name in fixtures:
+                return fixtures[obj_name]['pos']
+            # 模糊匹配：优先含 main 的
             candidates = [k for k in fixtures if obj_name in k and 'main' in k]
             if not candidates:
                 candidates = [k for k in fixtures if obj_name in k]
             if candidates:
                 return fixtures[candidates[0]]['pos']
     except Exception as e:
-        print(f"[waypoint] 查询物体位置失败: {e}")
+        print(f"[waypoint] 查询物体位置失败: {e}", file=sys.stderr)
     return None
 
 
-def find_waypoint(target) -> dict:
+def find_waypoint(target):
     """
-    根据目标（物体名或坐标字符串）找最近工作点
+    根据目标名称或坐标字符串，找最近的工作点并用预存的朝向
 
     Args:
-        target: 物体名 "apple" 或坐标字符串 "(1.5, -0.3)"
+        target: 物体名称（如 "apple"）或坐标字符串（如 "(1.5, -0.3)"）
 
     Returns:
-        dict: {"name": ..., "pos": [x, y], "serves": [...]}
+        dict: {"name": ..., "x": ..., "y": ..., "yaw_deg": ...}
     """
-    waypoints = load_waypoints()
-
-    # 解析目标坐标
     target_pos = None
     target_name = None
 
-    # 判断是坐标还是物体名
-    if '(' in str(target) or ',' in str(target):
-        # 是坐标字符串，解析出 x, y
-        try:
-            cleaned = str(target).strip().strip('()')
-            parts = [float(x.strip()) for x in cleaned.split(',')]
-            target_pos = parts[:2]
-        except Exception:
-            pass
-    else:
-        # 是物体名
+    # 判断是坐标还是名称
+    try:
+        cleaned = str(target).strip().strip("()")
+        parts = [float(x.strip()) for x in cleaned.split(",")]
+        if len(parts) >= 2:
+            target_pos = parts[:3]
+    except ValueError:
         target_name = str(target).strip()
 
-    # 先按 serves 匹配
-    if target_name:
-        serving = [w for w in waypoints if target_name in w.get('serves', [])]
-        if serving:
-            # 如果有多个服务该物体的工作点，找最近的
-            if target_pos is None:
-                pos = get_object_pos(target_name)
-                if pos:
-                    target_pos = pos[:2]
-
-            if target_pos:
-                tp = np.array(target_pos)
-                serving.sort(key=lambda w: np.linalg.norm(np.array(w['pos']) - tp))
-            return serving[0]
-
-    # fallback：按距离找最近工作点
-    if target_pos is None and target_name:
+    # 用名称查实时坐标
+    if target_name and target_pos is None:
         pos = get_object_pos(target_name)
         if pos:
-            target_pos = pos[:2]
+            target_pos = pos
 
-    if target_pos:
-        tp = np.array(target_pos)
-        waypoints_sorted = sorted(
-            waypoints,
-            key=lambda w: np.linalg.norm(np.array(w['pos']) - tp)
-        )
-        return waypoints_sorted[0]
+    waypoints = load_waypoints()
 
-    # 最终 fallback：返回第一个工作点
-    print(f"[waypoint] 无法确定目标位置，使用默认工作点")
-    return waypoints[0]
+    if target_pos is None:
+        print(f"[waypoint] 无法确定目标位置，使用第一个工作点", file=sys.stderr)
+        wp = waypoints[0]
+        return {
+            "name": wp['name'],
+            "x": wp['pos'][0],
+            "y": wp['pos'][1],
+            "yaw_deg": wp.get('yaw_deg', 0.0),
+        }
+
+    tp = np.array(target_pos[:2])
+
+    # 先找 serves 里包含目标名的候选工作点
+    if target_name:
+        serving = [
+            wp for wp in waypoints
+            if any(
+                target_name in s or s in target_name
+                for s in wp.get('serves', [])
+            )
+        ]
+    else:
+        serving = []
+
+    # 有 serves 匹配就用，没有就用全部
+    candidates = serving if serving else waypoints
+
+    # 按距离目标排序，选最近的
+    candidates_sorted = sorted(
+        candidates,
+        key=lambda wp: np.linalg.norm(np.array(wp['pos'][:2]) - tp)
+    )
+    best = candidates_sorted[0]
+    best_xy = best['pos'][:2]
+
+    # 直接用预存的朝向
+    yaw_deg = best.get('yaw_deg', 0.0)
+
+    print(
+        f"[waypoint] 目标: '{target}' @ {tp.tolist()}, "
+        f"工作点: {best['name']} @ {best_xy}, "
+        f"朝向: {yaw_deg:.1f}°",
+        file=sys.stderr
+    )
+
+    return {
+        "name": best['name'],
+        "x": best_xy[0],
+        "y": best_xy[1],
+        "yaw_deg": yaw_deg,
+    }

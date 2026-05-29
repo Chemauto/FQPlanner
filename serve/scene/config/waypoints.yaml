@@ -1,28 +1,60 @@
 waypoints:
-  - name: counter_front
-    pos: [1.7, -0.9]
-    serves: [counter, apple, mug, pot, cup]
-
-  - name: counter_left_front
-    pos: [0.5, -0.9]
-    serves: [cabinet, microwave, oven]
-
-  - name: stove_front
-    pos: [3.7, -0.9]
-    serves: [stove]
-
-  - name: island_north
-    pos: [3.2, -1.8]
-    serves: [island, sink, sponge]
-
-  - name: island_east
-    pos: [4.8, -2.7]
-    serves: [island, bowl, cup]
-
-  - name: island_south
-    pos: [3.2, -3.8]
-    serves: [island]
-
-  - name: entrance
-    pos: [0.0, 0.0]
-    serves: []
+- name: nav_013
+  pos:
+  - 2.025
+  - -1.025
+  serves:
+  - apple
+  - counter
+  - pot
+  yaw_deg: 118.6
+- name: nav_027
+  pos:
+  - 3.025
+  - -1.525
+  serves:
+  - mug
+  - sink
+  yaw_deg: -72.7
+- name: nav_003
+  pos:
+  - 3.525
+  - 0.475
+  serves:
+  - stove
+  yaw_deg: -77.9
+- name: nav_042
+  pos:
+  - 1.525
+  - -2.525
+  serves:
+  - sponge
+  yaw_deg: -10.6
+- name: nav_043
+  pos:
+  - 5.025
+  - -2.525
+  serves:
+  - bowl
+  yaw_deg: -169.2
+- name: nav_049
+  pos:
+  - 5.025
+  - -3.025
+  serves:
+  - cup
+  yaw_deg: -158.2
+- name: nav_012
+  pos:
+  - 1.525
+  - -1.025
+  serves:
+  - counter
+  yaw_deg: 76.0
+- name: nav_016
+  pos:
+  - 3.525
+  - -1.025
+  serves:
+  - stove
+  yaw_deg: 77.3
