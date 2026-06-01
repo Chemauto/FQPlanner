@@ -40,12 +40,14 @@ FQPlanner/
 │   │   └── module/            # 机器人技能模块
 │   │       ├── base.py        # 底盘导航 (navigate_to_target)
 │   │       ├── grasp.py       # 抓取 (grasp_object)
-│   │       └── place.py       # 放置 (place_on_top, place_object)
+│   │       ├── place.py       # 放置 (place_on_top, place_object)
+│   │       └── camera.py      # 拍照 (capture_image)
 │   └── tools/
 │       ├── tool_matcher.py    # 语义工具匹配 (sentence-transformers)
 │       ├── memory.py          # 场景记忆
 │       ├── judge.py           # 失败判断
 │       └── monitoring.py      # 日志监控
+│   └── waypoint_manager.py   # 工作点查找（根据物体名匹配最近工作点）
 │
 ├── serve/                     # RoboCasa 仿真服务
 │   ├── main.py                # 启动入口 (端口 5001)
@@ -65,6 +67,12 @@ FQPlanner/
 ├── deploy/                    # Web 控制台
 │   ├── run.py                 # Flask (端口 8888)
 │   └── templates/index.html
+│
+├── nav2/                      # 场景地图与工作点
+│   ├── map_generator.py       # 从仿真/layout 生成栅格地图
+│   ├── export_free_points.py  # 从栅格地图提取可通行点
+│   ├── select_waypoints.py    # 贪心选最优工作点
+│   └── maps/                  # 地图数据 (PGM, YAML, JSON)
 │
 ├── .env                       # CLOUD_API_KEY
 └── requirements.txt           # Python 依赖
@@ -104,6 +112,7 @@ cd deploy && python run.py
 | `/move_to` | POST | `target`, `max_steps`, `pos_threshold` | 移动机械臂 |
 | `/open_gripper` | POST | - | 打开夹爪 |
 | `/close_gripper` | POST | - | 关闭夹爪 |
+| `/screenshot` | POST | `camera_name`, `width`, `height` | 捕获相机截图 (base64 JPEG) |
 
 ## 关键设计
 
@@ -135,7 +144,7 @@ PandaOmron：Franka Panda 机械臂 + Omron 移动底盘。
 
 ## LLM
 
-使用阿里云 Qwen 模型（`qwen3.6-35b-a3b`），API Key 从 `.env` 读取。Master 和 Slaver 各自独立调用 LLM。
+使用 MiMo 模型（`mimo-v2.5`，多模态），API Key 从 `.env` 读取。Master 和 Slaver 各自独立调用 LLM。
 
 ## 两个 Conda 环境
 

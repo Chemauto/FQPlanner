@@ -20,10 +20,22 @@ import yaml
 import numpy as np
 from PIL import Image, ImageDraw
 
-# 默认地图参数；匹配 serve/scene/config/layout.yaml 中 6.4m x 5.0m 厨房。
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+CONFIG_DIR = os.path.dirname(__file__)
+
+
+def load_config():
+    with open(CONFIG_PATH) as f:
+        return yaml.safe_load(f)
+
+
+# 默认地图参数；运行时会被 config.yaml 覆盖。
+_cfg = load_config()
+_map_cfg = _cfg.get("map", {})
+
 MAP_X_MIN, MAP_X_MAX = -1.0, 8.0
 MAP_Y_MIN, MAP_Y_MAX = -6.0, 1.0
-RESOLUTION = 0.05  # 5cm/pixel
+RESOLUTION = _map_cfg.get("resolution", 0.05)
 
 MAP_W = int((MAP_X_MAX - MAP_X_MIN) / RESOLUTION)
 MAP_H = int((MAP_Y_MAX - MAP_Y_MIN) / RESOLUTION)
@@ -354,32 +366,35 @@ def _save_map(img, output_dir):
 
 
 if __name__ == "__main__":
+    cfg = load_config()
+    map_cfg = cfg.get("map", {})
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--from-sim", action="store_true", help="从运行中的仿真读取障碍物")
     parser.add_argument("--layout", default=None, help="layout.yaml 路径")
-    parser.add_argument("--output-dir", default="maps")
+    parser.add_argument("--output-dir", default=os.path.join(CONFIG_DIR, map_cfg.get("output_dir", "maps")))
     parser.add_argument(
         "--inflate-radius",
         type=float,
-        default=0.0,
-        help="生成地图时预膨胀障碍物的半径。默认 0，由 Nav2 costmap 负责膨胀。",
+        default=map_cfg.get("inflate_radius", 0.0),
+        help="生成地图时预膨胀障碍物的半径。",
     )
     parser.add_argument(
         "--clear-robot-radius",
         type=float,
-        default=0.0,
-        help="从仿真生成地图时清理机器人初始位置附近的半径。默认 0，不清理。",
+        default=map_cfg.get("clear_robot_radius", 0.0),
+        help="从仿真生成地图时清理机器人初始位置附近的半径。",
     )
     parser.add_argument(
         "--bounds-layout",
         default=None,
-        help="用于推导地图边界的 layout.yaml。默认使用 serve/scene/config/layout.yaml。",
+        help="用于推导地图边界的 layout.yaml。",
     )
     parser.add_argument(
         "--shrink-footprints",
         type=float,
-        default=0.2,
-        help="收缩家具 footprint，避免 RoboCasa fixture 尺寸过保守。默认 0.2m。",
+        default=map_cfg.get("shrink_footprints", 0.2),
+        help="收缩家具 footprint。",
     )
     args = parser.parse_args()
 
