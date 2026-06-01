@@ -206,6 +206,7 @@ class ToolCallingAgent(MultiStepAgent):
 
         # Parse state updates from tool result (format: "result_message" or tuple)
         state_updates = {}
+        tool_status = None
         if isinstance(observation, str):
             # Check if observation contains state updates in JSON format
             try:
@@ -214,17 +215,27 @@ class ToolCallingAgent(MultiStepAgent):
                 if isinstance(parsed, list) and len(parsed) == 2:
                     observation = parsed[0]  # Result message
                     state_updates = parsed[1] if isinstance(parsed[1], dict) else {}
-                    # print(f"[DEBUG] Parsed state updates: {state_updates}", file=sys.stderr)
+                    tool_status = state_updates.pop("_status", None)
             except (json.JSONDecodeError, ValueError) as e:
-                # print(f"[DEBUG] Failed to parse JSON: {e}", file=sys.stderr)
-                pass
                 pass  # Not a JSON tuple, use as-is
 
-        # Check if the tool execution failed
-        is_failed = isinstance(observation, str) and (
-            "失败" in observation or "failed" in observation.lower()
-            or "不在场景中" in observation or "已经抓取" in observation
-            or "没有抓取" in observation or "无法" in observation
+        # 完成类状态（success/recall/none）：直接停止
+        if tool_status in ("success", "recall", "none"):
+            self.last_tool_result = observation
+            # 更新机器人状态
+            if state_updates:
+                if "_image" in state_updates:
+                    self._captured_images.append(state_updates.pop("_image"))
+                await self._update_robot_state(state_updates)
+            return "final_answer"
+
+        # 错误类状态（failure/exception/timeout）：走 judge 逻辑
+        is_failed = tool_status in ("failure", "exception", "timeout") or (
+            isinstance(observation, str) and (
+                "失败" in observation or "failed" in observation.lower()
+                or "不在场景中" in observation or "已经抓取" in observation
+                or "没有抓取" in observation or "无法" in observation
+            )
         )
 
         if is_failed:
@@ -508,8 +519,7 @@ class ToolCallingAgent(MultiStepAgent):
 
         current_call = {"tool_name": tool_name, "tool_arguments": tool_arguments}
 
-        recent = self.tool_call[-3:] if len(self.tool_call) >= 3 else []
-        if len(recent) == 3 and all(c == current_call for c in recent):
+        if self.tool_call and self.tool_call[-1] == current_call:
             return "final_answer"
         else:
             self.tool_call.append(current_call)

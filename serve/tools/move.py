@@ -102,65 +102,60 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     return get_base_info(env)
 
 
-def nav(env, x, y, w, yaw, Kp=2, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=500):
+def nav(env, x, y, target_yaw=None, Kp=2.0, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=500):
     """
-    导航到世界坐标系目标点（顺序消除误差：x → y → w）
+    导航到世界坐标系目标点（全向 PD 控制，x/y/yaw 同时消除误差）
 
     Args:
         env:            环境对象
         x:              目标世界坐标 x
         y:              目标世界坐标 y
-        w:              目标偏航角（度）
-        yaw:            当前偏航角（度）
+        target_yaw:     目标偏航角（度），None 表示不调整朝向
         Kp:             比例增益
         Kd:             微分增益
         pos_threshold:  位置误差阈值（米），默认 0.1
         yaw_threshold:  偏航角误差阈值（度），默认 3.0
-        max_steps:      每个阶段最大步数
+        max_steps:      最大步数
 
     Returns:
         dict: 最终底座状态
     """
-    # 阶段 1：消除 x 误差
-    prev_err = 0.0
-    for step in range(max_steps):
-        info = get_base_info(env)
-        x_now = info["pos"][0]
-        err = x - x_now
-        if abs(err) < pos_threshold:
-            break
-        d_err = err - prev_err
-        prev_err = err
-        Vx_world = np.clip(Kp * err + Kd * d_err, -1.0, 1.0)
-        Vx_body, Vy_body = _world_to_body(Vx_world, 0.0, info["yaw_rad"])
-        move(env, Vx=Vx_body, Vy=Vy_body)
+    prev_err_x = 0.0
+    prev_err_y = 0.0
+    prev_err_yaw = 0.0
 
-    # 阶段 2：消除 y 误差
-    prev_err = 0.0
-    for step in range(max_steps):
+    for _ in range(max_steps):
         info = get_base_info(env)
-        y_now = info["pos"][1]
-        err = y - y_now
-        if abs(err) < pos_threshold:
-            break
-        d_err = err - prev_err
-        prev_err = err
-        Vy_world = np.clip(Kp * err + Kd * d_err, -1.0, 1.0)
-        Vx_body, Vy_body = _world_to_body(0.0, Vy_world, info["yaw_rad"])
-        move(env, Vx=Vx_body, Vy=Vy_body)
+        x_now, y_now = info["pos"][0], info["pos"][1]
 
-    # 阶段 3：消除 w 误差
-    prev_err = 0.0
-    for step in range(max_steps):
-        info = get_base_info(env)
-        w_now = info["yaw_deg"]
-        err = _normalize_angle_deg(w - w_now)
-        if abs(err) < yaw_threshold:
-            break
-        d_err = err - prev_err
-        prev_err = err
-        Vw = np.clip(Kp * (err / 180.0) + Kd * (d_err / 180.0), -1.0, 1.0)
-        move(env, Vw=Vw)
+        err_x = x - x_now
+        err_y = y - y_now
+        pos_err = float(np.hypot(err_x, err_y))
+
+        if pos_err < pos_threshold:
+            if target_yaw is None:
+                break
+            yaw_err = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+            if abs(yaw_err) < yaw_threshold:
+                break
+
+        d_err_x = err_x - prev_err_x
+        d_err_y = err_y - prev_err_y
+        prev_err_x = err_x
+        prev_err_y = err_y
+
+        Vx_world = np.clip(Kp * err_x + Kd * d_err_x, -1.0, 1.0)
+        Vy_world = np.clip(Kp * err_y + Kd * d_err_y, -1.0, 1.0)
+        Vx_body, Vy_body = _world_to_body(Vx_world, Vy_world, info["yaw_rad"])
+
+        Vw = 0.0
+        if target_yaw is not None:
+            err_yaw = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+            d_err_yaw = err_yaw - prev_err_yaw
+            prev_err_yaw = err_yaw
+            Vw = np.clip(Kp * (err_yaw / 90.0) + Kd * (d_err_yaw / 90.0), -1.0, 1.0)
+
+        move(env, Vx=Vx_body, Vy=Vy_body, Vw=Vw)
 
     return get_base_info(env)
 

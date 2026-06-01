@@ -156,25 +156,22 @@ def close_gripper():
 # 底盘导航
 # ============================================================
 
-def navigate(x, y, w=0, yaw=0):
+def navigate(x, y, target_yaw=None):
     """
     底盘导航到目标位置
 
     Args:
         x: 目标世界坐标 x
         y: 目标世界坐标 y
-        w: 目标偏航角（度）
-        yaw: 当前偏航角（度）
+        target_yaw: 目标偏航角（度），None 表示不调整朝向
 
     Returns:
         dict: {"success": bool, "pos": [x, y, z], "yaw": float}
     """
-    return call_sim("/nav", {
-        "x": x,
-        "y": y,
-        "w": w,
-        "yaw": yaw
-    })
+    payload = {"x": x, "y": y}
+    if target_yaw is not None:
+        payload["target_yaw"] = target_yaw
+    return call_sim("/nav", payload)
 
 
 # ============================================================
