@@ -1,0 +1,95 @@
+{
+  "waypoints": [
+    {
+      "name": "nav_013",
+      "pos": [
+        2.025,
+        -1.025
+      ],
+      "yaw_deg": 118.6,
+      "serves": [
+        "apple",
+        "counter",
+        "mug",
+        "pot"
+      ]
+    },
+    {
+      "name": "nav_003",
+      "pos": [
+        3.525,
+        0.475
+      ],
+      "yaw_deg": -77.9,
+      "serves": [
+        "stove"
+      ]
+    },
+    {
+      "name": "nav_027",
+      "pos": [
+        3.025,
+        -1.525
+      ],
+      "yaw_deg": -77.3,
+      "serves": [
+        "sink"
+      ]
+    },
+    {
+      "name": "nav_042",
+      "pos": [
+        1.525,
+        -2.525
+      ],
+      "yaw_deg": -10.6,
+      "serves": [
+        "sponge"
+      ]
+    },
+    {
+      "name": "nav_043",
+      "pos": [
+        5.025,
+        -2.525
+      ],
+      "yaw_deg": -169.5,
+      "serves": [
+        "bowl"
+      ]
+    },
+    {
+      "name": "nav_049",
+      "pos": [
+        5.025,
+        -3.025
+      ],
+      "yaw_deg": -158.8,
+      "serves": [
+        "cup"
+      ]
+    },
+    {
+      "name": "nav_012",
+      "pos": [
+        1.525,
+        -1.025
+      ],
+      "yaw_deg": 76.0,
+      "serves": [
+        "counter"
+      ]
+    },
+    {
+      "name": "nav_016",
+      "pos": [
+        3.525,
+        -1.025
+      ],
+      "yaw_deg": 77.3,
+      "serves": [
+        "stove"
+      ]
+    }
+  ]
+}

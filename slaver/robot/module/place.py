@@ -2,6 +2,7 @@
 放置/释放控制模块 - RoboCasa 仿真
 """
 
+import json
 import os
 import sys
 
@@ -31,7 +32,7 @@ def register_tools(mcp):
 
         scene = get_scene()
         if not scene or "error" in scene:
-            return f"无法获取场景信息，请检查仿真状态"
+            return json.dumps(["无法获取场景信息，请检查仿真状态", {"_status": "exception"}])
 
         # 在 objects 中查找
         objects = scene.get("objects", {})
@@ -47,7 +48,7 @@ def register_tools(mcp):
                     matched = fname
                     break
             if not matched:
-                return f"未找到目标 '{target_name}'（不在物体或家具列表中）"
+                return json.dumps([f"未找到目标 '{target_name}'（不在物体或家具列表中）", {"_status": "failure"}])
             fpos = fixtures[matched]["pos"]
             fsize = fixtures[matched]["size"]
             # 放在家具表面：x, y 取家具中心，z 取表面高度
@@ -59,11 +60,11 @@ def register_tools(mcp):
         if result.get("success"):
             response = result.get("result", f"成功将 {obj_name} 放在 {target_name} 上面")
             print(f"[place] ✓ {response}", file=sys.stderr)
-            return response
+            return json.dumps([response, {"_status": "success"}])
         else:
             msg = result.get("result", f"放置失败，请重试。")
             print(f"[place] ✗ {msg}", file=sys.stderr)
-            return msg
+            return json.dumps([msg, {"_status": "failure"}])
 
     @mcp.tool()
     async def place_object(obj_name: str, x: float, y: float, z: float) -> str:
@@ -86,11 +87,11 @@ def register_tools(mcp):
         if result.get("success"):
             response = result.get("result", f"成功将 {obj_name} 放到目标位置")
             print(f"[place] ✓ {response}", file=sys.stderr)
-            return response
+            return json.dumps([response, {"_status": "success"}])
         else:
             msg = result.get("result", f"放置失败，请重试。")
             print(f"[place] ✗ {msg}", file=sys.stderr)
-            return msg
+            return json.dumps([msg, {"_status": "failure"}])
 
     # @mcp.tool()
     # async def release_object() -> str:

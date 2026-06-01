@@ -2,6 +2,7 @@
 抓取控制模块 - RoboCasa 仿真
 """
 
+import json
 import os
 import sys
 
@@ -33,10 +34,10 @@ def register_tools(mcp):
         if result.get("success"):
             response = result.get("result", f"成功抓取 {target}")
             print(f"[grasp] ✓ {response}", file=sys.stderr)
-            return response
+            return json.dumps([response, {"_status": "success"}])
         else:
             msg = result.get("result", f"抓取 {target} 失败，请重试。")
             print(f"[grasp] ✗ {msg}", file=sys.stderr)
-            return msg
+            return json.dumps([msg, {"_status": "failure"}])
 
     print("[grasp.py] 抓取控制模块已注册 (RoboCasa)", file=sys.stderr)

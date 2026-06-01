@@ -21,7 +21,7 @@ map:
 free_points:
   map_file: "maps/kitchen_map.yaml"
   output: "maps/free_points.json"
-  spacing: 0.3             # 采样间距 (米)
+  spacing: 0.5             # 采样间距 (米)
   clearance: 0.35           # 最小离障碍距离 (米)
 
 # 工作点选择参数 (workpoints_generator.py)
@@ -40,3 +40,9 @@ waypoints:
     island: "island_island_group"
     stove: "stovetop_main_group"
     sink: "sink_island_group"
+
+# 路径规划参数 (serve/tools/path_planner.py)
+path_planner:
+  free_points_path: "maps/free_points.json"
+  neighbor_radius: 0.8      # 邻接连边半径 (米)，略大于 spacing
+  connect_neighbors: 3      # 起终点连接最近 N 个 free_point

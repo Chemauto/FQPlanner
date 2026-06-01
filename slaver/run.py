@@ -124,6 +124,21 @@ class RobotManager:
             )
             future.result()
 
+    @staticmethod
+    def _match_tool_by_keyword(task: str) -> str:
+        """根据子任务动词关键词匹配工具，返回工具名或 None"""
+        # 顺序重要：放/放置 在 抓取/拿 之前，因为"放置"包含"放"
+        rules = [
+            (["导航", "前往", "走到", "移动到", "去"], "navigate_to_target"),
+            (["放置", "放", "搁"], "place_on_top"),
+            (["抓取", "拿", "取", "拾", "捡"], "grasp_object"),
+            (["拍照", "截图", "拍张"], "capture_image"),
+        ]
+        for keywords, tool_name in rules:
+            if any(kw in task for kw in keywords):
+                return tool_name
+        return None
+
     async def _execute_task(self, task_data: Dict) -> None:
         """Internal task execution logic"""
         if self._shutdown_event.is_set():
@@ -134,17 +149,23 @@ class RobotManager:
         # Clear previous task status from Redis to avoid state pollution
         self.collaborator.clear_agent_status(self.robot_name)
 
-        # Use tool matcher to find relevant tools for the task
         task = task_data["task"]
-        matched_tools = self.tool_matcher.match_tools(task)
 
-        # Filter tools based on matching results
-        if matched_tools:
-            matched_tool_names = [tool_name for tool_name, _ in matched_tools]
+        # 优先用关键词匹配工具，匹配不到再走语义匹配
+        matched_tool_name = self._match_tool_by_keyword(task)
+        if matched_tool_name:
             filtered_tools = [tool for tool in self.tools
-                           if tool.get("function", {}).get("name") in matched_tool_names]
+                           if tool.get("function", {}).get("name") == matched_tool_name]
+            if not filtered_tools:
+                filtered_tools = self.tools  # 工具名不存在，回退全部
         else:
-            filtered_tools = self.tools
+            matched_tools = self.tool_matcher.match_tools(task)
+            if matched_tools:
+                matched_tool_names = [tool_name for tool_name, _ in matched_tools]
+                filtered_tools = [tool for tool in self.tools
+                               if tool.get("function", {}).get("name") in matched_tool_names]
+            else:
+                filtered_tools = self.tools
 
         agent = ToolCallingAgent(
             tools=filtered_tools,

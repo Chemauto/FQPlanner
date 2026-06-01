@@ -217,6 +217,22 @@ def process_commands(env):
                 elif cmd_type == "cmd_vel":
                     info = move(env, **params)
                     result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
+                elif cmd_type == "screenshot":
+                    from PIL import Image as PILImage
+                    from io import BytesIO
+                    import base64
+                    cam = params.get("camera_name", "overhead_cam")
+                    w = params.get("width", 640)
+                    h = params.get("height", 480)
+                    img = env.sim.render(w, h, camera_name=cam)
+                    if img is None:
+                        result = {"success": False, "result": f"相机 '{cam}' 渲染失败"}
+                    else:
+                        pil_img = PILImage.fromarray(img)
+                        buf = BytesIO()
+                        pil_img.save(buf, format="JPEG", quality=80)
+                        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        result = {"success": True, "image": img_b64, "camera": cam}
                 else:
                     result = {"error": f"未知命令: {cmd_type}"}
         except Exception as e:
@@ -472,12 +488,15 @@ def api_nav():
     data = request.json or {}
     x = data.get("x")
     y = data.get("y")
-    w = data.get("w", 0)
-    yaw = data.get("yaw", 0)
     if x is None or y is None:
         return jsonify({"error": "缺少 x 或 y 参数"}), 400
 
-    params = {"x": x, "y": y, "w": w, "yaw": yaw}
+    params = {"x": x, "y": y}
+    if data.get("target_yaw") is not None:
+        params["target_yaw"] = data["target_yaw"]
+    # 兼容旧参数名 w
+    elif data.get("w") is not None:
+        params["target_yaw"] = data["w"]
     return jsonify(submit_command("nav", params))
 
 
@@ -583,34 +602,19 @@ def api_map_data():
 
 
 # ============================================================
-# 截图（只读，不走命令队列）
+# 截图（走命令队列，在主线程渲染，避免 EGL 跨线程问题）
 # ============================================================
 
 @app.route("/screenshot", methods=["POST"])
 def api_screenshot():
     """从指定相机捕获单帧截图，返回 base64 编码的 JPEG 图像"""
     data = request.json or {}
-    camera_name = data.get("camera_name", "overhead_cam")
-    width = data.get("width", 640)
-    height = data.get("height", 480)
-    env = _get_env()
-    if env is None:
-        return jsonify({"success": False, "result": "仿真器未初始化"}), 503
-    try:
-        with _env_lock:
-            img = env.sim.render(width, height, camera_name=camera_name)
-        if img is None:
-            return jsonify({"success": False, "result": f"相机 '{camera_name}' 渲染失败"})
-        from PIL import Image
-        from io import BytesIO
-        import base64
-        pil_img = Image.fromarray(img)
-        buf = BytesIO()
-        pil_img.save(buf, format="JPEG", quality=80)
-        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-        return jsonify({"success": True, "image": img_b64, "camera": camera_name})
-    except Exception as e:
-        return jsonify({"success": False, "result": f"截图失败: {e}"})
+    params = {
+        "camera_name": data.get("camera_name", "overhead_cam"),
+        "width": data.get("width", 640),
+        "height": data.get("height", 480),
+    }
+    return jsonify(submit_command("screenshot", params))
 
 
 # ============================================================
