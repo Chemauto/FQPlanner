@@ -178,6 +178,28 @@ def navigate(x, y, w=0, yaw=0):
 
 
 # ============================================================
+# 截图
+# ============================================================
+
+def capture_screenshot(camera_name="overhead_cam", width=640, height=480):
+    """从指定相机捕获截图
+
+    Args:
+        camera_name: 相机名称 (overhead_cam, side_cam, robot0_frontview, robot0_eye_in_hand)
+        width: 图像宽度
+        height: 图像高度
+
+    Returns:
+        dict: {"success": bool, "image": "base64_string"} 或 {"success": False, "result": "错误信息"}
+    """
+    return call_sim("/screenshot", {
+        "camera_name": camera_name,
+        "width": width,
+        "height": height,
+    })
+
+
+# ============================================================
 # 辅助函数
 # ============================================================
 

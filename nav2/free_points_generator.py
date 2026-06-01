@@ -1,11 +1,31 @@
 #!/usr/bin/env python3
-"""Export candidate navigable points from the generated Nav2 occupancy map."""
+"""
+从占据栅格地图提取可通行点，并生成可视化图。
+
+输出:
+  - free_points.json: 可通行点数据
+  - free_points_vis.png: 可视化图（白=可通行 黑=障碍 红点=采样点）
+"""
 
 import argparse
 import json
 import math
+import os
 import re
 from pathlib import Path
+
+import numpy as np
+import yaml
+from PIL import Image
+
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+CONFIG_DIR = os.path.dirname(__file__)
+
+
+def load_config():
+    with open(CONFIG_PATH) as f:
+        return yaml.safe_load(f)
 
 
 def read_map_yaml(path):
@@ -51,17 +71,44 @@ def distance_to_obstacle(px, py, occupied, resolution, max_cells):
     return best * resolution
 
 
+def generate_visualization(pgm_path, width, height, data, resolution, origin, points, output_path):
+    arr = np.frombuffer(data, dtype=np.uint8).reshape((height, width))
+    vis = np.stack([arr] * 3, axis=-1).copy()
+
+    for pt in points:
+        px = int((pt["x"] - origin[0]) / resolution)
+        py = int((origin[1] + height * resolution - pt["y"]) / resolution)
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                ny, nx = py + dy, px + dx
+                if 0 <= nx < width and 0 <= ny < height:
+                    vis[ny, nx] = [255, 50, 50]
+
+    scale = 4
+    vis_big = np.repeat(np.repeat(vis, scale, axis=0), scale, axis=1)
+    vis_img = Image.fromarray(vis_big)
+
+    vis_output = Path(output_path).with_name("free_points_vis.png")
+    vis_img.save(vis_output)
+    print(f"[vis] 可视化图已保存: {vis_output} ({vis_img.size[0]}x{vis_img.size[1]})")
+    print(f"[vis] 图例: 白=可通行 黑=障碍 红点=采样可通行点({len(points)}个)")
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--map", default="maps/kitchen_map.yaml")
-    parser.add_argument("--output", default="maps/free_points.json")
-    parser.add_argument("--spacing", type=float, default=0.5)
-    parser.add_argument("--clearance", type=float, default=0.35)
+    cfg = load_config()
+    fp_cfg = cfg.get("free_points", {})
+
+    parser = argparse.ArgumentParser(description="从占据栅格地图提取可通行点并生成可视化")
+    parser.add_argument("--map", default=os.path.join(CONFIG_DIR, fp_cfg.get("map_file", "maps/kitchen_map.yaml")))
+    parser.add_argument("--output", default=os.path.join(CONFIG_DIR, fp_cfg.get("output", "maps/free_points.json")))
+    parser.add_argument("--spacing", type=float, default=fp_cfg.get("spacing", 0.5))
+    parser.add_argument("--clearance", type=float, default=fp_cfg.get("clearance", 0.35))
     args = parser.parse_args()
 
     image, resolution, origin = read_map_yaml(args.map)
     map_dir = Path(args.map).resolve().parent
-    width, height, data = read_pgm(map_dir / image)
+    pgm_path = map_dir / image
+    width, height, data = read_pgm(pgm_path)
 
     occupied = [(i % width, i // width) for i, value in enumerate(data) if value < 128]
     step = max(1, round(args.spacing / resolution))
@@ -91,7 +138,9 @@ def main():
         "clearance": args.clearance,
         "points": points,
     }, indent=2))
-    print(f"[free_points] exported {len(points)} points -> {output}")
+    print(f"[free_points] {len(points)} 可通行点 -> {output}")
+
+    generate_visualization(pgm_path, width, height, data, resolution, origin, points, output)
 
 
 if __name__ == "__main__":

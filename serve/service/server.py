@@ -15,7 +15,7 @@ from tools.arm import (
     move_arm, grasp, place,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, follow_path, nav_nav2, nav2_available
+from tools.move import get_base_info, nav, move, follow_path
 from utils.utils import get_fixture_detail
 
 app = Flask(__name__)
@@ -477,12 +477,6 @@ def api_nav():
     if x is None or y is None:
         return jsonify({"error": "缺少 x 或 y 参数"}), 400
 
-    # Nav2 优先：检测桥接节点是否在线
-    if nav2_available():
-        result = nav_nav2(x, y, w)
-        return jsonify(result)
-
-    # Fallback：PD 控制器
     params = {"x": x, "y": y, "w": w, "yaw": yaw}
     return jsonify(submit_command("nav", params))
 
@@ -586,6 +580,37 @@ def api_map_data():
             })
 
     return jsonify(obstacles)
+
+
+# ============================================================
+# 截图（只读，不走命令队列）
+# ============================================================
+
+@app.route("/screenshot", methods=["POST"])
+def api_screenshot():
+    """从指定相机捕获单帧截图，返回 base64 编码的 JPEG 图像"""
+    data = request.json or {}
+    camera_name = data.get("camera_name", "overhead_cam")
+    width = data.get("width", 640)
+    height = data.get("height", 480)
+    env = _get_env()
+    if env is None:
+        return jsonify({"success": False, "result": "仿真器未初始化"}), 503
+    try:
+        with _env_lock:
+            img = env.sim.render(width, height, camera_name=camera_name)
+        if img is None:
+            return jsonify({"success": False, "result": f"相机 '{camera_name}' 渲染失败"})
+        from PIL import Image
+        from io import BytesIO
+        import base64
+        pil_img = Image.fromarray(img)
+        buf = BytesIO()
+        pil_img.save(buf, format="JPEG", quality=80)
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return jsonify({"success": True, "image": img_b64, "camera": camera_name})
+    except Exception as e:
+        return jsonify({"success": False, "result": f"截图失败: {e}"})
 
 
 # ============================================================

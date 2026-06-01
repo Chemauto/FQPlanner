@@ -306,6 +306,7 @@ class OpenAIServerModel(Model):
         model_path: str,
         stop_sequences: Optional[List[str]] = None,
         tools_to_call_from: Optional[List[str]] = None,
+        images: Optional[List[str]] = None,
     ) -> ChatMessage:
 
         # Build task type guidance
@@ -327,8 +328,20 @@ Rules:
             content += "Completed Actions:\n"
             for current_short_statu in current_status:
                 content += f"- {current_short_statu}\n"
+
+        if images:
+            user_content = [{"type": "text", "text": content}]
+            for img_b64 in images:
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                })
+            messages = [{"role": "user", "content": user_content}]
+        else:
+            messages = [{"role": "user", "content": content}]
+
         completion_kwargs = {
-            "messages": [{"role": "user", "content": content}],
+            "messages": messages,
             "model": model_path,
             "n": 1,
             "temperature": 0,

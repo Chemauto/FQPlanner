@@ -69,6 +69,7 @@ class MultiStepAgent:
         self.step_callbacks.append(self.monitor.update_metrics)
         self.last_tool_result = None  # Store the last tool execution result
         self._scene_context = None  # 缓存场景上下文
+        self._captured_images = []  # 存储摄像头捕获的图像 (base64)
 
     async def run(
         self,
@@ -247,6 +248,8 @@ class ToolCallingAgent(MultiStepAgent):
 
         # Update robot state in Redis if there are state updates
         if state_updates:
+            if "_image" in state_updates:
+                self._captured_images.append(state_updates.pop("_image"))
             # print(f"[DEBUG] Calling _update_robot_state with: {state_updates}", file=sys.stderr)
             await self._update_robot_state(state_updates)
         # else:
@@ -452,7 +455,9 @@ class ToolCallingAgent(MultiStepAgent):
             model_path=self.model_path,
             tools_to_call_from=self.tools,
             stop_sequences=["Observation:"],
+            images=self._captured_images if self._captured_images else None,
         )
+        self._captured_images = []
         memory_step.model_output_message = model_message
 
         # Prepare log content - avoid logging full API response object

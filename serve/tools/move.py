@@ -12,13 +12,7 @@ body 坐标系随 yaw 旋转：
   yaw=90°: body_X = 世界+Y,  body_Y = 世界-X
 """
 
-import json
-import urllib.request
-import urllib.error
 import numpy as np
-
-# Nav2 桥接节点地址（Docker 容器内）
-NAV2_BRIDGE_URL = "http://127.0.0.1:5002"
 
 
 def _normalize_angle_deg(angle):
@@ -186,10 +180,10 @@ def follow_path(
     max_turn=0.25,
 ):
     """
-    Follow a Nav2 global path with an omnidirectional PD controller.
+    Follow a global path with an omnidirectional PD controller.
 
-    Nav2 is used only for global planning. This function converts path waypoints
-    in map/world coordinates into MuJoCo body-frame velocity actions.
+    Converts path waypoints in world coordinates into MuJoCo body-frame
+    velocity actions.
     """
     if not path:
         return {"success": False, "result": "空路径"}
@@ -250,44 +244,3 @@ def follow_path(
         "goal_error": final_err,
         "waypoints": len(points),
     }
-
-
-# ============================================================
-# Nav2 导航
-# ============================================================
-
-def nav2_available():
-    """检测 Nav2 桥接节点是否在线"""
-    try:
-        req = urllib.request.Request(f"{NAV2_BRIDGE_URL}/navigate", method="GET")
-        with urllib.request.urlopen(req, timeout=1):
-            return True
-    except Exception:
-        return False
-
-
-def nav_nav2(x, y, w, timeout=120):
-    """
-    通过 Nav2 桥接节点导航到目标位置
-
-    Args:
-        x:       目标世界坐标 x
-        y:       目标世界坐标 y
-        w:       目标偏航角（度）
-        timeout: 超时时间（秒）
-
-    Returns:
-        dict: {"success": bool, "pos": [x,y,z], "yaw": float, "result": str}
-    """
-    data = json.dumps({"x": x, "y": y, "w": w, "timeout": timeout}).encode("utf-8")
-    try:
-        req = urllib.request.Request(
-            f"{NAV2_BRIDGE_URL}/navigate",
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout + 10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        return {"success": False, "result": f"Nav2 请求失败: {e}"}
