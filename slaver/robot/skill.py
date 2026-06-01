@@ -32,7 +32,7 @@ def register_all_modules():
     register_base_tools(mcp)
     register_grasp_tools(mcp)
     register_place_tools(mcp)
-    # register_camera_tools(mcp)
+    register_camera_tools(mcp)
     # register_example_tools(mcp)
 
     print("[skill.py] ✓ 所有模块注册完成", file=sys.stderr)

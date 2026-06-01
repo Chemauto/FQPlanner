@@ -91,6 +91,7 @@ class GlobalAgent:
         self.current_task_queue: Optional[TaskQueue] = None
         self.current_task_id: Optional[str] = None
         self.current_task_desc: Optional[str] = None
+        self._last_subtask_status = None  # Slaver 返回的子任务状态
         self._memory_dir = os.path.join(os.path.dirname(__file__), '..', 'memory')
         self._experience_file = os.path.join(self._memory_dir, 'experiences.md')
 
@@ -175,16 +176,19 @@ class GlobalAgent:
         subtask_result = data.get("subtask_result")
         terminated = data.get("terminated", False)
         task_id = data.get("task_id")
+        status = data.get("status")  # success/failure/recall/none/exception/timeout
 
         if robot_name and subtask_handle and subtask_result:
             self.logger.info(
                 f"================ Received result from {robot_name} ================"
             )
-            self.logger.info(f"Subtask: {subtask_handle}\nResult: {subtask_result}")
+            self.logger.info(f"Subtask: {subtask_handle}\nResult: {subtask_result}\nStatus: {status}")
             if terminated:
                 self.logger.warning(f"[TERMINATE] Task {task_id} terminated by judge")
                 if task_id:
                     self.terminated_tasks.add(task_id)
+            # 存储最后一次子任务状态，供 _dispath_subtasks_async 使用
+            self._last_subtask_status = status
             self.logger.info(
                 "===================================================================="
             )
@@ -335,6 +339,8 @@ class GlobalAgent:
         refresh: bool
     ):
         """逐个发送子任务，每个完成后检查场景变化并增量规划。"""
+        robot_name = None
+
         while not task_queue.all_done():
             if task_id in self.terminated_tasks:
                 self.logger.warning(f"[TERMINATE] Stopping task {task_id}")
@@ -354,6 +360,9 @@ class GlobalAgent:
             if refresh:
                 self.collaborator.clear_agent_status(robot_name)
 
+            # 重置状态
+            self._last_subtask_status = None
+
             self.logger.info(f"Sending: {current['subtask']}")
             self.collaborator.send(
                 f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
@@ -362,6 +371,14 @@ class GlobalAgent:
             self.collaborator.wait_agents_free([robot_name])
 
             task_queue.mark_done(current)
+
+            # 子任务失败/异常时，拍照诊断
+            if self._last_subtask_status in ("failure", "exception", "timeout"):
+                self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
+                self._send_camera_task(
+                    robot_name, task_id,
+                    f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
+                )
 
             if task_id in self.terminated_tasks:
                 self.logger.warning(f"[TERMINATE] Task {task_id} terminated, stopping")
@@ -387,7 +404,30 @@ class GlobalAgent:
                         f"{[t['subtask'] for t in new_tasks]}"
                     )
 
+        # 所有子任务完成后，拍照验证最终场景
+        if robot_name and task_queue.all_done():
+            self.logger.info("[Camera] 所有子任务完成，拍照验证最终场景...")
+            self._send_camera_task(
+                robot_name, task_id,
+                f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
+            )
+
         self.logger.info(f"Task_id ({task_id}) [{task}] all done.")
+
+    def _send_camera_task(self, robot_name: str, task_id: str, description: str):
+        """发送拍照子任务并等待完成。"""
+        subtask_data = {
+            "task_id": task_id,
+            "task": description,
+            "order": "true",
+        }
+        self._last_subtask_status = None
+        self.collaborator.send(
+            f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
+        )
+        self.collaborator.update_agent_busy(robot_name, True)
+        self.collaborator.wait_agents_free([robot_name])
+        self.logger.info(f"[Camera] 拍照完成，状态: {self._last_subtask_status}")
 
     def get_task_status(self) -> Dict:
         """返回当前任务的执行状态，供前端查询。"""
