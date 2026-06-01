@@ -191,10 +191,11 @@ class RobotManager:
             result=result,
             tool_call=agent.tool_call,
             terminated=terminated,
+            status=agent._last_status,
         )
 
     def _send_result(
-        self, robot_name: str, task: str, task_id: str, result: Dict, tool_call: List, terminated: bool = False
+        self, robot_name: str, task: str, task_id: str, result: Dict, tool_call: List, terminated: bool = False, status: str = None
     ) -> None:
         """Send task results to collaboration channel"""
         if self._shutdown_event.is_set():
@@ -208,6 +209,7 @@ class RobotManager:
             "tools": tool_call,
             "task_id": task_id,
             "terminated": terminated,
+            "status": status,  # success/failure/recall/none/exception/timeout
         }
         self.collaborator.send(channel, json.dumps(payload))
 

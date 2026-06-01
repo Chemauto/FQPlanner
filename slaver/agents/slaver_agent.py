@@ -68,6 +68,7 @@ class MultiStepAgent:
         self.step_callbacks = step_callbacks if step_callbacks is not None else []
         self.step_callbacks.append(self.monitor.update_metrics)
         self.last_tool_result = None  # Store the last tool execution result
+        self._last_status = None  # 最后一次工具执行的状态 (success/failure/recall/none/exception/timeout)
         self._scene_context = None  # 缓存场景上下文
         self._captured_images = []  # 存储摄像头捕获的图像 (base64)
 
@@ -221,6 +222,7 @@ class ToolCallingAgent(MultiStepAgent):
 
         # 完成类状态（success/recall/none）：直接停止
         if tool_status in ("success", "recall", "none"):
+            self._last_status = tool_status
             self.last_tool_result = observation
             # 更新机器人状态
             if state_updates:
@@ -247,12 +249,14 @@ class ToolCallingAgent(MultiStepAgent):
                 return await self._execute_tool_call(tool_name, tool_arguments, memory_step, _retry_count + 1)
 
             elif decision == "skip":
+                self._last_status = tool_status or "failure"
                 skip_msg = f"任务跳过：{tool_name} 执行失败，放弃该子任务。"
                 print(f"[Judge] {skip_msg}", file=sys.stderr)
                 self.last_tool_result = skip_msg
                 return skip_msg
 
             elif decision == "terminate":
+                self._last_status = tool_status or "failure"
                 terminate_msg = f"任务终止：{tool_name} 执行失败，判定终止整个任务。"
                 print(f"[Judge] {terminate_msg}", file=sys.stderr)
                 raise TaskTerminatedException(terminate_msg)
