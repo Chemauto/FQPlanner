@@ -49,8 +49,14 @@ collaborator:
 
 # Camera Parameters
 camera:
-  # Path to save camera images
   image_path: "images/"
+  cameras:
+    - "robot0_frontview"
+    - "robot0_eye_in_hand"
+  vlm:
+    model: "mimo-v2.5"
+    api_base: "https://api.xiaomimimo.com/v1"
+    max_tokens: 1000
 
 # Robot 
 robot:
