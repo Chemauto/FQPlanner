@@ -92,6 +92,7 @@ class GlobalAgent:
         self.current_task_id: Optional[str] = None
         self.current_task_desc: Optional[str] = None
         self._last_subtask_status = None  # Slaver 返回的子任务状态
+        self._last_subtask_result = None  # Slaver 返回的子任务结果（含 VLM 描述）
         self._memory_dir = os.path.join(os.path.dirname(__file__), '..', 'memory')
         self._experience_file = os.path.join(self._memory_dir, 'experiences.md')
 
@@ -176,7 +177,7 @@ class GlobalAgent:
         subtask_result = data.get("subtask_result")
         terminated = data.get("terminated", False)
         task_id = data.get("task_id")
-        status = data.get("status")  # success/failure/recall/none/exception/timeout
+        status = data.get("status")  # success/failure/none/exception/timeout
 
         if robot_name and subtask_handle and subtask_result:
             self.logger.info(
@@ -187,8 +188,9 @@ class GlobalAgent:
                 self.logger.warning(f"[TERMINATE] Task {task_id} terminated by judge")
                 if task_id:
                     self.terminated_tasks.add(task_id)
-            # 存储最后一次子任务状态，供 _dispath_subtasks_async 使用
+            # 存储最后一次子任务状态和结果，供 _dispath_subtasks_async 使用
             self._last_subtask_status = status
+            self._last_subtask_result = subtask_result
             self.logger.info(
                 "===================================================================="
             )
@@ -362,6 +364,7 @@ class GlobalAgent:
 
             # 重置状态
             self._last_subtask_status = None
+            self._last_subtask_result = None
 
             self.logger.info(f"Sending: {current['subtask']}")
             self.collaborator.send(
@@ -372,13 +375,28 @@ class GlobalAgent:
 
             task_queue.mark_done(current)
 
-            # 子任务失败/异常时，拍照诊断
-            if self._last_subtask_status in ("failure", "exception", "timeout"):
+            # 子任务失败/异常时，拍照诊断（但拍照任务本身失败不再触发拍照，避免死循环）
+            is_camera_task = "拍照" in current["subtask"]
+            if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
                 self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
                 self._send_camera_task(
                     robot_name, task_id,
                     f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
                 )
+
+                # VLM 发现异常时，让 Master LLM 决定如何调整
+                if self._last_subtask_result and "abnormal" in self._last_subtask_result:
+                    self.logger.info(f"[Camera] VLM 发现异常，触发重规划...")
+                    vlm_feedback = self._last_subtask_result
+                    new_tasks, remove_tasks = self._incremental_replan(
+                        task, task_queue, [], vlm_feedback=vlm_feedback
+                    )
+                    if remove_tasks:
+                        task_queue.remove_pending_tasks(remove_tasks)
+                        self.logger.info(f"[Camera] 移除任务: {remove_tasks}")
+                    if new_tasks:
+                        task_queue.append_tasks(new_tasks)
+                        self.logger.info(f"[Camera] 新增任务: {[t['subtask'] for t in new_tasks]}")
 
             if task_id in self.terminated_tasks:
                 self.logger.warning(f"[TERMINATE] Task {task_id} terminated, stopping")
@@ -411,6 +429,10 @@ class GlobalAgent:
                 robot_name, task_id,
                 f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
             )
+            if self._last_subtask_result and "abnormal" in self._last_subtask_result:
+                self.logger.warning(f"[Camera] 最终验证发现异常: {self._last_subtask_result}")
+            else:
+                self.logger.info("[Camera] 最终验证通过，场景正常")
 
         self.logger.info(f"Task_id ({task_id}) [{task}] all done.")
 
@@ -422,6 +444,7 @@ class GlobalAgent:
             "order": "true",
         }
         self._last_subtask_status = None
+        self._last_subtask_result = None
         self.collaborator.send(
             f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
         )
@@ -455,9 +478,11 @@ class GlobalAgent:
         }
 
     def _incremental_replan(
-        self, original_task: str, task_queue: TaskQueue, changes: list
+        self, original_task: str, task_queue: TaskQueue, changes: list, vlm_feedback: str = None
     ) -> tuple:
-        """增量规划：返回需要新增和移除的子任务。"""
+        """增量规划：返回需要新增和移除的子任务。
+        vlm_feedback: VLM 拍照诊断的反馈（可选），包含场景异常描述。
+        """
         changes_summary = self._summarize_changes(changes)
 
         # 读取当前场景状态
@@ -494,11 +519,13 @@ class GlobalAgent:
 {remaining_str}
 
 场景变化：{changes_summary}
+{f"VLM 视觉反馈：{vlm_feedback}" if vlm_feedback else ""}
 
 请根据当前场景状态和场景变化，判断需要调整的子任务：
 - 如果有新物体出现需要处理，在 new_subtasks 中添加
 - 如果某个剩余子任务的目标已不存在（如物体从场景中消失），在 remove_subtasks 中列出对应的子任务描述
 - 如果场景变化不需要额外操作（如机器人自己抓取导致的移除），两个列表都为空
+- 如果 VLM 视觉反馈显示场景异常（如物体掉落、位置不对），在 new_subtasks 中添加修正子任务
 
 输出格式：
 {{

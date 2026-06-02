@@ -550,55 +550,85 @@ def api_close_gripper():
 
 @app.route("/map_data", methods=["GET"])
 def api_map_data():
-    """返回场景中所有障碍物的世界坐标位置和尺寸，供地图生成使用"""
+    """从上往下投射：读取所有 MuJoCo geom 的世界坐标 2D 投影，生成占据栅格"""
     env = _get_env()
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
 
+    resolution = float(request.args.get("resolution", 0.05))
+    x_min = float(request.args.get("x_min", -1.0))
+    x_max = float(request.args.get("x_max", 8.0))
+    y_min = float(request.args.get("y_min", -6.0))
+    y_max = float(request.args.get("y_max", 1.0))
+
+    width = int((x_max - x_min) / resolution)
+    height = int((y_max - y_min) / resolution)
+
     with _env_lock:
-        obstacles = []
+        model = env.sim.model
+        data = env.sim.data
 
-        for name, fixture in env.fixtures.items():
-            name_lower = name.lower()
-            fixture_type = type(fixture).__name__.lower()
-            if any(skip in name_lower for skip in ("backing", "floor", "window", "outlet", "switch")):
+        # 排除的 body（机器人相关）
+        robot_bodies = set()
+        for i in range(model.nbody):
+            name = (model.body_id2name(i) or "").lower()
+            if any(k in name for k in ("robot", "panda", "omron", "mobilebase",
+                                        "gripper", "finger", "hand", "torso",
+                                        "camera", "link", "joint", "site")):
+                robot_bodies.add(i)
+
+        # 收集障碍物的 2D 矩形 (col_min, row_min, col_max, row_max)
+        rects = []
+        for i in range(model.ngeom):
+            body_id = model.geom_bodyid[i]
+            if body_id in robot_bodies:
                 continue
-            if any(skip in fixture_type for skip in ("accessory",)):
+
+            name = (model.geom_id2name(i) or "").lower()
+            if any(k in name for k in ("floor", "ground", "ceiling", "skybox", "visual", "light")):
                 continue
 
-            try:
-                pos = np.array(fixture.pos, dtype=float)
-                size = np.array(fixture.size, dtype=float)
-            except Exception:
+            pos = data.geom_xpos[i]       # 世界坐标 [x, y, z]
+            size = model.geom_size[i]      # 半尺寸 [hx, hy, hz]
+            mat = data.geom_xmat[i].reshape(3, 3)  # 旋转矩阵
+
+            # 太高的跳过（天花板灯具等）
+            top_z = pos[2] + abs(size[2]) * 2
+            if pos[2] - abs(size[2]) > 2.0 or top_z < 0.05:
                 continue
 
-            if pos.size < 2 or size.size < 2:
-                continue
-            if pos.size == 2:
-                pos = np.array([pos[0], pos[1], 0.0])
-            if size.size == 2:
-                size = np.array([size[0], size[1], 0.1])
+            # 投影 8 个角点到 x-y 平面，取 2D AABB
+            xs, ys = [], []
+            for sx in (-size[0], size[0]):
+                for sy in (-size[1], size[1]):
+                    for sz in (-size[2], size[2]):
+                        corner = pos + mat @ np.array([sx, sy, sz])
+                        xs.append(corner[0])
+                        ys.append(corner[1])
 
-            # Wall/furniture sizes from RoboCasa fixtures are full extents.
-            # map_generator expects MuJoCo-style half extents.
-            half_size = (size / 2.0).tolist()
-            z_rot = float(getattr(fixture, "rot", 0.0) or getattr(fixture, "z_rot", 0.0) or 0.0)
-            c, s = np.cos(z_rot), np.sin(z_rot)
-            xmat = [
-                c, -s, 0.0,
-                s, c, 0.0,
-                0.0, 0.0, 1.0,
-            ]
+            x1, x2 = min(xs), max(xs)
+            y1, y2 = min(ys), max(ys)
+            col_min = max(0, int((x1 - x_min) / resolution))
+            col_max = min(width - 1, int((x2 - x_min) / resolution))
+            row_min = max(0, int((y_max - y2) / resolution))
+            row_max = min(height - 1, int((y_max - y1) / resolution))
+            if col_min <= col_max and row_min <= row_max:
+                rects.append((col_min, row_min, col_max, row_max))
 
-            obstacles.append({
-                "name": name,
-                "pos": pos.tolist(),
-                "size": half_size,
-                "xmat": xmat,
-                "type": 6,
-            })
+        # 画栅格
+        grid = bytearray([255] * (width * height))
+        for c1, r1, c2, r2 in rects:
+            for r in range(r1, r2 + 1):
+                for c in range(c1, c2 + 1):
+                    grid[r * width + c] = 0
 
-    return jsonify(obstacles)
+    return jsonify({
+        "grid": list(grid),
+        "width": width,
+        "height": height,
+        "resolution": resolution,
+        "origin": [x_min, y_min],
+    })
 
 
 # ============================================================

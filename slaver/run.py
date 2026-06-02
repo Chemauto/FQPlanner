@@ -126,13 +126,17 @@ class RobotManager:
 
     @staticmethod
     def _match_tool_by_keyword(task: str) -> str:
-        """根据子任务动词关键词匹配工具，返回工具名或 None"""
-        # 顺序重要：放/放置 在 抓取/拿 之前，因为"放置"包含"放"
+        """根据子任务动词关键词匹配工具，返回工具名或 None。
+        导航类子任务里经常会出现“为抓取/放置做准备”，这时动词目标仍然是导航。
+        """
+        navigation_keywords = ["导航", "前往", "走到", "移动到", "到达", "靠近"]
+        if any(kw in task for kw in navigation_keywords):
+            return "navigate_to_target"
+
         rules = [
-            (["导航", "前往", "走到", "移动到", "去"], "navigate_to_target"),
-            (["放置", "放", "搁"], "place_on_top"),
-            (["抓取", "拿", "取", "拾", "捡"], "grasp_object"),
             (["拍照", "截图", "拍张"], "capture_image"),
+            (["放置", "放到", "搁到"], "place_on_top"),
+            (["抓取", "拿起", "取走", "拾起", "捡起"], "grasp_object"),
         ]
         for keywords, tool_name in rules:
             if any(kw in task for kw in keywords):
@@ -209,7 +213,7 @@ class RobotManager:
             "tools": tool_call,
             "task_id": task_id,
             "terminated": terminated,
-            "status": status,  # success/failure/recall/none/exception/timeout
+            "status": status,  # success/failure/none/exception/timeout
         }
         self.collaborator.send(channel, json.dumps(payload))
 

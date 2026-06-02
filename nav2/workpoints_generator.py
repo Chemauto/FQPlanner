@@ -123,9 +123,34 @@ def find_covering_waypoints(free_points, targets, max_reach, min_dist):
     return selected
 
 
+FIXTURE_PRIORITY = ["counter", "island", "stove", "sink"]
+
+
+def snap_to_90(yaw_deg):
+    """把角度吸附到最近的 90 度方向"""
+    while yaw_deg > 180:
+        yaw_deg -= 360
+    while yaw_deg <= -180:
+        yaw_deg += 360
+    angles = [-180, -90, 0, 90, 180]
+    return float(min(angles, key=lambda a: abs(a - yaw_deg)))
+
+
+def pick_primary_target(serves, targets):
+    """从 serves 列表中选最主要的目标（家具优先）"""
+    for fixture in FIXTURE_PRIORITY:
+        if fixture in serves and fixture in targets:
+            return fixture
+    for name in serves:
+        if name in targets:
+            return name
+    return None
+
+
 def compute_yaw(from_xy, to_xy):
     dx = to_xy[0] - from_xy[0]
     dy = to_xy[1] - from_xy[1]
+    # yaw=0→+X, 90→+Y (CCW)，atan2(dy,dx) 直接给出正确朝向
     return math.degrees(math.atan2(dy, dx))
 
 
@@ -174,11 +199,13 @@ def build_waypoints(selected, targets):
         p = item['point']
         serves = item['serves']
 
-        yaw_deg = 0.0
-        for name in serves:
-            if name in targets:
-                yaw_deg = compute_yaw([p['x'], p['y']], targets[name])
-                break
+        # 取最主要目标的朝向（家具优先），snap 到 90°
+        primary = pick_primary_target(serves, targets)
+        if primary:
+            raw_yaw = compute_yaw([p['x'], p['y']], targets[primary])
+            yaw_deg = snap_to_90(raw_yaw)
+        else:
+            yaw_deg = 0.0
 
         waypoints.append({
             'name': item['name'],

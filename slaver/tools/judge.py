@@ -14,9 +14,9 @@ import sys
 def judge_on_failure(tool_name: str, observation: str) -> str:
     """工具执行失败后调用，返回 "retry" / "skip" / "terminate"。"""
     r = random.random()
-    if r > 0.0:
+    if r >= 0.4:
         decision = "retry"
-    elif r >= 0.00:
+    elif r >= 0.01:
         decision = "skip"
     else:
         decision = "terminate"

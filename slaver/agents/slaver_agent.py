@@ -15,8 +15,6 @@ from slaver.tools.memory import ActionStep, AgentMemory
 from slaver.tools.monitoring import AgentLogger, LogLevel, Monitor
 import os
 
-from slaver.tools.judge import judge_on_failure
-
 # 添加项目根目录到 sys.path，以便导入 serve 模块
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
@@ -68,7 +66,7 @@ class MultiStepAgent:
         self.step_callbacks = step_callbacks if step_callbacks is not None else []
         self.step_callbacks.append(self.monitor.update_metrics)
         self.last_tool_result = None  # Store the last tool execution result
-        self._last_status = None  # 最后一次工具执行的状态 (success/failure/recall/none/exception/timeout)
+        self._last_status = None  # 最后一次工具执行的状态 (success/failure/none/exception/timeout)
         self._scene_context = None  # 缓存场景上下文
         self._captured_images = []  # 存储摄像头捕获的图像 (base64)
 
@@ -102,6 +100,7 @@ class MultiStepAgent:
             self.memory.reset()
             self.step_number = 1
             self._scene_context = None
+            self._last_status = None
 
         self.logger.log_task(
             content=self.task.strip(),
@@ -176,9 +175,8 @@ class ToolCallingAgent(MultiStepAgent):
         )
 
     async def _execute_tool_call(
-        self, tool_name: str, tool_arguments: dict, memory_step: ActionStep, _retry_count: int = 0
+        self, tool_name: str, tool_arguments: dict, memory_step: ActionStep
     ) -> Union[str, None]:
-        MAX_RETRIES = 3
 
         self.logger.log(
             Panel(
@@ -220,8 +218,8 @@ class ToolCallingAgent(MultiStepAgent):
             except (json.JSONDecodeError, ValueError) as e:
                 pass  # Not a JSON tuple, use as-is
 
-        # 完成类状态（success/recall/none）：直接停止
-        if tool_status in ("success", "recall", "none"):
+        # 完成类状态（success/none）：直接停止
+        if tool_status in ("success", "none"):
             self._last_status = tool_status
             self.last_tool_result = observation
             # 更新机器人状态
@@ -231,7 +229,7 @@ class ToolCallingAgent(MultiStepAgent):
                 await self._update_robot_state(state_updates)
             return "final_answer"
 
-        # 错误类状态（failure/exception/timeout）：走 judge 逻辑
+        # 错误类状态（failure/exception/timeout）：直接返回给 Master，由 Master LLM + VLM 综合判断
         is_failed = tool_status in ("failure", "exception", "timeout") or (
             isinstance(observation, str) and (
                 "失败" in observation or "failed" in observation.lower()
@@ -241,25 +239,16 @@ class ToolCallingAgent(MultiStepAgent):
         )
 
         if is_failed:
-            # Ask the judge what to do
-            decision = judge_on_failure(tool_name, observation)
+            self._last_status = tool_status or "failure"
+            self.last_tool_result = observation
+            print(f"[Slaver] 工具执行失败: {tool_name}, 状态: {self._last_status}, 交由 Master 决策", file=sys.stderr)
+            return observation
 
-            if decision == "retry" and _retry_count < MAX_RETRIES:
-                print(f"[Judge] Retrying ({_retry_count + 1}/{MAX_RETRIES})...", file=sys.stderr)
-                return await self._execute_tool_call(tool_name, tool_arguments, memory_step, _retry_count + 1)
-
-            elif decision == "skip":
-                self._last_status = tool_status or "failure"
-                skip_msg = f"任务跳过：{tool_name} 执行失败，放弃该子任务。"
-                print(f"[Judge] {skip_msg}", file=sys.stderr)
-                self.last_tool_result = skip_msg
-                return skip_msg
-
-            elif decision == "terminate":
-                self._last_status = tool_status or "failure"
-                terminate_msg = f"任务终止：{tool_name} 执行失败，判定终止整个任务。"
-                print(f"[Judge] {terminate_msg}", file=sys.stderr)
-                raise TaskTerminatedException(terminate_msg)
+        # 正常成功路径：设置 _last_status
+        if tool_status:
+            self._last_status = tool_status
+        elif self._last_status is None:
+            self._last_status = "success"
 
         # Update robot state in Redis if there are state updates
         if state_updates:
