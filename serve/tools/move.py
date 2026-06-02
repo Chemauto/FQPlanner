@@ -1,11 +1,10 @@
 """
 move.py - 机器人底座移动控制
 
-动作空间（12维）：
-  action[7]  → forward（body X 轴，前进/后退）
-  action[8]  → side（body Y 轴，左/右平移，正=左）
-  action[9]  → yaw（原地旋转，正=逆时针）
-  action[11] → 模式（正=底座模式）
+XLeRobot MuJoCo actuator：
+  ctrl[0] → slide_joint_x
+  ctrl[1] → slide_joint_y
+  ctrl[2] → hinge_joint_z
 
 body 坐标系随 yaw 旋转：
   yaw=0°:  body_X = 世界+X,  body_Y = 世界+Y
@@ -13,6 +12,7 @@ body 坐标系随 yaw 旋转：
 """
 
 import numpy as np
+import mujoco
 
 
 def _normalize_angle_deg(angle):
@@ -50,19 +50,21 @@ def get_base_info(env):
             qvel:      关节速度 [forward, side, yaw]
             ctrl:      控制信号 [forward, side, yaw]
     """
-    base_id = env.sim.model.body_name2id("mobilebase0_base")
+    model = env.sim.model
+    data = env.sim.data
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
 
     # 世界坐标
-    pos = env.sim.data.body_xpos[base_id].copy()
-    quat = env.sim.data.body_xquat[base_id]  # [w, x, y, z]
+    pos = data.xpos[base_id].copy()
+    quat = data.xquat[base_id]  # [w, x, y, z]
     w, x, y, z = quat
     yaw_rad = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     yaw_deg = np.rad2deg(yaw_rad)
 
     # 关节值
-    qpos = env.sim.data.qpos[0:3].copy()
-    qvel = env.sim.data.qvel[0:3].copy()
-    ctrl = env.sim.data.ctrl[7:10].copy()
+    qpos = data.qpos[0:3].copy()
+    qvel = data.qvel[0:3].copy()
+    ctrl = data.ctrl[0:3].copy()
 
     return {
         "pos": pos.tolist(),
@@ -77,6 +79,7 @@ def get_base_info(env):
 def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     """
     底座速度控制（一步）
+    slide joints 在 chassis body frame，直接传入 body-frame 速度。
 
     Args:
         env: 环境对象
@@ -92,10 +95,20 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     Vw = np.clip(Vw, -1.0, 1.0)
 
     action = np.zeros(env.action_dim)
-    action[7] = Vx
-    action[8] = Vy
-    action[9] = Vw
-    action[11] = 1.0  # 底座模式
+    # slide joints 在 body frame，直接赋值
+    action[0] = Vx
+    action[1] = Vy
+    action[2] = Vw
+
+    # 轮子电机同步转动
+    if env.action_dim >= 18:
+        radius = 0.1
+        vel2wheel = np.array([
+            [0, 1, -radius],
+            [-np.sqrt(3) * 0.5, -0.5, -radius],
+            [np.sqrt(3) * 0.5, -0.5, -radius],
+        ])
+        action[15:18] = 20.0 * vel2wheel @ np.array([Vx, Vy, Vw])
 
     env.step(action)
 

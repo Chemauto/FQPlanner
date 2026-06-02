@@ -7,6 +7,7 @@ import os
 import time
 import threading
 import numpy as np
+import mujoco
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -126,10 +127,9 @@ def get_base_action(action_dim):
     with _queue_lock:
         if time.time() > _base_cmd["expires_at"]:
             return action
-        action[7] = np.clip(_base_cmd["Vx"], -1.0, 1.0)
-        action[8] = np.clip(_base_cmd["Vy"], -1.0, 1.0)
-        action[9] = np.clip(_base_cmd["Vw"], -1.0, 1.0)
-        action[11] = 1.0
+        action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)
+        action[1] = np.clip(_base_cmd["Vy"], -1.0, 1.0)
+        action[2] = np.clip(_base_cmd["Vw"], -1.0, 1.0)
     return action
 
 
@@ -299,12 +299,11 @@ def api_fixtures():
         return jsonify({"error": "仿真器未初始化"}), 503
     result = {}
     for name, fixture in env.fixtures.items():
-        try:
-            body_id = env.sim.model.body_name2id(fixture.root_body)
-            pos = env.sim.data.body_xpos[body_id].copy()
-            result[name] = {"pos": pos.tolist()}
-        except Exception:
-            pass
+        result[name] = {
+            "pos": list(fixture.pos),
+            "size": list(fixture.size),
+            "type": fixture.type,
+        }
     return jsonify(result)
 
 @app.route("/scene", methods=["GET"])
@@ -579,10 +578,12 @@ def api_map_data():
         # 排除的 body（机器人相关）
         robot_bodies = set()
         for i in range(model.nbody):
-            name = (model.body_id2name(i) or "").lower()
-            if any(k in name for k in ("robot", "panda", "omron", "mobilebase",
-                                        "gripper", "finger", "hand", "torso",
-                                        "camera", "link", "joint", "site")):
+            name = (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) or "").lower()
+            if any(k in name for k in (
+                "chassis", "arm", "jaw", "wrist", "pitch", "elbow", "rotation",
+                "servo", "motor", "wheel", "base_plate", "head", "battery",
+                "standoff", "mount",
+            )):
                 robot_bodies.add(i)
 
         # 收集障碍物的 2D 矩形 (col_min, row_min, col_max, row_max)
@@ -592,7 +593,7 @@ def api_map_data():
             if body_id in robot_bodies:
                 continue
 
-            name = (model.geom_id2name(i) or "").lower()
+            name = (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i) or "").lower()
             if any(k in name for k in ("floor", "ground", "ceiling", "skybox", "visual", "light")):
                 continue
 

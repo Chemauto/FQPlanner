@@ -1,111 +1,143 @@
-# FQPlanner 使用指南
+# FQPlanner_Mujoco 使用指南
 
-## 启动系统
+## 启动顺序
 
-按以下顺序启动：
-
+```text
+1. Redis (6379)
+2. MuJoCo / XLeRobot 仿真后端 (5001)
+3. Master (5000)
+4. Slaver
+5. Web 控制台 (8888，可选)
 ```
-1. Redis (6379)  →  2. 仿真后端 (5001)  →  3. Master (5000)  →  4. Slaver  →  5. Web 控制台 (8888)
-```
 
-### 1. 启动 Redis
+## 1. 启动 Redis
 
 ```bash
 redis-server
 ```
 
-### 2. 启动 RoboCasa 仿真后端
+## 2. 启动 MuJoCo 仿真后端
 
 ```bash
 conda activate robocasa
-cd /home/fangqi/WorkXCJ/FQPlanner/serve
-python sim.py
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
+python main.py
+```
+
+如果只想启动 API，不打开 MuJoCo viewer：
+
+```bash
+python main.py --no-viewer
 ```
 
 验证：
+
 ```bash
 curl http://127.0.0.1:5001/status
+curl http://127.0.0.1:5001/base_status
 curl http://127.0.0.1:5001/objects
+curl http://127.0.0.1:5001/scene
 ```
 
-### 3. 启动 Master
+## 3. 启动 Master
 
 ```bash
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python master/run.py
 ```
 
-### 4. 启动 Slaver
+## 4. 启动 Slaver
 
 ```bash
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python slaver/run.py
 ```
 
-### 5. 启动 Web 控制台（可选）
+Slaver 的仿真服务地址应指向：
+
+```text
+http://127.0.0.1:5001
+```
+
+## 5. 启动 Web 控制台
 
 ```bash
-cd /home/fangqi/WorkXCJ/FQPlanner
+conda activate FQPlanner
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python deploy/run.py
 ```
 
-访问 `http://127.0.0.1:8888`
+访问：
 
----
-
-## 快速访问
-
-| 链接 | 说明 |
-|------|------|
-| http://127.0.0.1:8888 | Web 控制台 |
-| http://127.0.0.1:5001/status | 仿真状态 |
-| http://127.0.0.1:5001/objects | 场景物体列表 |
-| http://127.0.0.1:5001/arm_status | 机械臂状态 |
-
----
-
-## 可用工具
-
-| 工具 | 参数 | 说明 |
-|------|------|------|
-| `navigate_to_target` | `target` (坐标) | 导航底盘，如 `"(1.5, -0.5)"` |
-| `grasp_object` | `object_name` | 抓取物体 |
-| `place_on_top` | `obj_name`, `target_name` | 放到目标物体上方 |
-| `place_object` | `obj_name`, `x`, `y`, `z` | 放到指定坐标 |
-| `release_object` | 无 | 释放当前抓取的物体 |
-
----
-
-## 文件结构
-
-```
-FQPlanner/
-├── master/              # Master（任务规划）
-│   ├── run.py           # 启动入口 (5000)
-│   └── config.yaml
-├── slaver/              # Slaver（任务执行）
-│   ├── run.py           # 启动入口
-│   ├── config.yaml
-│   └── robot/module/    # 技能模块（调用 serve.sim）
-├── serve/               # RoboCasa 仿真服务
-│   ├── main.py          # 启动入口 (5001)
-│   ├── sim.py           # 仿真接口
-│   ├── tools/           # arm.py, move.py
-│   ├── service/         # server.py, web.py
-│   └── scene/           # 场景配置
-├── deploy/              # Web 控制台 (8888)
-└── .env                 # API Key
+```text
+http://127.0.0.1:8888
 ```
 
----
+## 常用 API
 
-## 配置
+| 地址 | 方法 | 说明 |
+| --- | --- | --- |
+| `/status` | GET | 机械臂 / 抓取状态 |
+| `/base_status` | GET | XLeRobot 底盘位置和速度 |
+| `/objects` | GET | 当前物体位置 |
+| `/fixtures` | GET | 当前家具 / fixtures |
+| `/scene` | GET | 场景综合信息 |
+| `/scene_state` | GET | 逻辑场景状态 |
+| `/map_data` | GET | 地图生成数据 |
+| `/grasp` | POST | 抓取物体 |
+| `/place` | POST | 放置物体到坐标 |
+| `/move_to` | POST | 移动虚拟末端 |
+| `/nav` | POST | 底盘导航到坐标 |
+| `/cmd_vel` | POST | 底盘速度控制 |
+| `/nav_path` | POST | 路径跟随 |
+| `/screenshot` | POST | 截图 |
 
-`.env` 文件：
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:5001/nav \
+  -H 'Content-Type: application/json' \
+  -d '{"x": 3.2, "y": -2.5, "yaw": 0}'
+
+curl -X POST http://127.0.0.1:5001/grasp \
+  -H 'Content-Type: application/json' \
+  -d '{"obj_name": "apple"}'
+
+curl -X POST http://127.0.0.1:5001/place \
+  -H 'Content-Type: application/json' \
+  -d '{"obj_name": "apple", "target": [4.0, -0.5, 1.0]}'
 ```
-CLOUD_API_KEY=your_api_key_here
+
+## 场景配置
+
+主要配置目录：
+
+```text
+serve/scene/config/
 ```
 
-`slaver/config.yaml` 中 `robocasa.server_url` 需指向仿真服务地址（默认 `http://127.0.0.1:5001`）。
+关键文件：
+
+```text
+layout.yaml              # 厨房布局
+style.yaml               # RoboCasa 风格 / 材质
+objects.yaml             # 可操作物体和 placement
+waypoints.yaml           # 工作点 / 导航语义点
+scene_state_initial.yaml # 初始逻辑状态
+target.yaml              # 放置目标
+```
+
+当前 `objects.yaml`：
+
+- `pot` 放在 counter，靠近 stove 参照区域。
+- `cup`、`bowl`、`apple`、`mug` 放在 counter 随机区域。
+- `sponge` 放在 island 随机区域。
+- 同一 fixture 上随机物体有最小距离避让，避免挤在一起。
+
+## 当前限制
+
+- 当前后端不是 RoboCasa 原生 env；RoboCasa 用于生成真实厨房和物体 XML。
+- 抓取 / 放置是高层测试逻辑，通过 freejoint 更新物体位置，不是完整真实接触抓取。
+- 原规划可以继续调用同名工具，但任务成功与否主要取决于物体名称、目标名称、API 参数是否仍然匹配。
