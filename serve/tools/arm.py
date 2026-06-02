@@ -10,7 +10,6 @@ arm.py - PandaOmron 机械臂控制工具
 
 import numpy as np
 
-
 # ============================================================
 # 状态查询
 # ============================================================
@@ -336,8 +335,16 @@ def grasp(env, obj_name, snap_threshold=0.15):
     print(f"[grasp] 最终末端位置: {final_ee_pos.round(3)}")
     print(f"[grasp] 最终距离: {np.linalg.norm(final_obj_pos - final_ee_pos):.3f}m")
     print(f"[grasp] {'成功' if success else '失败'}抓取 {obj_name}")
+    # 在 return success 之前
+    if success:
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+            from scene.scene_memory import move_object
+            move_object(obj_name, 'robot_hand')
+        except Exception as e:
+            print(f"[SceneMemory] 更新失败: {e}")
     return success
-
 
 def place(env, obj_name, target_pos, snap_threshold=0.15):
     """
@@ -386,6 +393,16 @@ def place(env, obj_name, target_pos, snap_threshold=0.15):
     lift_pos = ee_pos.copy()
     lift_pos[2] += 0.2
     move_arm(env, lift_pos, max_steps=50, pos_threshold=0.05)
+
+    # open_gripper 之后，return True 之前
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from scene.scene_memory import move_object, coords_to_waypoint
+        waypoint_name = coords_to_waypoint(target_pos.tolist())
+        move_object(obj_name, waypoint_name)
+    except Exception as e:
+        print(f"[SceneMemory] 更新失败: {e}")
 
     print(f"[place] 放置完成")
     return True
