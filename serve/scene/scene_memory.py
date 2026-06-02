@@ -5,8 +5,9 @@ scene_memory.py - 场景状态记忆
 """
 
 import os
-import yaml
 import shutil
+import numpy as np
+import yaml
 from datetime import datetime
 
 _DIR = os.path.join(os.path.dirname(__file__), 'config')
@@ -98,7 +99,6 @@ def get_all_locations() -> dict:
 
 def coords_to_waypoint(pos: list) -> str:
     """根据放置坐标找最近的工作点名，总是返回最近的"""
-    import numpy as np
     if pos is None:
         return 'unknown'
     p = np.array(pos[:2])

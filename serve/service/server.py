@@ -17,6 +17,7 @@ from tools.arm import (
 )
 from tools.move import get_base_info, nav, move, follow_path
 from utils.utils import get_fixture_detail
+from scene.scene_memory import get_all_locations
 
 app = Flask(__name__)
 CORS(app)
@@ -350,9 +351,6 @@ def api_scene():
 def api_scene_state():
     """返回当前场景状态记忆"""
     try:
-        import sys, os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from scene.scene_memory import get_all_locations
         return jsonify(get_all_locations())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
