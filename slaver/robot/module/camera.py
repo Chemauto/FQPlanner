@@ -1,5 +1,5 @@
 """
-摄像头模块 - 场景截图 + VLM 分析
+摄像头模块 - 双相机截图 + VLM 综合分析
 """
 
 import json
@@ -11,115 +11,139 @@ from openai import OpenAI
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-# 加载 .env（确保 MCP 子进程也能读到 API key）
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 load_dotenv(os.path.join(_project_root, '.env'))
+
+import yaml
 
 from serve.sim import capture_screenshot
 
 # ============================================================
-# 配置
+# 从 config.yaml 加载配置
 # ============================================================
 
-# 默认相机
-CAMERA_SOURCE = "robot0_frontview"
+_config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config.yaml')
+with open(_config_path) as _f:
+    _cfg = yaml.safe_load(_f)
+_camera_cfg = _cfg.get("camera", {})
+_vlm_cfg = _camera_cfg.get("vlm", {})
 
-# VLM 配置
-VLM_MODEL = "mimo-v2.5"
-VLM_API_BASE = "https://api.xiaomimimo.com/v1"
+CAMERAS = _camera_cfg.get("cameras", ["robot0_frontview", "robot0_eye_in_hand"])
+VLM_MODEL = _vlm_cfg.get("model", "mimo-v2.5")
+VLM_API_BASE = _vlm_cfg.get("api_base", "https://api.xiaomimimo.com/v1")
+VLM_MAX_TOKENS = _vlm_cfg.get("max_tokens", 1000)
 
-def _call_vlm(image_b64: str, context: str = "") -> tuple:
-    """调用 VLM 分析图像，返回 (status, description)。
-    status: "normal" 或 "abnormal"
-    description: VLM 对场景的一句话描述
+
+# ============================================================
+# VLM 调用
+# ============================================================
+
+def _call_vlm(images, context=""):
+    """
+    双图 VLM 分析
+
+    Args:
+        images: {camera_name: base64_str}
+        context: 任务描述
+
+    Returns:
+        (status, description)
     """
     try:
         if context:
             prompt = f"""你是机器人场景监控系统。当前任务：{context}
 
-请分析这张图片，判断任务执行后场景是否符合预期。
+以下是两张来自机器人前视和手眼相机的场景图片。
+请综合两张图片信息，判断任务执行后场景是否符合预期。
 - normal：场景状态符合任务预期
 - abnormal：场景状态不符合预期、有异常
 
-请先用一句话描述你看到的场景，然后最后一行只回复 normal 或 abnormal。"""
+请先用几句话描述你观察到的场景，然后最后一行只回复 normal 或 abnormal。"""
         else:
-            prompt = """你是机器人场景监控系统。请分析这张图片，判断场景是否正常。
+            prompt = """你是机器人场景监控系统。
+
+以下是两张来自机器人前视和手眼相机的场景图片。
+请综合两张图片分析场景是否正常。
 - normal：物体在预期位置，没有异常
 - abnormal：物体位置不对、有障碍物、场景异常
 
-请先用一句话描述你看到的场景，然后最后一行只回复 normal 或 abnormal。"""
+请先用几句话描述你观察到的场景，然后最后一行只回复 normal 或 abnormal。"""
+
+        content = [{"type": "text", "text": prompt}]
+        for cam_name, b64 in images.items():
+            content.append({"type": "text", "text": f"[{cam_name}]"})
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            })
 
         api_key = os.environ.get("CLOUD_API_KEY", "")
         client = OpenAI(api_key=api_key, base_url=VLM_API_BASE)
         response = client.chat.completions.create(
             model=VLM_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-                        },
-                    ],
-                }
-            ],
-            max_tokens=1000,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=VLM_MAX_TOKENS,
             temperature=0,
         )
         raw_content = response.choices[0].message.content
         result = raw_content.strip() if raw_content else ""
         print(f"[camera] VLM 原始输出: {repr(raw_content)}", file=sys.stderr)
-        print(f"[camera] VLM 处理后: {repr(result)}", file=sys.stderr)
 
         if not result:
             return "normal", "VLM 返回空内容，无法判断场景状态"
 
-        # 提取最后一行判断状态，其余作为描述
         lines = result.split("\n")
         status_line = lines[-1].strip().lower()
         status = "abnormal" if "abnormal" in status_line else "normal"
         description = "\n".join(lines[:-1]).strip() if len(lines) > 1 else result
+        print(f"[camera] VLM 结果: {status}, 描述: {description}", file=sys.stderr)
         return status, description
     except Exception as e:
         print(f"[camera] VLM 调用失败: {e}", file=sys.stderr)
         return "normal", f"VLM 调用失败: {e}"
 
 
+# ============================================================
+# MCP 工具注册
+# ============================================================
+
 def register_tools(mcp):
 
     @mcp.tool()
-    async def capture_image(camera_name: str = CAMERA_SOURCE, context: str = "") -> str:
-        """拍照：从指定相机捕获当前场景图像，并用 VLM 分析场景状态。
+    async def capture_image(context: str = "") -> str:
+        """拍照：从机器人前视和手眼两个相机捕获当前场景，用 VLM 综合分析。
         注意：每个任务最多拍照1次。拍照后必须立即执行具体操作（导航/抓取/放置），不要连续拍照。
 
         Args:
-            camera_name: 相机名称。可选: overhead_cam(俯视), side_cam(侧面),
-                         robot0_frontview(机器人前视), robot0_eye_in_hand(手眼相机)
             context: 当前任务描述，用于 VLM 判断场景是否正常。例如："正在抓取马克杯"、"已导航到水槽附近"
 
         Returns:
             截图结果和场景分析。
         """
-        print(f"[camera] 拍照: {camera_name}", file=sys.stderr)
+        print(f"[camera] 拍照请求 (context: {context})", file=sys.stderr)
 
-        result = capture_screenshot(camera_name)
+        images = {}
+        for cam in CAMERAS:
+            result = capture_screenshot(cam)
+            if result.get("success"):
+                images[cam] = result["image"]
+            else:
+                print(f"[camera] {cam} 截图失败: {result.get('result', '')}", file=sys.stderr)
 
-        if not result.get("success"):
-            msg = f"截图失败: {result.get('result', '未知错误')}"
-            print(f"[camera] ✗ {msg}", file=sys.stderr)
+        if not images:
+            msg = "截图失败：所有相机均不可用"
+            print(f"[camera] {msg}", file=sys.stderr)
             return json.dumps([msg, {"_status": "failure"}])
 
-        image_b64 = result["image"]
+        n_cams = len(images)
+        print(f"[camera] VLM 分析: {n_cams} 个相机", file=sys.stderr)
+        scene_status, vlm_description = _call_vlm(images, context)
 
-        # VLM 分析场景（传入任务上下文）
-        print(f"[camera] VLM 分析场景... (context: {context})", file=sys.stderr)
-        scene_status, vlm_description = _call_vlm(image_b64, context)
-        print(f"[camera] VLM 结果: {scene_status}, 描述: {vlm_description}", file=sys.stderr)
+        cam_list = "、".join(images.keys())
+        response = (
+            f"截图成功（{cam_list}），"
+            f"VLM 判断: {scene_status}，描述: {vlm_description}"
+        )
+        return json.dumps([response, {"_status": "none"}])
 
-        # 统一返回 none 状态，让 Slaver 正常完成，把 VLM 描述传给 Master 决策
-        response = f"截图成功（{camera_name} 视角），VLM 判断: {scene_status}，场景描述: {vlm_description}"
-        return json.dumps([response, {"_status": "none", "_image": image_b64}])
-
-    print("[camera.py] 摄像头模块已注册 (VLM 分析)", file=sys.stderr)
+    print("[camera.py] 摄像头模块已注册 (双相机 VLM)", file=sys.stderr)
