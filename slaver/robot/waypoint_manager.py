@@ -65,14 +65,17 @@ def load_reach_limits():
         return 0.1, 1.0
 
 
-def get_object_pos(obj_name):
-    """查询物体坐标：记忆模式用场景状态，实时模式调API"""
-    # 读配置
-    import yaml, os
+def _load_perception_config():
+    """读取感知模式配置"""
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
     with open(config_path) as f:
         config = yaml.safe_load(f)
-    use_realtime = config.get('perception', {}).get('use_realtime_coords', True)
+    return config.get('perception', {}).get('use_realtime_coords', True)
+
+
+def get_object_pos(obj_name):
+    """查询物体坐标：记忆模式用场景状态，实时模式调API"""
+    use_realtime = _load_perception_config()
     
     if not use_realtime:
         # 记忆模式：直接跳到记忆查询，不调任何 API
@@ -168,14 +171,7 @@ def find_waypoint(target):
 
     tp = np.array(target_pos[:2])
 
-    # 记忆模式：纯距离选工作点；实时模式：优先 serves 匹配
-    try:
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config.yaml')
-        with open(config_path) as f:
-            cfg = yaml.safe_load(f)
-        use_realtime = cfg.get('perception', {}).get('use_realtime_coords', True)
-    except Exception:
-        use_realtime = True
+    use_realtime = _load_perception_config()
 
     min_dist, max_reach = load_reach_limits()
 
@@ -195,6 +191,9 @@ def find_waypoint(target):
         candidates = serving_reachable or free_reachable or all_reachable or serving or waypoints
     else:
         # 记忆模式：物体位置动态变化，serves 不可靠，直接用全部按距离选
+        candidates = waypoints
+
+    if not candidates:
         candidates = waypoints
 
     # 按距离目标排序，选最近的

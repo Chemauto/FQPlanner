@@ -10,6 +10,8 @@ arm.py - PandaOmron 机械臂控制工具
 
 import numpy as np
 
+from scene.scene_memory import move_object, coords_to_waypoint
+
 # ============================================================
 # 状态查询
 # ============================================================
@@ -338,9 +340,6 @@ def grasp(env, obj_name, snap_threshold=0.15):
     # 在 return success 之前
     if success:
         try:
-            import sys, os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-            from scene.scene_memory import move_object
             move_object(obj_name, 'robot_hand')
         except Exception as e:
             print(f"[SceneMemory] 更新失败: {e}")
@@ -394,11 +393,7 @@ def place(env, obj_name, target_pos, snap_threshold=0.15):
     lift_pos[2] += 0.2
     move_arm(env, lift_pos, max_steps=50, pos_threshold=0.05)
 
-    # open_gripper 之后，return True 之前
     try:
-        import sys, os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from scene.scene_memory import move_object, coords_to_waypoint
         waypoint_name = coords_to_waypoint(target_pos.tolist())
         move_object(obj_name, waypoint_name)
     except Exception as e:
