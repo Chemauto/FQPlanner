@@ -177,3 +177,7 @@ cython_debug/
 .vscode/
 .logs
 .log
+.agents
+.claude
+.codex
+serve/videos/
