@@ -7,6 +7,7 @@ main.py - RoboCasa 固定场景仿真主程序
     然后打开 service/web.py 或浏览器访问 http://localhost:5001
 """
 
+import os
 import time
 import numpy as np
 from termcolor import colored
@@ -19,7 +20,6 @@ from service.server import (
     get_base_action,
 )
 
-
 if __name__ == "__main__":
     # 1. 创建固定场景
     print(colored("正在从 scene/ 加载厨房场景...", "yellow"))
@@ -27,6 +27,10 @@ if __name__ == "__main__":
 
     # 2. 初始化场景
     env.reset()
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+    from scene.scene_memory import reset_to_initial
+    reset_to_initial()
 
     # 3. 调试信息
     base_id = env.sim.model.body_name2id("mobilebase0_base")
