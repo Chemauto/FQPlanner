@@ -312,13 +312,11 @@ class OpenAIServerModel(Model):
         task_guidance = """Task Type Guidelines:
 - When the task asks to go to, navigate to, or move from one location to another (e.g., "go to kitchen", "navigate to bedroom", "move from living room to bedroom"), use the navigate_to_target tool with the destination as the target parameter.
 - When the task specifies movement parameters like direction, speed, and duration (e.g., "move forward at 1 m/s for 2 seconds", "move left at 0.5 m/s for 3 seconds"), use the move tool with the exact parameters.
-
 Rules:
 - Only call a tool IF AND ONLY IF the action is required by the task AND has NOT already been completed.
 - Do NOT call the same tool multiple times for the same object/location.
 - Extract tool parameters directly from the task description when available.
 - If the task mentions moving between locations, treat the destination as the target parameter for navigate_to_target.
-
 """
         content = task_guidance
 

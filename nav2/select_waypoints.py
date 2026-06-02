@@ -13,9 +13,17 @@ from pathlib import Path
 
 FREE_POINTS_PATH = "nav2/maps/free_points.json"
 OUTPUT_PATH = "serve/scene/config/waypoints.yaml"
-MAX_REACH = 1     # 机械臂最大可达距离
+MAX_REACH = 0.8     # 机械臂最大可达距离
 MIN_DIST = 0.3    # 距家具最小安全距离
 
+def snap_to_90(yaw_deg):
+    """把角度吸附到最近的 90 度方向"""
+    angles = [0, 90, 180, 270]
+    # 归一化到 [0, 360) 
+    yaw_deg = yaw_deg % 360
+    # 找最近的
+    best = min(angles, key=lambda a: min(abs(a - yaw_deg), 360 - abs(a - yaw_deg)))
+    return float(best)
 
 def get_scene_objects():
     """拉取所有可操作物体和主要家具坐标"""
@@ -55,6 +63,7 @@ def find_covering_waypoints(free_points, targets):
     """
     贪心算法：选最少的工作点覆盖所有目标物体
     每个工作点覆盖距离在 [MIN_DIST, MAX_REACH] 内的所有目标
+    同样覆盖数量时优先选离目标最近的
     """
     # 预计算每个 free_point 能覆盖哪些目标
     coverage = {}
@@ -71,19 +80,38 @@ def find_covering_waypoints(free_points, targets):
                 'covers': covered,
             }
 
-    # 贪心选点：每次选覆盖未覆盖目标最多的点
     uncovered = set(targets.keys())
     selected = []
 
     while uncovered:
         best_name = None
         best_covers = set()
+        best_avg_dist = float('inf')
 
         for pname, info in coverage.items():
             new_covers = info['covers'] & uncovered
+            p = info['point']
+            pp = np.array([p['x'], p['y']])
+
             if len(new_covers) > len(best_covers):
+                # 覆盖更多目标，直接选
                 best_covers = new_covers
                 best_name = pname
+                # 计算到覆盖目标的平均距离
+                best_avg_dist = np.mean([
+                    np.linalg.norm(pp - np.array(targets[t]))
+                    for t in new_covers
+                ])
+            elif len(new_covers) == len(best_covers) and len(new_covers) > 0:
+                # 覆盖数量相同，选平均距离更近的
+                avg_dist = np.mean([
+                    np.linalg.norm(pp - np.array(targets[t]))
+                    for t in new_covers
+                ])
+                if avg_dist < best_avg_dist:
+                    best_covers = new_covers
+                    best_name = pname
+                    best_avg_dist = avg_dist
 
         if best_name is None:
             print(f"[警告] 以下目标无法被任何工作点覆盖: {uncovered}")
@@ -105,7 +133,7 @@ def compute_yaw(from_xy, to_xy):
     dx = to_xy[0] - from_xy[0]
     dy = to_xy[1] - from_xy[1]
     yaw = math.degrees(math.atan2(dy, dx))
-    return yaw
+    return snap_to_90(yaw)
 
 # 在 save_waypoints 之前加这段，强制补充家具工作点
 def add_fixture_waypoints(selected, free_points, targets, fixture_names):
@@ -175,6 +203,58 @@ def save_waypoints(selected, targets):
     print(f"\n共选出 {len(waypoints)} 个工作点，保存到 {OUTPUT_PATH}")
     return waypoints
 
+def generate_scene_state(selected, targets):
+    """根据新工作点自动生成 scene_state_initial.yaml"""
+    import numpy as np
+    
+    # 可操作物体列表（从 /objects 拿）
+    try:
+        resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
+        objects = resp.json() if resp.status_code == 200 else {}
+    except Exception:
+        objects = {}
+
+    # 为每个物体找最近的工作点
+    locations = {}
+    for item in selected:
+        locations[item['name']] = {
+            'fixture': next(
+                (s for s in item['serves'] 
+                 if s not in objects),  # serves 里不是物体的就是家具名
+                None
+            ),
+            'objects': []
+        }
+    locations['robot_hand'] = {'fixture': None, 'objects': []}
+
+    # 把每个物体分配到最近的工作点
+    for obj_name, obj_data in objects.items():
+        obj_pos = np.array(obj_data['pos'][:2])
+        best_wp = None
+        best_dist = float('inf')
+        for item in selected:
+            p = item['point']
+            dist = np.linalg.norm(np.array([p['x'], p['y']]) - obj_pos)
+            if dist < best_dist:
+                best_dist = dist
+                best_wp = item['name']
+        if best_wp:
+            locations[best_wp]['objects'].append(obj_name)
+            print(f"  {obj_name} → {best_wp} (dist={best_dist:.2f})")
+
+    state = {'last_updated': '初始状态', 'locations': locations}
+
+    state_initial_path = Path(OUTPUT_PATH).parent / 'scene_state_initial.yaml'
+    state_path = Path(OUTPUT_PATH).parent / 'scene_state.yaml'
+
+    with open(state_initial_path, 'w') as f:
+        yaml.dump(state, f, allow_unicode=True, default_flow_style=False)
+    # scene_state 也同步更新
+    with open(state_path, 'w') as f:
+        yaml.dump(state, f, allow_unicode=True, default_flow_style=False)
+
+    print(f"场景状态已保存到 {state_initial_path}")
+
 
 if __name__ == "__main__":
     print("拉取场景物体...")
@@ -194,3 +274,7 @@ if __name__ == "__main__":
 
     print("\n保存工作点...")
     save_waypoints(selected, targets)
+    
+    # 自动生成场景状态
+    print("\n生成场景状态...")
+    generate_scene_state(selected, targets)

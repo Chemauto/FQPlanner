@@ -330,6 +330,16 @@ def api_scene():
         "robot": robot,
     }))
 
+@app.route("/scene_state", methods=["GET"])
+def api_scene_state():
+    """返回当前场景状态记忆"""
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from scene.scene_memory import get_all_locations
+        return jsonify(get_all_locations())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ============================================================
 # 视频录制（工具函数内主动调用 record_hook.try_record_frame）
