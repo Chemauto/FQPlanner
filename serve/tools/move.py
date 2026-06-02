@@ -102,7 +102,7 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     return get_base_info(env)
 
 
-def nav(env, x, y, target_yaw=None, Kp=2.0, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=500):
+def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=500):
     """
     导航到世界坐标系目标点（全向 PD 控制，x/y/yaw 同时消除误差）
 

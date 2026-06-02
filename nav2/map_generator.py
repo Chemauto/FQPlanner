@@ -16,6 +16,7 @@ map_generator.py - 从 RoboCasa 仿真生成 Nav2 占据地图
 import os
 import sys
 import argparse
+import urllib.parse
 import yaml
 import numpy as np
 from PIL import Image, ImageDraw
@@ -256,38 +257,59 @@ def generate_from_sim(
     layout_path=None,
     shrink_footprints=0.2,
 ):
-    """从 MuJoCo 仿真生成地图"""
-    obstacles = fetch_obstacles_from_sim()
-    if obstacles is None:
-        print("[map_generator] 仿真未启动，请先运行 serve/main.py", file=sys.stderr)
+    """从 MuJoCo 仿真射线投射生成地图"""
+    import json
+    import urllib.request
+
+    # 先从 layout.yaml 算正确的地图范围
+    lb = bounds_from_layout(layout_path)
+    if lb is not None:
+        x_min, x_max, y_min, y_max = lb
+        # 扩展到包含机器人位置
+        base = fetch_base_status()
+        if base and "pos" in base:
+            bx, by = base["pos"][0], base["pos"][1]
+            x_min = min(x_min, bx - 1.0)
+            x_max = max(x_max, bx + 1.0)
+            y_min = min(y_min, by - 1.0)
+            y_max = max(y_max, by + 1.0)
+    else:
+        x_min, x_max, y_min, y_max = -1.0, 8.0, -6.0, 1.0
+
+    # 请求射线投射栅格
+    params = urllib.parse.urlencode({
+        "resolution": RESOLUTION,
+        "x_min": x_min, "x_max": x_max,
+        "y_min": y_min, "y_max": y_max,
+    })
+    url = f"http://127.0.0.1:5001/map_data?{params}"
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"[map_generator] 无法连接仿真: {e}", file=sys.stderr)
         sys.exit(1)
 
-    configure_bounds_from_sim(obstacles, layout_path=layout_path)
+    w = result["width"]
+    h = result["height"]
+    grid = result["grid"]
+    origin = result.get("origin", [x_min, y_min])
 
-    img = Image.new("L", (MAP_W, MAP_H), FREE)
-    draw = ImageDraw.Draw(img)
+    # 转 PGM 图像
+    img = Image.new("L", (w, h))
+    img.putdata(grid)
 
-    for obs in obstacles:
-        # 只画地面上的障碍物（z < 1.2m 的）
-        if obs["pos"][2] > 1.2:
-            continue
-        if obs["size"][0] < 0.01 and obs["size"][1] < 0.01:
-            continue
-        draw_obstacle(draw, obs, shrink_footprints)
-
-    base = fetch_base_status()
-    if base and "pos" in base and clear_robot_radius > 0:
-        draw_circle(draw, base["pos"][0], base["pos"][1], clear_robot_radius, FREE)
-
+    # 膨胀
     img = apply_inflation(img, inflate_radius)
 
+    # 更新全局 bounds
+    res = result.get("resolution", RESOLUTION)
+    set_map_bounds(origin[0], origin[0] + w * res, origin[1], origin[1] + h * res)
+
     _save_map(img, output_dir)
-    print(f"[map_generator] 从仿真生成地图，共 {len(obstacles)} 个障碍物")
-    print(f"[map_generator] 地图范围 x=[{MAP_X_MIN:.2f}, {MAP_X_MAX:.2f}], y=[{MAP_Y_MIN:.2f}, {MAP_Y_MAX:.2f}]")
-    if shrink_footprints > 0:
-        print(f"[map_generator] 家具 footprint 已收缩: {shrink_footprints:.2f}m")
-    if base and "pos" in base and clear_robot_radius > 0:
-        print(f"[map_generator] 已清理机器人初始区域: ({base['pos'][0]:.2f}, {base['pos'][1]:.2f}), r={clear_robot_radius:.2f}m")
+    print(f"[map_generator] 射线投射地图: {w}x{h}, 分辨率 {res}m")
+    print(f"[map_generator] 地图范围 x=[{origin[0]:.2f}, {origin[0]+w*res:.2f}], y=[{origin[1]:.2f}, {origin[1]+h*res:.2f}]")
 
 
 # ============================================================

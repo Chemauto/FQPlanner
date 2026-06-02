@@ -28,8 +28,11 @@ CAMERA_SOURCE = "robot0_frontview"
 VLM_MODEL = "mimo-v2.5"
 VLM_API_BASE = "https://api.xiaomimimo.com/v1"
 
-def _call_vlm(image_b64: str, context: str = "") -> str:
-    """调用 VLM 分析图像，返回 "normal" 或 "abnormal" """
+def _call_vlm(image_b64: str, context: str = "") -> tuple:
+    """调用 VLM 分析图像，返回 (status, description)。
+    status: "normal" 或 "abnormal"
+    description: VLM 对场景的一句话描述
+    """
     try:
         if context:
             prompt = f"""你是机器人场景监控系统。当前任务：{context}
@@ -62,15 +65,26 @@ def _call_vlm(image_b64: str, context: str = "") -> str:
                     ],
                 }
             ],
-            max_tokens=100,
+            max_tokens=1000,
             temperature=0,
         )
-        result = response.choices[0].message.content.strip().lower()
-        print(f"[camera] VLM 输出: {result}", file=sys.stderr)
-        return "abnormal" if "abnormal" in result else "normal"
+        raw_content = response.choices[0].message.content
+        result = raw_content.strip() if raw_content else ""
+        print(f"[camera] VLM 原始输出: {repr(raw_content)}", file=sys.stderr)
+        print(f"[camera] VLM 处理后: {repr(result)}", file=sys.stderr)
+
+        if not result:
+            return "normal", "VLM 返回空内容，无法判断场景状态"
+
+        # 提取最后一行判断状态，其余作为描述
+        lines = result.split("\n")
+        status_line = lines[-1].strip().lower()
+        status = "abnormal" if "abnormal" in status_line else "normal"
+        description = "\n".join(lines[:-1]).strip() if len(lines) > 1 else result
+        return status, description
     except Exception as e:
         print(f"[camera] VLM 调用失败: {e}", file=sys.stderr)
-        return "normal"  # VLM 失败时默认正常
+        return "normal", f"VLM 调用失败: {e}"
 
 
 def register_tools(mcp):
@@ -101,14 +115,11 @@ def register_tools(mcp):
 
         # VLM 分析场景（传入任务上下文）
         print(f"[camera] VLM 分析场景... (context: {context})", file=sys.stderr)
-        scene_status = _call_vlm(image_b64, context)
-        print(f"[camera] VLM 结果: {scene_status}", file=sys.stderr)
+        scene_status, vlm_description = _call_vlm(image_b64, context)
+        print(f"[camera] VLM 结果: {scene_status}, 描述: {vlm_description}", file=sys.stderr)
 
-        if scene_status == "abnormal":
-            response = f"截图成功（{camera_name} 视角），VLM 发现场景异常"
-            return json.dumps([response, {"_status": "recall", "_image": image_b64}])
-        else:
-            response = f"截图成功（{camera_name} 视角），场景正常"
-            return json.dumps([response, {"_status": "none", "_image": image_b64}])
+        # 统一返回 none 状态，让 Slaver 正常完成，把 VLM 描述传给 Master 决策
+        response = f"截图成功（{camera_name} 视角），VLM 判断: {scene_status}，场景描述: {vlm_description}"
+        return json.dumps([response, {"_status": "none", "_image": image_b64}])
 
     print("[camera.py] 摄像头模块已注册 (VLM 分析)", file=sys.stderr)

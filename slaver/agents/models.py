@@ -313,6 +313,7 @@ class OpenAIServerModel(Model):
 - You MUST call exactly ONE tool. Do NOT return plain text without a tool call.
 - Only do what the task says. If the task says "navigate", call a navigation tool. If it says "grasp", call a grasp tool. If it says "place", call a place tool. Do NOT do extra actions.
 - Do NOT call the same tool twice for the same task.
+- When navigating to an object or furniture, pass its NAME (e.g. "apple", "counter") to the tool. Do NOT pass coordinates like "(1.5, -0.3)". The system will find the best workpoint and facing direction automatically.
 
 """
         content = rules
