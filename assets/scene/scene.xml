@@ -931,7 +931,7 @@
   </default>
   <worldbody>
     <light directional="true" pos="-0.5 0.5 3" dir="0 0 -1" />
-    <body name="chassis" pos="3.2 -1.5 0.38" quat="0.707108 0 0 0.707108">
+    <body name="chassis" pos="3.2 -1.5 0.38" quat="0.707108 0 0 -0.707108">
       <freejoint />
       <geom type="box" size="0.19565 0.2295 0.05" pos="0 0 -0.3" class="collision" friction="1 0.005 0.0001" rgba="0 0 0 0" group="4" contype="1" conaffinity="1" condim="4" />
       <geom type="box" size="0.1575 0.2025 0.295" pos="0 0 0.015" class="collision" friction="1 0.005 0.0001" rgba="0 0 0 0" group="4" contype="1" conaffinity="1" condim="4" />
@@ -5150,12 +5150,12 @@
   </contact>
   <tendon>
     <fixed name="forward">
-      <joint joint="left_wheel_joint" coef="0.5" />
-      <joint joint="right_wheel_joint" coef="0.5" />
+      <joint joint="left_wheel_joint" coef="-0.5" />
+      <joint joint="right_wheel_joint" coef="-0.5" />
     </fixed>
     <fixed name="turn">
-      <joint joint="left_wheel_joint" coef="-0.5" />
-      <joint joint="right_wheel_joint" coef="0.5" />
+      <joint joint="left_wheel_joint" coef="0.5" />
+      <joint joint="right_wheel_joint" coef="-0.5" />
     </fixed>
   </tendon>
   <actuator>

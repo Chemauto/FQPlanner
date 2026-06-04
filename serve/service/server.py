@@ -17,7 +17,7 @@ from tools.arm import (
     move_arm,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, follow_path
+from tools.move import get_base_info, nav, move
 from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
 
 app = Flask(__name__)
@@ -35,10 +35,11 @@ _base_cmd = {
     "Vw": 0.0,
     "expires_at": 0.0,
     "last_log_at": 0.0,
+    "was_active": False,
 }
 _base_status_cache = {}
 
-NAV_SUBSTEPS = 40
+NAV_SUBSTEPS = 1
 ARM_STEP = 0.025
 
 # 录制状态
@@ -160,6 +161,11 @@ def get_lock():
     return _env_lock
 
 
+def has_active_base_command():
+    """当前是否有正在执行的底盘命令 (nav/cmd_vel)"""
+    return _active_command is not None and _active_command.get("type") in ("nav", "cmd_vel")
+
+
 def set_base_velocity(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
     """Store the latest velocity command for the main simulation loop."""
     with _queue_lock:
@@ -176,16 +182,23 @@ def set_base_velocity(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
             _base_cmd["last_log_at"] = now
 
 
-def get_base_action(action_dim):
-    """Build the current base action, expiring to zero if cmd_vel stops."""
-    action = np.zeros(3)
+def get_base_action():
+    """返回当前底座速度命令 [forward, turn]，不包含手臂 ctrl。
+
+    cmd_vel 过期后返回 None，主循环不写 ctrl，保留 viewer 手动控制值。
+    过期瞬间返回一次 [0, 0] 以确保机器人停止。
+    """
     with _queue_lock:
         if time.time() > _base_cmd["expires_at"]:
-            return action
-        action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)
-        action[1] = np.clip(_base_cmd["Vy"], -1.0, 1.0)
-        action[2] = np.clip(_base_cmd["Vw"], -1.0, 1.0)
-    return action
+            if _base_cmd["was_active"]:
+                _base_cmd["was_active"] = False
+                return np.zeros(2)
+            return None
+        _base_cmd["was_active"] = True
+        action = np.zeros(2)
+        action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)   # forward
+        action[1] = np.clip(_base_cmd["Vw"], -1.0, 1.0)    # turn
+        return action
 
 
 def _get_env():
@@ -246,7 +259,7 @@ def submit_command(cmd_type, params):
 
 def _finish_command(cmd, result):
     global _active_command
-    if cmd.get("type") in ("nav", "nav_path", "cmd_vel"):
+    if cmd.get("type") in ("nav", "cmd_vel"):
         env = _get_env()
         if env is not None:
             try:
@@ -263,12 +276,6 @@ def _normalize_angle_deg(angle):
     return (float(angle) + 180.0) % 360.0 - 180.0
 
 
-def _world_to_body(Vx_world, Vy_world, yaw_rad):
-    c = np.cos(yaw_rad)
-    s = np.sin(yaw_rad)
-    return c * Vx_world + s * Vy_world, -s * Vx_world + c * Vy_world
-
-
 def _step_active_command(env):
     cmd = _active_command
     if cmd is None:
@@ -280,6 +287,7 @@ def _step_active_command(env):
             for _ in range(NAV_SUBSTEPS):
                 info = get_base_info(env)
                 x_now, y_now = info["pos"][0], info["pos"][1]
+                yaw_now = info["yaw_rad"]
                 err_x = state["x"] - x_now
                 err_y = state["y"] - y_now
                 pos_err = float(np.hypot(err_x, err_y))
@@ -296,14 +304,18 @@ def _step_active_command(env):
                     final = get_base_info(env)
                     _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
                     return True
+                # 差速驱动 PD 控制
                 if pos_err >= state["pos_threshold"]:
-                    Vx_world = np.clip(state["kp"] * err_x, -0.8, 0.8)
-                    Vy_world = np.clip(state["kp"] * err_y, -0.8, 0.8)
-                    Vx_body, Vy_body = _world_to_body(Vx_world, Vy_world, info["yaw_rad"])
-                    move(env, Vx=Vx_body, Vy=Vy_body, Vw=0.0)
+                    angle_to_target = np.arctan2(err_y, err_x)
+                    heading_err = np.arctan2(np.sin(angle_to_target - yaw_now), np.cos(angle_to_target - yaw_now))
+                    Kp = state["kp"]
+                    turn = np.clip(Kp * heading_err, -1.0, 1.0)
+                    forward = np.clip(Kp * pos_err, -0.8, 0.8)
+                    forward *= max(0.0, np.cos(heading_err))
+                    move(env, Vx=forward, Vw=turn)
                 else:
                     Vw = np.clip(2.0 * (yaw_err / 90.0), -1.0, 1.0)
-                    move(env, Vx=0.0, Vy=0.0, Vw=Vw)
+                    move(env, Vx=0.0, Vw=Vw)
                 state["step"] += 1
             return True
 
@@ -427,16 +439,14 @@ def process_commands(env):
                             "x": float(params["x"]),
                             "y": float(params["y"]),
                             "target_yaw": params.get("target_yaw"),
-                            "kp": float(params.get("Kp", 2.5)),
-                            "pos_threshold": float(params.get("pos_threshold", 0.15)),
-                            "yaw_threshold": float(params.get("yaw_threshold", 8.0)),
-                            "max_steps": int(params.get("max_steps", 3000)),
+                            "kp": float(params.get("Kp", 1.5)),
+                            "pos_threshold": float(params.get("pos_threshold", 0.20)),
+                            "yaw_threshold": float(params.get("yaw_threshold", 10.0)),
+                            "max_steps": int(params.get("max_steps", 6000)),
                             "step": 0,
                         },
                     }
                     return
-                elif cmd_type == "nav_path":
-                    result = follow_path(env, **params)
                 elif cmd_type == "cmd_vel":
                     info = move(env, **params)
                     result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
@@ -495,7 +505,7 @@ def process_commands(env):
         except Exception as e:
             result = {"error": str(e)}
 
-        if cmd_type in ("nav", "nav_path", "cmd_vel"):
+        if cmd_type in ("nav", "cmd_vel"):
             try:
                 _read_base_info(env)
             except Exception:
@@ -778,22 +788,6 @@ def api_cmd_vel():
     with _env_lock:
         info = get_base_info(env)
     return jsonify({"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]})
-
-
-@app.route("/nav_path", methods=["POST"])
-def api_nav_path():
-    """接收 Nav2 全局路径，由 MuJoCo 端全向 PD 跟踪"""
-    data = request.json or {}
-    path = data.get("path")
-    if not path:
-        return jsonify({"success": False, "result": "缺少 path 参数"}), 400
-    params = {
-        "path": path,
-        "w": data.get("w", 0),
-    }
-    if data.get("max_steps") is not None:
-        params["max_steps"] = data["max_steps"]
-    return jsonify(submit_command("nav_path", params))
 
 
 @app.route("/open_gripper", methods=["POST"])

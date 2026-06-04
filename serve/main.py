@@ -18,6 +18,7 @@ from service.server import (
     try_record_frame,
     get_lock,
     get_base_action,
+    has_active_base_command,
 )
 
 if __name__ == "__main__":
@@ -76,7 +77,15 @@ if __name__ == "__main__":
             with get_lock():
                 process_commands(env)
                 try_record_frame()
-                env.step(get_base_action(env.action_dim))
+                # 没有活跃底盘命令时，才用 cmd_vel 驱动
+                # cmd_vel 过期时 get_base_action() 返回 None，不写 ctrl
+                # 这样 MuJoCo viewer 的手动滑块可以正常工作
+                if not has_active_base_command():
+                    base = get_base_action()
+                    if base is not None:
+                        env.data.ctrl[0] = base[0]
+                        env.data.ctrl[1] = base[1]
+                env.step()
             if viewer is not None:
                 if not viewer.is_running():
                     break

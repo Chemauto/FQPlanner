@@ -110,7 +110,33 @@ class MujocoKitchenEnv:
         if self.model.jnt_type[joint_id] == mujoco.mjtJoint.mjJNT_FREE:
             self.base_free_joint_id = joint_id
             qadr = self.model.jnt_qposadr[joint_id]
-            self.base_height = float(self.model.qpos0[qadr + 2])
+            # 记录初始高度（仅用于参考，不再钉 z）
+            self.base_height = self._compute_ground_height(body_id) or float(self.model.qpos0[qadr + 2])
+
+    def _compute_ground_height(self, chassis_body_id):
+        """计算 chassis freejoint 的 z 高度，使轮子/脚轮恰好触地
+
+        对于每个接触 geom：chassis_z + body_z + geom_z - radius = 0
+        所以：chassis_z = -(body_z + geom_z) + radius
+        取最大值（最高的 chassis 位置使所有接触 geom 都在地面以上）。
+        """
+        model = self.model
+        max_z = None
+        for i in range(model.ngeom):
+            body_id = int(model.geom_bodyid[i])
+            if body_id == chassis_body_id:
+                continue
+            if int(model.body_parentid[body_id]) != chassis_body_id:
+                continue
+            if model.geom_contype[i] == 0 and model.geom_conaffinity[i] == 0:
+                continue
+            body_z = model.body_pos[body_id][2]
+            geom_z = model.geom_pos[i][2]
+            r = model.geom_size[i][0]
+            chassis_z = -(body_z + geom_z) + r
+            if max_z is None or chassis_z > max_z:
+                max_z = chassis_z
+        return max_z
 
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
@@ -118,6 +144,8 @@ class MujocoKitchenEnv:
         self._set_initial_arm_pose()
         self._set_initial_objects()
         self.sim.forward()
+        if self.base_free_joint_id >= 0:
+            self.settle_base(steps=2000)
         self.virtual_ee_pos = self.get_body_pos("Fixed_Jaw_2", fallback="Moving_Jaw_2")
         return {}
 
@@ -162,50 +190,38 @@ class MujocoKitchenEnv:
     def step(self, action=None):
         if action is not None:
             action = np.asarray(action, dtype=float)
-            if self.base_free_joint_id >= 0 and action.size == 3:
-                self.move_base_kinematic(Vx=action[0], Vy=action[1], Vw=action[2])
-                action = None
-            else:
-                n = min(action.size, self.model.nu)
-                self.data.ctrl[:n] = action[:n]
+            n = min(action.size, self.model.nu)
+            self.data.ctrl[:n] = action[:n]
         if self.grasped_object:
             self.set_object_pos(self.grasped_object, self.virtual_ee_pos)
         mujoco.mj_step(self.model, self.data)
-        self._pin_base_freejoint()
         if self.grasped_object:
             self.set_object_pos(self.grasped_object, self.virtual_ee_pos)
             self.sim.forward()
 
-    def move_base_kinematic(self, Vx=0.0, Vy=0.0, Vw=0.0, dt=0.02):
+    def _stabilize_base(self):
+        """只锁 pitch/roll，不锁 z，让物理引擎自然处理轮子-地面接触"""
         if self.base_free_joint_id < 0:
-            return False
+            return
         qadr = self.model.jnt_qposadr[self.base_free_joint_id]
         dadr = self.model.jnt_dofadr[self.base_free_joint_id]
+        # 恢复 quaternion，只保留 yaw（防止 pitch/roll 积累）
         yaw = self._base_yaw_from_qpos(qadr)
-        c = np.cos(yaw)
-        s = np.sin(yaw)
-        self.data.qpos[qadr] += (c * Vx - s * Vy) * dt
-        self.data.qpos[qadr + 1] += (s * Vx + c * Vy) * dt
-        yaw += float(Vw) * dt
         self.data.qpos[qadr + 3:qadr + 7] = [np.cos(yaw / 2.0), 0.0, 0.0, np.sin(yaw / 2.0)]
-        self.data.qvel[dadr:dadr + 6] = 0.0
+        # 只清 pitch/roll 角速度
+        self.data.qvel[dadr + 3] = 0.0  # wx: roll
+        self.data.qvel[dadr + 4] = 0.0  # wy: pitch
         self.sim.forward()
-        return True
+
+    def settle_base(self, steps=2000):
+        """启动时调用，让机器人自然沉降到地面"""
+        for _ in range(steps):
+            mujoco.mj_step(self.model, self.data)
+        self._stabilize_base()
 
     def _base_yaw_from_qpos(self, qadr):
         w, x, y, z = self.data.qpos[qadr + 3:qadr + 7]
         return float(np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
-
-    def _pin_base_freejoint(self):
-        if self.base_free_joint_id < 0 or self.base_height is None:
-            return
-        qadr = self.model.jnt_qposadr[self.base_free_joint_id]
-        dadr = self.model.jnt_dofadr[self.base_free_joint_id]
-        yaw = self._base_yaw_from_qpos(qadr)
-        self.data.qpos[qadr + 2] = self.base_height
-        self.data.qpos[qadr + 3:qadr + 7] = [np.cos(yaw / 2.0), 0.0, 0.0, np.sin(yaw / 2.0)]
-        self.data.qvel[dadr:dadr + 6] = 0.0
-        self.sim.forward()
 
     def close(self):
         self.sim.close()

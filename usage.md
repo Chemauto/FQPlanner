@@ -91,7 +91,6 @@ http://127.0.0.1:8888
 | `/move_to` | POST | 移动虚拟末端 |
 | `/nav` | POST | 底盘导航到坐标 |
 | `/cmd_vel` | POST | 底盘速度控制 |
-| `/nav_path` | POST | 路径跟随 |
 | `/screenshot` | POST | 截图 |
 
 示例：

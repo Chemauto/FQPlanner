@@ -115,7 +115,6 @@ placement 规则：
 | `/move_to` | POST | 移动虚拟末端 |
 | `/nav` | POST | 底盘导航 |
 | `/cmd_vel` | POST | 速度控制 |
-| `/nav_path` | POST | 路径跟随 |
 | `/open_gripper` | POST | 打开夹爪 |
 | `/close_gripper` | POST | 关闭夹爪 |
 | `/screenshot` | POST | 截图 |
