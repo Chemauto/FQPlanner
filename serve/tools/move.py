@@ -81,7 +81,8 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
         dict: 执行后的底座状态
     """
     forward = np.clip(Vx, -1.0, 1.0)
-    turn = np.clip(Vw, -1.0, 1.0)
+    # MuJoCo tendon sign is opposite to the public Vw convention.
+    turn = -np.clip(Vw, -1.0, 1.0)
 
     env.data.ctrl[0] = forward
     env.data.ctrl[1] = turn
