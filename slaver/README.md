@@ -30,8 +30,8 @@ slaver/
 ## 启动
 
 ```bash
-conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner
+conda activate robocasa
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 
 # 确保 .env 中配置了 CLOUD_API_KEY
 # 确保 Master 已启动
@@ -49,7 +49,7 @@ python slaver/run.py
 - **robot.path** — 本地目录名或远程 URL
 - **robot.name** — 机器人名称（如 FQrobot）
 - **tool.matching** — 工具匹配配置（max_tools、min_similarity）
-- **robocasa.server_url** — RoboCasa 仿真服务器地址（默认 http://127.0.0.1:5001）
+- **robocasa.server_url** — MuJoCo 仿真服务器地址（默认 http://127.0.0.1:5001；键名保留用于兼容）
 
 ## 工作流程
 
@@ -70,7 +70,7 @@ python slaver/run.py
 
 ## 工具模块
 
-所有模块通过 `serve/sim.py` 调用 RoboCasa 仿真 API。
+所有模块通过 `serve/sim.py` 调用本地 XLeRobot MuJoCo 仿真 API。
 
 ### base.py - 导航
 
@@ -126,4 +126,4 @@ def register_tools(mcp):
 
 - FQPlanner conda 环境
 - Redis 服务
-- RoboCasa 仿真服务器（serve/main.py）
+- XLeRobot MuJoCo 仿真服务器（serve/main.py）

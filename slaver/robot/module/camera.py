@@ -16,7 +16,7 @@ load_dotenv(os.path.join(_project_root, '.env'))
 
 import yaml
 
-from serve.sim import capture_screenshot
+from serve.service.client import capture_screenshot
 
 # ============================================================
 # 从 config.yaml 加载配置

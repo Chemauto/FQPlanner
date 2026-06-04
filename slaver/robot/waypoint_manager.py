@@ -112,11 +112,18 @@ def get_object_pos(obj_name):
         resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
         if resp.status_code == 200:
             objects = resp.json()
+            if isinstance(objects, dict) and "objects" in objects:
+                objects = objects["objects"]
             if obj_name in objects:
                 return objects[obj_name]['pos']
+            candidates = [k for k in objects if obj_name in k or k in obj_name]
+            if candidates:
+                return objects[candidates[0]]['pos']
         resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
         if resp.status_code == 200:
             fixtures = resp.json()
+            if isinstance(fixtures, dict) and "fixtures" in fixtures:
+                fixtures = fixtures["fixtures"]
             if obj_name in fixtures:
                 return fixtures[obj_name]['pos']
             candidates = [k for k in fixtures if obj_name in k and 'main' in k]
@@ -160,14 +167,7 @@ def find_waypoint(target):
     waypoints = load_waypoints()
 
     if target_pos is None:
-        print(f"[waypoint] 无法确定目标位置，使用第一个工作点", file=sys.stderr)
-        wp = waypoints[0]
-        return {
-            "name": wp['name'],
-            "x": wp['pos'][0],
-            "y": wp['pos'][1],
-            "yaw_deg": wp.get('yaw_deg', 0.0),
-        }
+        raise ValueError(f"无法确定目标 '{target}' 的位置，请确认 /objects 或 /fixtures 中存在该名称")
 
     tp = np.array(target_pos[:2])
 
@@ -204,14 +204,9 @@ def find_waypoint(target):
     best = candidates_sorted[0]
     best_xy = best['pos'][:2]
 
-    # 动态计算朝向：工作点指向目标，snap 到 90°
-    # yaw=0→+X, 90→+Y (CCW)，atan2(dy,dx) 直接给出正确朝向
-    dx = target_pos[0] - best_xy[0]
-    dy = target_pos[1] - best_xy[1]
-    raw_yaw = math.degrees(math.atan2(dy, dx))
-    angles = [0, 90, 180, 270]
-    yaw_raw = raw_yaw % 360
-    yaw_deg = float(min(angles, key=lambda a: min(abs(a - yaw_raw), 360 - abs(a - yaw_raw))))
+    # 工作点生成器已经根据可达区域和目标家具方向写入 yaw_deg。
+    # 这里必须使用预存角度，否则会出现 nav_011 应为 90° 却被重算成 0° 的问题。
+    yaw_deg = float(best.get('yaw_deg', 0.0))
 
     print(
         f"[waypoint] 目标: '{target}' @ {tp.tolist()}, "

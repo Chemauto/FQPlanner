@@ -1,0 +1,1881 @@
+{
+  "fixtures": [
+    {
+      "name": "wall_room",
+      "root_body": "wall_room_main",
+      "pos": [
+        3.2,
+        0.02,
+        1.5
+      ],
+      "size": [
+        3.24,
+        1.5,
+        0.02
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_backing_room",
+      "root_body": "wall_backing_room_main",
+      "pos": [
+        3.2,
+        0.14,
+        1.38
+      ],
+      "size": [
+        3.4400000000000004,
+        1.62,
+        0.1
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_left_room",
+      "root_body": "wall_left_room_main",
+      "pos": [
+        -0.02,
+        -2.5,
+        1.5
+      ],
+      "size": [
+        2.54,
+        1.5,
+        0.02
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_left_backing_room",
+      "root_body": "wall_left_backing_room_main",
+      "pos": [
+        -0.14,
+        -2.5,
+        1.38
+      ],
+      "size": [
+        2.54,
+        1.62,
+        0.1
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_right_room",
+      "root_body": "wall_right_room_main",
+      "pos": [
+        6.42,
+        -2.5,
+        1.5
+      ],
+      "size": [
+        2.54,
+        1.5,
+        0.02
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_right_backing_room",
+      "root_body": "wall_right_backing_room_main",
+      "pos": [
+        6.54,
+        -2.5,
+        1.38
+      ],
+      "size": [
+        2.54,
+        1.62,
+        0.1
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_front_room",
+      "root_body": "wall_front_room_main",
+      "pos": [
+        3.2,
+        -5.02,
+        1.5
+      ],
+      "size": [
+        3.24,
+        1.5,
+        0.02
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "wall_front_backing_room",
+      "root_body": "wall_front_backing_room_main",
+      "pos": [
+        3.2,
+        -5.14,
+        1.38
+      ],
+      "size": [
+        3.4400000000000004,
+        1.62,
+        0.1
+      ],
+      "type": "Wall"
+    },
+    {
+      "name": "floor_room",
+      "root_body": "floor_room_main",
+      "pos": [
+        3.2,
+        -2.5,
+        -0.02
+      ],
+      "size": [
+        2.54,
+        3.24,
+        0.02
+      ],
+      "type": "Floor"
+    },
+    {
+      "name": "floor_backing_room",
+      "root_body": "floor_backing_room_main",
+      "pos": [
+        3.2,
+        -2.5,
+        -0.14
+      ],
+      "size": [
+        2.54,
+        3.24,
+        0.1
+      ],
+      "type": "Floor"
+    },
+    {
+      "name": "utensil_rack_room",
+      "root_body": "utensil_rack_room_main",
+      "pos": [
+        6.36,
+        -2.0,
+        1.2
+      ],
+      "size": [
+        0.4039180427704384,
+        0.09154048265364051,
+        0.32
+      ],
+      "type": "WallAccessory"
+    },
+    {
+      "name": "light_switch_room",
+      "root_body": "light_switch_room_main",
+      "pos": [
+        4.2,
+        0.0,
+        1.2
+      ],
+      "size": [
+        3e-05,
+        3e-05,
+        3e-05
+      ],
+      "type": "WallAccessory"
+    },
+    {
+      "name": "light_switch_2_room",
+      "root_body": "light_switch_2_room_main",
+      "pos": [
+        4.1,
+        0.0,
+        1.2
+      ],
+      "size": [
+        3e-05,
+        3e-05,
+        3e-05
+      ],
+      "type": "WallAccessory"
+    },
+    {
+      "name": "outlet_room",
+      "root_body": "outlet_room_main",
+      "pos": [
+        6.4,
+        -0.6,
+        1.2
+      ],
+      "size": [
+        3e-05,
+        3e-05,
+        3e-05
+      ],
+      "type": "WallAccessory"
+    },
+    {
+      "name": "outlet_2_room",
+      "root_body": "outlet_2_room_main",
+      "pos": [
+        6.4,
+        -3.0,
+        1.2
+      ],
+      "size": [
+        3e-05,
+        3e-05,
+        3e-05
+      ],
+      "type": "WallAccessory"
+    },
+    {
+      "name": "outlet_3_room",
+      "root_body": "outlet_3_room_main",
+      "pos": [
+        0.0,
+        -2.4,
+        1.2
+      ],
+      "size": [
+        3e-05,
+        3e-05,
+        3e-05
+      ],
+      "type": "WallAccessory"
+    },
+    {
+      "name": "window_group_room",
+      "root_body": "window_group_room_main",
+      "pos": [
+        2.15,
+        -0.015000000000000003,
+        1.75
+      ],
+      "size": [
+        1.85,
+        0.03,
+        1.25
+      ],
+      "type": "Window"
+    },
+    {
+      "name": "stool_1_room",
+      "root_body": "stool_1_room_main",
+      "pos": [
+        2.55,
+        -3.425,
+        0.4
+      ],
+      "size": [
+        0.45000000000000007,
+        0.44999999999999996,
+        0.8
+      ],
+      "type": "Stool"
+    },
+    {
+      "name": "stool_2_room",
+      "root_body": "stool_2_room_main",
+      "pos": [
+        3.2,
+        -3.425,
+        0.4
+      ],
+      "size": [
+        0.45000000000000007,
+        0.44999999999999996,
+        0.8
+      ],
+      "type": "Stool"
+    },
+    {
+      "name": "stool_3_room",
+      "root_body": "stool_3_room_main",
+      "pos": [
+        3.85,
+        -3.425,
+        0.4
+      ],
+      "size": [
+        0.45000000000000007,
+        0.44999999999999996,
+        0.8
+      ],
+      "type": "Stool"
+    },
+    {
+      "name": "counter_corner_main_group",
+      "root_body": "counter_corner_main_group_main",
+      "pos": [
+        0.35,
+        -0.325,
+        0.46
+      ],
+      "size": [
+        0.7,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "counter_1_main_group",
+      "root_body": "counter_1_main_group_main",
+      "pos": [
+        1.7,
+        -0.325,
+        0.46
+      ],
+      "size": [
+        2.0,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "stovetop_main_group",
+      "root_body": "stovetop_main_group_main",
+      "pos": [
+        3.6900000000000004,
+        -0.29500000000000004,
+        0.9333959419178334
+      ],
+      "size": [
+        0.944328242891903,
+        0.55,
+        0.011015937688183609
+      ],
+      "type": "Stovetop"
+    },
+    {
+      "name": "counter_main_main_group",
+      "root_body": "counter_main_main_group_main",
+      "pos": [
+        4.2,
+        -0.325,
+        0.46
+      ],
+      "size": [
+        3.0,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "counter_corner_2_main_group",
+      "root_body": "counter_corner_2_main_group_main",
+      "pos": [
+        6.05,
+        -0.325,
+        0.46
+      ],
+      "size": [
+        0.7,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "cab_corner_main_group",
+      "root_body": "cab_corner_main_group_main",
+      "pos": [
+        0.325,
+        -0.2,
+        1.85
+      ],
+      "size": [
+        0.65,
+        0.4,
+        0.92
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "cab_corner_2_main_group",
+      "root_body": "cab_corner_2_main_group_main",
+      "pos": [
+        0.2,
+        -0.55,
+        1.85
+      ],
+      "size": [
+        0.4,
+        0.3,
+        0.92
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "cab_1_main_group",
+      "root_body": "cab_1_main_group_main",
+      "pos": [
+        0.9,
+        -0.2,
+        1.85
+      ],
+      "size": [
+        0.5,
+        0.4,
+        0.92
+      ],
+      "type": "SingleCabinet"
+    },
+    {
+      "name": "hood_main_group",
+      "root_body": "hood_main_group_main",
+      "pos": [
+        3.6900000000000004,
+        -0.294815494658648,
+        2.09795173128255
+      ],
+      "size": [
+        0.944328242891903,
+        0.6,
+        0.8559034625650999
+      ],
+      "type": "Hood"
+    },
+    {
+      "name": "shelves_main_group",
+      "root_body": "shelves_main_group_main",
+      "pos": [
+        4.7,
+        -0.2,
+        1.85
+      ],
+      "size": [
+        0.95,
+        0.4,
+        0.92
+      ],
+      "type": "OpenCabinet"
+    },
+    {
+      "name": "cab_main_main_group",
+      "root_body": "cab_main_main_group_main",
+      "pos": [
+        5.425,
+        -0.2,
+        1.85
+      ],
+      "size": [
+        0.5,
+        0.4,
+        0.92
+      ],
+      "type": "SingleCabinet"
+    },
+    {
+      "name": "cab_corner_3_main_group",
+      "root_body": "cab_corner_3_main_group_main",
+      "pos": [
+        6.05,
+        -0.2,
+        1.85
+      ],
+      "size": [
+        0.75,
+        0.4,
+        0.92
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "cab_corner_4_main_group",
+      "root_body": "cab_corner_4_main_group_main",
+      "pos": [
+        6.225,
+        -0.55,
+        1.85
+      ],
+      "size": [
+        0.4,
+        0.3,
+        0.92
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_1_main_group_base",
+      "root_body": "stack_1_main_group_base_main",
+      "pos": [
+        1.2,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_1_main_group_1",
+      "root_body": "stack_1_main_group_1_main",
+      "pos": [
+        1.2,
+        -0.3,
+        0.365
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.63
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_1_main_group_2",
+      "root_body": "stack_1_main_group_2_main",
+      "pos": [
+        0.95,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_1_main_group_3",
+      "root_body": "stack_1_main_group_3_main",
+      "pos": [
+        1.45,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_2_main_group_base",
+      "root_body": "stack_2_main_group_base_main",
+      "pos": [
+        2.2,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_2_main_group_1",
+      "root_body": "stack_2_main_group_1_main",
+      "pos": [
+        2.2,
+        -0.3,
+        0.365
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.63
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_2_main_group_2",
+      "root_body": "stack_2_main_group_2_main",
+      "pos": [
+        1.9500000000000002,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_2_main_group_3",
+      "root_body": "stack_2_main_group_3_main",
+      "pos": [
+        2.45,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_main_group_base",
+      "root_body": "stack_3_main_group_base_main",
+      "pos": [
+        2.95,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.5,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_3_main_group_1",
+      "root_body": "stack_3_main_group_1_main",
+      "pos": [
+        2.95,
+        -0.3,
+        0.15499999999999997
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_main_group_2",
+      "root_body": "stack_3_main_group_2_main",
+      "pos": [
+        2.95,
+        -0.3,
+        0.365
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_main_group_3",
+      "root_body": "stack_3_main_group_3_main",
+      "pos": [
+        2.95,
+        -0.3,
+        0.575
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_main_group_4",
+      "root_body": "stack_3_main_group_4_main",
+      "pos": [
+        2.95,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_4_main_group_base",
+      "root_body": "stack_4_main_group_base_main",
+      "pos": [
+        3.7,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_4_main_group_1",
+      "root_body": "stack_4_main_group_1_main",
+      "pos": [
+        3.7,
+        -0.3,
+        0.47
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.84
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_5_main_group_base",
+      "root_body": "stack_5_main_group_base_main",
+      "pos": [
+        4.7,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_5_main_group_1",
+      "root_body": "stack_5_main_group_1_main",
+      "pos": [
+        4.7,
+        -0.3,
+        0.365
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.63
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_5_main_group_2",
+      "root_body": "stack_5_main_group_2_main",
+      "pos": [
+        4.45,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_5_main_group_3",
+      "root_body": "stack_5_main_group_3_main",
+      "pos": [
+        4.95,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_6_main_group_base",
+      "root_body": "stack_6_main_group_base_main",
+      "pos": [
+        5.45,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.5,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_6_main_group_1",
+      "root_body": "stack_6_main_group_1_main",
+      "pos": [
+        5.45,
+        -0.3,
+        0.365
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.63
+      ],
+      "type": "SingleCabinet"
+    },
+    {
+      "name": "stack_6_main_group_2",
+      "root_body": "stack_6_main_group_2_main",
+      "pos": [
+        5.45,
+        -0.3,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "knife_block_main_group",
+      "root_body": "knife_block_main_group_main",
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "size": [
+        0.11999999999999998,
+        0.28595899321902024,
+        0.32567632684017644
+      ],
+      "type": "Accessory"
+    },
+    {
+      "name": "paper_towel_main_group",
+      "root_body": "paper_towel_main_group_main",
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "size": [
+        0.1802082324194408,
+        0.180208252614969,
+        0.33
+      ],
+      "type": "Accessory"
+    },
+    {
+      "name": "utensil_set_main_group",
+      "root_body": "utensil_set_main_group_main",
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "size": [
+        0.17338788122821866,
+        0.17403701471201227,
+        0.35
+      ],
+      "type": "Accessory"
+    },
+    {
+      "name": "sink_island_group",
+      "root_body": "sink_island_group_main",
+      "pos": [
+        3.200039367273442,
+        -2.300000001823273,
+        0.9434977096365678
+      ],
+      "size": [
+        0.9243527692720157,
+        0.53,
+        0.2862041315512944
+      ],
+      "type": "Sink"
+    },
+    {
+      "name": "island_island_group",
+      "root_body": "island_island_group_main",
+      "pos": [
+        3.2,
+        -2.725,
+        0.46
+      ],
+      "size": [
+        2.5,
+        1.55,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "island_stack_1_island_group_base",
+      "root_body": "island_stack_1_island_group_base_main",
+      "pos": [
+        0.0,
+        -0.39,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "island_stack_1_island_group_1",
+      "root_body": "island_stack_1_island_group_1_main",
+      "pos": [
+        3.2000393777756058,
+        -2.3000000018242464,
+        0.365
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.63
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "island_stack_1_island_group_2",
+      "root_body": "island_stack_1_island_group_2_main",
+      "pos": [
+        3.2000393777756058,
+        -2.3000000018242464,
+        0.7849999999999999
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.21
+      ],
+      "type": "PanelCabinet"
+    },
+    {
+      "name": "dishwasher_island_group",
+      "root_body": "dishwasher_island_group_main",
+      "pos": [
+        4.025041387625622,
+        -2.2782642167777025,
+        0.4449999999999999
+      ],
+      "size": [
+        0.6499999999999999,
+        0.6,
+        0.89
+      ],
+      "type": "Dishwasher"
+    },
+    {
+      "name": "island_panel_cab_right_island_group_base",
+      "root_body": "island_panel_cab_right_island_group_base_main",
+      "pos": [
+        1.2,
+        0.035,
+        0.024999999999999988
+      ],
+      "size": [
+        0.1,
+        1.38,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "island_panel_cab_right_island_group_1",
+      "root_body": "island_panel_cab_right_island_group_1_main",
+      "pos": [
+        2.000000005150813,
+        -2.7248888156924074,
+        0.47
+      ],
+      "size": [
+        0.1,
+        1.45,
+        0.84
+      ],
+      "type": "PanelCabinet"
+    },
+    {
+      "name": "island_cab_right_island_group_base",
+      "root_body": "island_cab_right_island_group_base_main",
+      "pos": [
+        0.825,
+        -0.39,
+        0.024999999999999988
+      ],
+      "size": [
+        0.65,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "island_cab_right_island_group_1",
+      "root_body": "island_cab_right_island_group_1_main",
+      "pos": [
+        2.37503938131679,
+        -2.2999235626127765,
+        0.15499999999999997
+      ],
+      "size": [
+        0.65,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "island_cab_right_island_group_2",
+      "root_body": "island_cab_right_island_group_2_main",
+      "pos": [
+        2.37503938131679,
+        -2.2999235626127765,
+        0.365
+      ],
+      "size": [
+        0.65,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "island_cab_right_island_group_3",
+      "root_body": "island_cab_right_island_group_3_main",
+      "pos": [
+        2.37503938131679,
+        -2.2999235626127765,
+        0.575
+      ],
+      "size": [
+        0.65,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "island_cab_right_island_group_4",
+      "root_body": "island_cab_right_island_group_4_main",
+      "pos": [
+        2.37503938131679,
+        -2.2999235626127765,
+        0.7849999999999999
+      ],
+      "size": [
+        0.65,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "island_panel_cab_left_island_group_base",
+      "root_body": "island_panel_cab_left_island_group_base_main",
+      "pos": [
+        -1.2,
+        0.035,
+        0.024999999999999988
+      ],
+      "size": [
+        0.1,
+        1.38,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "island_panel_cab_left_island_group_1",
+      "root_body": "island_panel_cab_left_island_group_1_main",
+      "pos": [
+        4.399999994849187,
+        -2.725111184307593,
+        0.47
+      ],
+      "size": [
+        0.1,
+        1.45,
+        0.84
+      ],
+      "type": "PanelCabinet"
+    },
+    {
+      "name": "island_base_box_island_group",
+      "root_body": "island_base_box_island_group_main",
+      "pos": [
+        0.0,
+        0.2,
+        0.445
+      ],
+      "size": [
+        2.3,
+        0.1,
+        0.89
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "plant_island_group",
+      "root_body": "plant_island_group_main",
+      "pos": [
+        3.2,
+        -2.725,
+        0.0
+      ],
+      "size": [
+        0.17195215626482205,
+        0.17193930961727139,
+        0.14
+      ],
+      "type": "Accessory"
+    },
+    {
+      "name": "counter_1_left_group",
+      "root_body": "counter_1_left_group_main",
+      "pos": [
+        0.32499338822862145,
+        -1.6999988062204847,
+        0.46
+      ],
+      "size": [
+        2.0,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "counter_corner_left_group",
+      "root_body": "counter_corner_left_group_main",
+      "pos": [
+        0.324989531363263,
+        -0.6499988062275688,
+        0.46
+      ],
+      "size": [
+        0.1,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "bottom_left_group_base",
+      "root_body": "bottom_left_group_base_main",
+      "pos": [
+        0.4,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.8,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "bottom_left_group_1",
+      "root_body": "bottom_left_group_1_main",
+      "pos": [
+        0.2999985307159348,
+        -3.0999988980411675,
+        0.19999999999999998
+      ],
+      "size": [
+        0.8,
+        0.6,
+        0.3
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "bottom_left_group_2",
+      "root_body": "bottom_left_group_2_main",
+      "pos": [
+        0.2999985307159348,
+        -3.0999988980411675,
+        0.5
+      ],
+      "size": [
+        0.8,
+        0.6,
+        0.3
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "oven_left_group",
+      "root_body": "oven_left_group_main",
+      "pos": [
+        0.34231018416694575,
+        -3.0999987332740773,
+        0.9999999999999999
+      ],
+      "size": [
+        0.75,
+        0.6000000000000001,
+        0.68
+      ],
+      "type": "Oven"
+    },
+    {
+      "name": "oven_housing_left_group",
+      "root_body": "oven_housing_left_group_main",
+      "pos": [
+        0.2999985307159348,
+        -3.0999988980411675,
+        0.9999999999999999
+      ],
+      "size": [
+        0.8,
+        0.6,
+        0.7
+      ],
+      "type": "HousingCabinet"
+    },
+    {
+      "name": "microwave_left_group",
+      "root_body": "microwave_left_group_main",
+      "pos": [
+        0.3794816863579052,
+        -3.099998620710699,
+        1.6250000073137323
+      ],
+      "size": [
+        0.75,
+        0.5,
+        0.426505773776369
+      ],
+      "type": "Microwave"
+    },
+    {
+      "name": "micro_housing_left_group",
+      "root_body": "micro_housing_left_group_main",
+      "pos": [
+        0.2999985307159348,
+        -3.0999988980411675,
+        1.625
+      ],
+      "size": [
+        0.8,
+        0.6,
+        0.55
+      ],
+      "type": "HousingCabinet"
+    },
+    {
+      "name": "top_left_group",
+      "root_body": "top_left_group_main",
+      "pos": [
+        0.2999985307159348,
+        -3.0999988980411675,
+        2.25
+      ],
+      "size": [
+        0.8,
+        0.6,
+        0.7
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_1_left_group_base",
+      "root_body": "stack_1_left_group_base_main",
+      "pos": [
+        1.05,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.5,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_1_left_group_1",
+      "root_body": "stack_1_left_group_1_main",
+      "pos": [
+        0.2999961431326176,
+        -2.4499988980455525,
+        0.365
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.63
+      ],
+      "type": "SingleCabinet"
+    },
+    {
+      "name": "stack_1_left_group_2",
+      "root_body": "stack_1_left_group_2_main",
+      "pos": [
+        0.2999961431326176,
+        -2.4499988980455525,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_2_left_group_base",
+      "root_body": "stack_2_left_group_base_main",
+      "pos": [
+        1.8,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_2_left_group_1",
+      "root_body": "stack_2_left_group_1_main",
+      "pos": [
+        0.29999338822879007,
+        -1.6999988980506124,
+        0.365
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.63
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_2_left_group_2",
+      "root_body": "stack_2_left_group_2_main",
+      "pos": [
+        0.2999943065300659,
+        -1.9499988980489258,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_2_left_group_3",
+      "root_body": "stack_2_left_group_3_main",
+      "pos": [
+        0.29999246992751427,
+        -1.449998898052299,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_left_group_base",
+      "root_body": "stack_3_left_group_base_main",
+      "pos": [
+        2.55,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.5,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_3_left_group_1",
+      "root_body": "stack_3_left_group_1_main",
+      "pos": [
+        0.29999063332496256,
+        -0.9499988980556724,
+        0.15499999999999997
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_left_group_2",
+      "root_body": "stack_3_left_group_2_main",
+      "pos": [
+        0.29999063332496256,
+        -0.9499988980556724,
+        0.365
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_left_group_3",
+      "root_body": "stack_3_left_group_3_main",
+      "pos": [
+        0.29999063332496256,
+        -0.9499988980556724,
+        0.575
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_left_group_4",
+      "root_body": "stack_3_left_group_4_main",
+      "pos": [
+        0.29999063332496256,
+        -0.9499988980556724,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "shelves_left_group",
+      "root_body": "shelves_left_group_main",
+      "pos": [
+        0.19999430653074057,
+        -1.949999265369436,
+        1.85
+      ],
+      "size": [
+        1.5,
+        0.4,
+        0.92
+      ],
+      "type": "OpenCabinet"
+    },
+    {
+      "name": "cab_2_left_group",
+      "root_body": "cab_2_left_group_main",
+      "pos": [
+        0.1999906333256372,
+        -0.9499992653761828,
+        1.85
+      ],
+      "size": [
+        0.5,
+        0.4,
+        0.92
+      ],
+      "type": "SingleCabinet"
+    },
+    {
+      "name": "toaster_oven_left_group",
+      "root_body": "toaster_oven_left_group_main",
+      "pos": [
+        0.0,
+        -3.5,
+        0.0
+      ],
+      "size": [
+        0.5286762507889455,
+        0.29500000000000004,
+        0.3025806366170015
+      ],
+      "type": "ToasterOven"
+    },
+    {
+      "name": "counter_1_right_group",
+      "root_body": "counter_1_right_group_main",
+      "pos": [
+        6.0749963267970895,
+        -1.6999988062015952,
+        0.46
+      ],
+      "size": [
+        2.0,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "counter_corner_right_group",
+      "root_body": "counter_corner_right_group_main",
+      "pos": [
+        6.075000183662448,
+        -0.6499988062086787,
+        0.46
+      ],
+      "size": [
+        0.1,
+        0.65,
+        0.92
+      ],
+      "type": "Counter"
+    },
+    {
+      "name": "fridge_right_group",
+      "root_body": "fridge_right_group_main",
+      "pos": [
+        5.964674860270211,
+        -3.144994156721971,
+        0.8750000303817225
+      ],
+      "size": [
+        0.85,
+        0.8,
+        1.75
+      ],
+      "type": "FridgeSideBySide"
+    },
+    {
+      "name": "fridge_housing_right_group",
+      "root_body": "fridge_housing_right_group_main",
+      "pos": [
+        6.009991019016153,
+        -3.1449985674335146,
+        0.885
+      ],
+      "size": [
+        0.89,
+        0.78,
+        1.77
+      ],
+      "type": "HousingCabinet"
+    },
+    {
+      "name": "stack_1_right_group_base",
+      "root_body": "stack_1_right_group_base_main",
+      "pos": [
+        0.5,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        1.0,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_1_right_group_1",
+      "root_body": "stack_1_right_group_1_main",
+      "pos": [
+        6.099998163399473,
+        -1.1999988980350957,
+        0.365
+      ],
+      "size": [
+        1.0,
+        0.6,
+        0.63
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "stack_1_right_group_2",
+      "root_body": "stack_1_right_group_2_main",
+      "pos": [
+        6.099999081700749,
+        -0.9499988980367824,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_1_right_group_3",
+      "root_body": "stack_1_right_group_3_main",
+      "pos": [
+        6.099997245098197,
+        -1.4499988980334093,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_2_right_group_base",
+      "root_body": "stack_2_right_group_base_main",
+      "pos": [
+        1.25,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.5,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_2_right_group_1",
+      "root_body": "stack_2_right_group_1_main",
+      "pos": [
+        6.099995408495645,
+        -1.9499988980300362,
+        0.365
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.63
+      ],
+      "type": "SingleCabinet"
+    },
+    {
+      "name": "stack_2_right_group_2",
+      "root_body": "stack_2_right_group_2_main",
+      "pos": [
+        6.099995408495645,
+        -1.9499988980300362,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_right_group_base",
+      "root_body": "stack_3_right_group_base_main",
+      "pos": [
+        1.75,
+        -0.265,
+        0.024999999999999988
+      ],
+      "size": [
+        0.5,
+        0.53,
+        0.05
+      ],
+      "type": "Box"
+    },
+    {
+      "name": "stack_3_right_group_1",
+      "root_body": "stack_3_right_group_1_main",
+      "pos": [
+        6.099993571893093,
+        -2.449998898026663,
+        0.15499999999999997
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_right_group_2",
+      "root_body": "stack_3_right_group_2_main",
+      "pos": [
+        6.099993571893093,
+        -2.449998898026663,
+        0.365
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_right_group_3",
+      "root_body": "stack_3_right_group_3_main",
+      "pos": [
+        6.099993571893093,
+        -2.449998898026663,
+        0.575
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "stack_3_right_group_4",
+      "root_body": "stack_3_right_group_4_main",
+      "pos": [
+        6.099993571893093,
+        -2.449998898026663,
+        0.7849999999999999
+      ],
+      "size": [
+        0.5,
+        0.6,
+        0.21
+      ],
+      "type": "Drawer"
+    },
+    {
+      "name": "cab_1_right_group",
+      "root_body": "cab_1_right_group_main",
+      "pos": [
+        6.1999981633987975,
+        -1.1999992653556062,
+        1.85
+      ],
+      "size": [
+        1.0,
+        0.4,
+        0.92
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "cab_2_right_group",
+      "root_body": "cab_2_right_group_main",
+      "pos": [
+        6.199994490193695,
+        -2.19999926534886,
+        1.85
+      ],
+      "size": [
+        1.0,
+        0.4,
+        0.92
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "fridge_cab_right_group",
+      "root_body": "fridge_cab_right_group_main",
+      "pos": [
+        6.199991019014872,
+        -3.1449992653424843,
+        2.04
+      ],
+      "size": [
+        0.89,
+        0.4,
+        0.54
+      ],
+      "type": "HingeCabinet"
+    },
+    {
+      "name": "coffee_machine_right_group",
+      "root_body": "coffee_machine_right_group_main",
+      "pos": [
+        6.4,
+        -0.7,
+        0.0
+      ],
+      "size": [
+        0.2698413434163315,
+        0.3839042040280255,
+        0.36000000000000004
+      ],
+      "type": "CoffeeMachine"
+    },
+    {
+      "name": "toaster_right_group",
+      "root_body": "toaster_right_group_main",
+      "pos": [
+        6.4,
+        -0.7,
+        0.0
+      ],
+      "size": [
+        0.16820673433404912,
+        0.2711052407952633,
+        0.19
+      ],
+      "type": "Toaster"
+    }
+  ],
+  "objects": [
+    {
+      "name": "pot",
+      "root_body": "pot_main",
+      "pos": [
+        3.95,
+        -0.475,
+        1.0
+      ],
+      "type": "pot"
+    },
+    {
+      "name": "cup",
+      "root_body": "cup_main",
+      "pos": [
+        4.752630481366219,
+        -0.5076201934505578,
+        1.0
+      ],
+      "type": "glass_cup"
+    },
+    {
+      "name": "bowl",
+      "root_body": "bowl_main",
+      "pos": [
+        5.394941968776085,
+        -0.26026069596370094,
+        1.0
+      ],
+      "type": "bowl"
+    },
+    {
+      "name": "apple",
+      "root_body": "apple_main",
+      "pos": [
+        4.352837403644338,
+        -0.5212822347531212,
+        1.0
+      ],
+      "type": "apple"
+    },
+    {
+      "name": "mug",
+      "root_body": "mug_main",
+      "pos": [
+        3.232010577789134,
+        -0.24262797104089542,
+        1.0
+      ],
+      "type": "mug"
+    },
+    {
+      "name": "sponge",
+      "root_body": "sponge_main",
+      "pos": [
+        4.275272384598683,
+        -2.960135766513495,
+        1.0
+      ],
+      "type": "sponge"
+    }
+  ]
+}
