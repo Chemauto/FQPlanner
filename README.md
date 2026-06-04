@@ -100,7 +100,6 @@ POST /place
 POST /move_to
 POST /nav
 POST /cmd_vel
-POST /nav_path
 POST /open_gripper
 POST /close_gripper
 POST /screenshot

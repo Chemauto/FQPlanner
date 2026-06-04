@@ -30,7 +30,6 @@ Flask 应用，端口 5001。接收 HTTP 请求，调用 `tools/` 和 `mujoco_ba
 |------|------|------|
 | `/nav` | POST | 导航到目标位置 `{x, y, target_yaw}` |
 | `/cmd_vel` | POST | 发送底盘速度 `{vx, vy, vw}` |
-| `/nav_path` | POST | 路径跟随 `{path, w}` |
 | `/move_to` | POST | 移动末端到目标 `{target}` |
 | `/grasp` | POST | 抓取物体 `{obj_name}` |
 | `/place` | POST | 放置物体 `{obj_name, target}` |

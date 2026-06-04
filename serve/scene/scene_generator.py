@@ -267,7 +267,7 @@ def _set_robot_initial_pose(root):
     设置机器人底盘初始位置和朝向。
 
     保留模型自身的 z 高度，只改 x/y 到岛台和台面之间的位置 [3.2, -1.5]。
-    朝向通过 quat 设为 yaw=90°。
+    朝向通过 quat 设为 yaw=-90°。
     """
     chassis = root.find(".//body[@name='chassis']")
     if chassis is None:
@@ -275,7 +275,7 @@ def _set_robot_initial_pose(root):
     current_pos = [float(v) for v in chassis.get("pos", "0 0 0.035").split()]
     z = current_pos[2] if len(current_pos) >= 3 else 0.035
     chassis.set("pos", f"3.2 -1.5 {z}")
-    chassis.set("quat", "0.707108 0 0 0.707108")
+    chassis.set("quat", "0.707108 0 0 -0.707108")
 
 
 def _add_missing_robot_inertials(root):

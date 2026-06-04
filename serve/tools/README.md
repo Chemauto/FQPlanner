@@ -5,7 +5,7 @@
 ```
 tools/
 ├── arm.py    # 机械臂控制（末端移动、抓取、放置、夹爪）
-└── move.py   # 底盘导航（速度控制、目标点导航、路径跟随）
+└── move.py   # 底盘导航（速度控制、目标点导航）
 ```
 
 ## arm.py — 机械臂控制
@@ -28,13 +28,12 @@ tools/
 | 函数 | 作用 |
 |------|------|
 | `get_base_info(env)` | 获取底座位置、朝向、qpos、qvel、ctrl |
-| `move(env, Vx, Vy, Vw)` | 单步速度控制（body-frame） |
-| `nav(env, x, y, target_yaw)` | 导航到目标位置（PD 控制全向移动） |
-| `follow_path(env, path, w)` | 路径跟随（全局路径点序列） |
+| `move(env, Vx, Vw)` | 单步速度控制（差速驱动，ctrl[0]=forward, ctrl[1]=turn） |
+| `nav(env, x, y, target_yaw)` | 导航到目标位置（差速驱动 PD 控制） |
 
 ## 底盘控制说明
 
-使用 MuJoCo-GS-Web 的 XLeRobot 真实外观模型：
-- `chassis` 是 `freejoint`
-- 高层导航直接更新 chassis 的 x/y/yaw
-- GS-Web XML 中的轮子 actuator 保留在模型里，但当前导航不依赖车轮物理
+使用 MuJoCo-GS-Web 的 XLeRobot 模型，差速驱动：
+- `chassis` 是 `freejoint`，启动时自然沉降到地面
+- 轮子通过 motor actuator + tendon 驱动（ctrl[0]=forward, ctrl[1]=turn）
+- 与实物接口一致，部署时可直接复用
