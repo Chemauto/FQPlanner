@@ -19,7 +19,7 @@
 `serve/main.py`：
 
 - 创建 `MujocoKitchenEnv`
-- 生成 / 加载 `assets/xlerobot/fqplanner_scene.xml`
+- 生成 / 加载 `assets/scene/scene.xml`
 - 启动 Flask API
 - 默认打开 MuJoCo viewer
 - 每帧处理命令队列并 step MuJoCo
@@ -36,8 +36,8 @@
 - 写出：
 
 ```text
-assets/xlerobot/fqplanner_scene.xml
-assets/xlerobot/fqplanner_scene_meta.json
+assets/scene/scene.xml
+assets/scene/scene_meta.json
 ```
 
 ## XLeRobot
@@ -46,12 +46,12 @@ assets/xlerobot/fqplanner_scene_meta.json
 
 ```text
 assets/xlerobot/xlerobot.xml
-assets/xlerobot/assets/*.stl
+assets/xlerobot/*.stl
 ```
 
 注意：
 
-- `assets/xlerobot/assets/` 是有效 mesh 目录。
+- `assets/xlerobot/` 是有效 mesh 目录，`xlerobot.xml` 和 mesh 文件放在同一级。
 - 不再使用旧的 `assets/xlerobot/meshes/`。
 - 不再使用旧的 `robots/` robosuite 注册目录。
 - 不会启动时从 `/home/fangqi/WorkXCJ/XLeRobot` 同步。
@@ -124,8 +124,8 @@ placement 规则：
 
 `serve/tools/move.py`：
 
-- 使用 XLeRobot 底盘的 MuJoCo actuator 控制移动。
-- `nav()` 根据世界坐标误差生成底盘速度。
+- 使用 MuJoCo-GS-Web 的 XLeRobot 真实外观模型。
+- `chassis` 是 `freejoint`；`nav()` 根据世界坐标误差生成 body-frame 速度，再由工具层直接更新 x/y/yaw。
 - body 名称是 `chassis`。
 
 `serve/tools/arm.py`：
@@ -153,7 +153,7 @@ placement 规则：
 
 - 原 prompt / 文档里如果写死 PandaOmron 或 RoboCasa 原生 env，需要改成 XLeRobot / MuJoCo。
 - 任务里的物体名必须匹配当前 `objects.yaml`。
-- 真实抓取能力还不是完整物理抓取，目前是高层吸附 / 放置。
+- 真实抓取能力还不是完整物理抓取，目前是高层吸附 / 放置；服务端会分步移动虚拟末端和物体，避免一帧瞬移。
 - 如果要完全复现 RoboCasa 原始 placement sampler，还需要进一步接入 RoboCasa 原生 placement initializer。
 
 ## 启动
@@ -185,6 +185,6 @@ python deploy/run.py
 ## 开发注意
 
 - 修改 `objects.yaml` 后，重启 `serve/main.py` 会重新生成场景 XML。
-- 修改 XLeRobot 模型后，需要直接更新本项目内 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/assets/`。
+- 修改 XLeRobot 模型后，需要直接更新本项目内 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/*.stl`。
 - 不要恢复旧的 `robots/` 目录；当前不通过 robosuite robot registry 加载 XLeRobot。
-- 不要重新创建 `assets/xlerobot/meshes/`；当前 meshdir 是 `./assets/`。
+- 不要重新创建 `assets/xlerobot/meshes/` 或 `assets/xlerobot/assets/`；当前 robot XML 的 meshdir 是 `./`，生成场景 XML 的 meshdir 是 `../xlerobot/`。

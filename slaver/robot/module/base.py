@@ -7,7 +7,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-from serve.sim import navigate, get_base_status
+from serve.service.client import navigate, get_base_status
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from waypoint_manager import find_waypoint
@@ -51,7 +51,12 @@ def register_tools(mcp):
             pass
 
         # 是物体名称，找最佳工作点
-        wp = find_waypoint(target)
+        try:
+            wp = find_waypoint(target)
+        except Exception as e:
+            msg = f"导航失败：无法找到目标 '{target}' 的实时位置或工作点：{e}"
+            print(f"[base] {msg}", file=sys.stderr)
+            return json.dumps([msg, {"_status": "failure"}])
         return await _do_navigate(wp['x'], wp['y'], wp['yaw_deg'])
 
     async def _do_navigate(x, y, yaw_deg):

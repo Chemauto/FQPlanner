@@ -11,7 +11,7 @@ import argparse
 import os
 import time
 from termcolor import colored
-from utils.utils import create_scene
+from mujoco_backend import MujocoKitchenEnv
 from service.server import (
     start_server,
     process_commands,
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     # 1. 创建固定场景
     print(colored("正在从 scene/ 加载 MuJoCo 厨房场景...", "yellow"))
-    env = create_scene(scene_dir="scene", seed=42)
+    env = MujocoKitchenEnv(scene_dir="scene", seed=42)
 
     # 2. 初始化场景
     env.reset()
@@ -63,10 +63,10 @@ if __name__ == "__main__":
         if not args.no_viewer:
             import mujoco.viewer
             viewer = mujoco.viewer.launch_passive(env.model, env.data)
-            viewer.cam.distance = 6.0
+            viewer.cam.distance = 7.5
             viewer.cam.azimuth = 135
-            viewer.cam.elevation = -25
-            viewer.cam.lookat[:] = [3.2, -2.5, 0.8]
+            viewer.cam.elevation = -35
+            viewer.cam.lookat[:] = [3.2, -2.15, 0.8]
             viewer.opt.geomgroup[:] = 0
             viewer.opt.geomgroup[0] = 1
             viewer.opt.geomgroup[1] = 1

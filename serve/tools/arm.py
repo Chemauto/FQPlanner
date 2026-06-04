@@ -54,7 +54,7 @@ def move_arm(env, target_pos, max_steps=200, pos_threshold=0.03, gain=1.5):
     if env.grasped_object:
         env.set_object_pos(env.grasped_object, target_pos)
     for _ in range(min(int(max_steps), 20)):
-        env.step(np.zeros(env.action_dim))
+        env.step()
     return True
 
 
@@ -63,13 +63,13 @@ def open_gripper(env, steps=10):
         env.grasped_object = None
     _set_joint_ctrl(env, "Jaw_R", -0.2)
     for _ in range(steps):
-        env.step(np.zeros(env.action_dim))
+        env.step()
 
 
 def close_gripper(env, steps=10):
     _set_joint_ctrl(env, "Jaw_R", 1.2)
     for _ in range(steps):
-        env.step(np.zeros(env.action_dim))
+        env.step()
 
 
 def get_obj_pos(env, obj_name):
@@ -145,4 +145,3 @@ def _set_joint_ctrl(env, actuator_or_joint_name, value):
     actuator_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_ACTUATOR, actuator_or_joint_name)
     if actuator_id >= 0:
         env.data.ctrl[actuator_id] = float(value)
-

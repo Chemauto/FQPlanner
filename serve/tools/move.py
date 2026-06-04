@@ -1,14 +1,9 @@
 """
 move.py - 机器人底座移动控制
 
-XLeRobot MuJoCo actuator：
-  ctrl[0] → slide_joint_x
-  ctrl[1] → slide_joint_y
-  ctrl[2] → hinge_joint_z
-
-body 坐标系随 yaw 旋转：
-  yaw=0°:  body_X = 世界+X,  body_Y = 世界+Y
-  yaw=90°: body_X = 世界+Y,  body_Y = 世界-X
+当前支持两种 XLeRobot MJCF：
+- 旧模型：slide_joint_x / slide_joint_y / hinge_joint_z
+- GS-Web 真实外观模型：chassis freejoint，高层导航直接更新 x/y/yaw
 """
 
 import numpy as np
@@ -61,18 +56,22 @@ def get_base_info(env):
     yaw_rad = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     yaw_deg = np.rad2deg(yaw_rad)
 
-    # 关节值
-    qpos = data.qpos[0:3].copy()
-    qvel = data.qvel[0:3].copy()
-    ctrl = data.ctrl[0:3].copy()
+    qpos = [float(pos[0]), float(pos[1]), float(yaw_rad)]
+    qvel = [0.0, 0.0, 0.0]
+    if getattr(env, "base_free_joint_id", -1) >= 0:
+        dadr = model.jnt_dofadr[env.base_free_joint_id]
+        qvel = data.qvel[dadr:dadr + 3].copy().tolist()
+    elif data.qvel.size >= 3:
+        qvel = data.qvel[0:3].copy().tolist()
+    ctrl = data.ctrl[:min(3, data.ctrl.size)].copy().tolist()
 
     return {
         "pos": pos.tolist(),
         "yaw_deg": round(float(yaw_deg), 2),
         "yaw_rad": round(float(yaw_rad), 4),
-        "qpos": qpos.tolist(),
-        "qvel": qvel.tolist(),
-        "ctrl": ctrl.tolist(),
+        "qpos": qpos,
+        "qvel": qvel,
+        "ctrl": ctrl,
     }
 
 
@@ -94,8 +93,13 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     Vy = np.clip(Vy, -1.0, 1.0)
     Vw = np.clip(Vw, -1.0, 1.0)
 
-    action = np.zeros(env.action_dim)
-    # slide joints 在 body frame，直接赋值
+    if getattr(env, "base_free_joint_id", -1) >= 0:
+        env.move_base_kinematic(Vx=Vx, Vy=Vy, Vw=Vw)
+        env.step()
+        return get_base_info(env)
+
+    action = env.data.ctrl.copy()
+    # slide joints 在 body frame，直接赋值；其余 actuator 保持当前目标姿态。
     action[0] = Vx
     action[1] = Vy
     action[2] = Vw

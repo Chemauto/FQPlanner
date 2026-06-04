@@ -4,7 +4,7 @@ FQPlanner_Mujoco 是 FQPlanner 的 MuJoCo / XLeRobot 迁移版本。当前目标
 
 ## 当前状态
 
-- 机器人模型：使用本项目内的 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/assets/*.stl`。
+- 机器人模型：使用本项目内的 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/*.stl`。
 - 厨房场景：通过 RoboCasa 的 `KitchenArena + ManipulationTask` 导出真实厨房 fixtures / object MJCF，再合并到 XLeRobot MuJoCo XML。
 - 运行后端：`serve/main.py` 启动 MuJoCo viewer 和 Flask API，端口 `5001`。
 - 项目自包含 XLeRobot 文件，不会启动时从 `/home/fangqi/WorkXCJ/XLeRobot` 同步。
@@ -54,9 +54,9 @@ http://127.0.0.1:8888
 
 ```text
 assets/xlerobot/xlerobot.xml              # 当前使用的 XLeRobot 模型
-assets/xlerobot/assets/                   # 当前使用的 XLeRobot STL 网格
-assets/xlerobot/fqplanner_scene.xml       # 生成后的厨房 + XLeRobot 场景
-assets/xlerobot/fqplanner_scene_meta.json # 生成后的 fixtures / objects 元信息
+assets/xlerobot/*.stl                     # 当前使用的 XLeRobot STL 网格
+assets/scene/scene.xml                    # 生成后的厨房 + XLeRobot 场景
+assets/scene/scene_meta.json              # 生成后的 fixtures / objects 元信息
 serve/mujoco_backend.py                   # 场景导出、XML 合并、MuJoCo Env 适配器
 serve/main.py                             # MuJoCo viewer + Flask API 入口
 serve/scene/config/objects.yaml           # 可操作物体和 placement 配置
@@ -111,8 +111,8 @@ POST /screenshot
 ## 注意事项
 
 - 当前不是 RoboCasa 原生环境 reset；RoboCasa 用于导出真实厨房和物体 MJCF。
-- 当前抓取 / 放置是高层测试实现：物体通过 freejoint 吸附 / 放置，不是完整接触抓取和 IK。
-- XLeRobot 底盘 body 是 `chassis`，初始位置来自 `xlerobot.xml`：`[0, 0, 0.035]`。
+- 当前抓取 / 放置是高层测试实现：服务端会分步移动虚拟末端和物体用于可视化，但不是完整接触抓取和 IK。
+- XLeRobot 使用 `/home/fangqi/WorkXCJ/MuJoCo-GS-Web` 的真实外观模型；底盘 body 是 `chassis`，为 `freejoint`，当前生成场景把初始位置放在岛台和台面之间：`[3.2, -1.5, 0.38]`。
 - 如果要完全复现 RoboCasa 原始物体采样，需要继续接入 RoboCasa 原生 placement sampler；当前实现是基于 fixture `pos/size` 的轻量 placement。
 
 ## 文档
