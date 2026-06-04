@@ -216,7 +216,7 @@ def get_base_action():
         _base_cmd["was_active"] = True
         action = np.zeros(2)
         action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)   # forward
-        action[1] = np.clip(_base_cmd["Vw"], -1.0, 1.0)    # turn
+        action[1] = -np.clip(_base_cmd["Vw"], -1.0, 1.0)   # turn
         return action
 
 

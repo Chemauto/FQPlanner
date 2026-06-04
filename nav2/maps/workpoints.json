@@ -1,60 +1,70 @@
 {
   "waypoints": [
     {
-      "name": "nav_011",
+      "name": "nav_016",
       "pos": [
-        3.525,
-        -1.025
+        4.125,
+        -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
         "apple",
-        "mug",
+        "cup",
         "pot",
         "stove"
       ]
     },
     {
-      "name": "nav_016",
-      "pos": [
-        4.775,
-        -1.025
-      ],
-      "yaw_deg": 90.0,
-      "serves": [
-        "bowl",
-        "cup"
-      ]
-    },
-    {
       "name": "nav_001",
       "pos": [
-        1.025,
-        -1.025
+        1.125,
+        -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
         "counter"
       ]
     },
     {
-      "name": "nav_044",
+      "name": "nav_009",
       "pos": [
-        2.775,
-        -1.525
+        2.725,
+        -1.125
       ],
       "yaw_deg": -90.0,
+      "serves": [
+        "mug"
+      ]
+    },
+    {
+      "name": "nav_020",
+      "pos": [
+        4.925,
+        -1.125
+      ],
+      "yaw_deg": -90.0,
+      "serves": [
+        "bowl"
+      ]
+    },
+    {
+      "name": "nav_033",
+      "pos": [
+        3.125,
+        -1.325
+      ],
+      "yaw_deg": 90.0,
       "serves": [
         "sink"
       ]
     },
     {
-      "name": "nav_073",
+      "name": "nav_089",
       "pos": [
-        5.025,
-        -2.525
+        4.925,
+        -2.325
       ],
-      "yaw_deg": -180.0,
+      "yaw_deg": 0.0,
       "serves": [
         "sponge"
       ]
@@ -62,32 +72,32 @@
     {
       "name": "nav_004",
       "pos": [
-        1.775,
-        -1.025
+        1.725,
+        -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
         "counter"
       ]
     },
     {
-      "name": "nav_012",
+      "name": "nav_014",
       "pos": [
-        3.775,
-        -1.025
+        3.725,
+        -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
         "stove"
       ]
     },
     {
-      "name": "nav_046",
+      "name": "nav_055",
       "pos": [
-        3.275,
+        3.125,
         -1.525
       ],
-      "yaw_deg": -90.0,
+      "yaw_deg": 90.0,
       "serves": [
         "sink"
       ]
