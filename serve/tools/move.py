@@ -90,6 +90,25 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     return get_base_info(env)
 
 
+def stop_base(env):
+    """Stop commanded base motion and clear residual chassis/wheel velocity."""
+    env.data.ctrl[0] = 0.0
+    env.data.ctrl[1] = 0.0
+
+    if getattr(env, "base_free_joint_id", -1) >= 0:
+        dadr = env.model.jnt_dofadr[env.base_free_joint_id]
+        env.data.qvel[dadr:dadr + 6] = 0.0
+
+    for joint_name in ("left_wheel_joint", "right_wheel_joint"):
+        joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if joint_id >= 0:
+            dadr = env.model.jnt_dofadr[joint_id]
+            env.data.qvel[dadr] = 0.0
+
+    env.sim.forward()
+    return get_base_info(env)
+
+
 def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=800):
     """
     导航到世界坐标系目标点（差速驱动 PD 控制）

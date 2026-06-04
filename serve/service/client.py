@@ -156,6 +156,25 @@ def close_gripper():
 # 底盘导航
 # ============================================================
 
+def move_for_duration(vx=0.0, vw=0.0, duration=1.0):
+    """
+    以指定速度持续移动底盘一段时间
+
+    Args:
+        vx:       前进速度 [-1, 1]，正值前进，负值后退
+        vw:       旋转速度 [-1, 1]，正值左转，负值右转
+        duration: 持续时间（秒）
+
+    Returns:
+        dict: {"success": bool, "pos": [x,y,z], "yaw": float}
+    """
+    return call_sim("/move_duration", {
+        "vx": vx,
+        "vw": vw,
+        "duration": duration,
+    })
+
+
 def navigate(x, y, target_yaw=None):
     """
     底盘导航到目标位置

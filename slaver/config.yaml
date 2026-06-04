@@ -51,8 +51,10 @@ collaborator:
 camera:
   image_path: "images/"
   cameras:
-    - "robot0_frontview"
-    - "robot0_eye_in_hand"
+    - "overhead_cam"
+    - "head_cam"
+    - "right_arm_cam"
+    - "left_arm_cam"
   vlm:
     model: "mimo-v2.5"
     api_base: "https://api.xiaomimimo.com/v1"
