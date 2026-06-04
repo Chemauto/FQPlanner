@@ -4,11 +4,13 @@ server.py - Flask API 服务
 """
 
 import os
+import sys
 import time
 import threading
 import numpy as np
 import mujoco
 import yaml
+from pathlib import Path
 from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 
@@ -17,8 +19,23 @@ from tools.arm import (
     move_arm,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move
+from tools.move import get_base_info, nav, move, stop_base
 from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+try:
+    from serve_real.base_bridge import start_move_duration, stop_real_base
+except Exception as e:
+    print(f"[real_base] bridge 未启用: {e}", flush=True)
+
+    def start_move_duration(vx, duration, vw=0.0):
+        return None
+
+    def stop_real_base():
+        return None
 
 app = Flask(__name__)
 CORS(app)
@@ -162,12 +179,13 @@ def get_lock():
 
 
 def has_active_base_command():
-    """当前是否有正在执行的底盘命令 (nav/cmd_vel)"""
-    return _active_command is not None and _active_command.get("type") in ("nav", "cmd_vel")
+    """当前是否有正在执行的底盘命令 (nav/cmd_vel/move_duration)"""
+    return _active_command is not None and _active_command.get("type") in ("nav", "cmd_vel", "move_duration")
 
 
 def set_base_velocity(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
     """Store the latest velocity command for the main simulation loop."""
+    print(f"[set_base_velocity] Vx={Vx}, Vw={Vw}, timeout={timeout}", flush=True)
     with _queue_lock:
         _base_cmd["Vx"] = float(Vx)
         _base_cmd["Vy"] = float(Vy)
@@ -192,6 +210,7 @@ def get_base_action():
         if time.time() > _base_cmd["expires_at"]:
             if _base_cmd["was_active"]:
                 _base_cmd["was_active"] = False
+                print("[get_base_action] cmd_vel 过期，返回停止信号 [0,0]", flush=True)
                 return np.zeros(2)
             return None
         _base_cmd["was_active"] = True
@@ -259,7 +278,7 @@ def submit_command(cmd_type, params):
 
 def _finish_command(cmd, result):
     global _active_command
-    if cmd.get("type") in ("nav", "cmd_vel"):
+    if cmd.get("type") in ("nav", "cmd_vel", "move_duration"):
         env = _get_env()
         if env is not None:
             try:
@@ -319,6 +338,21 @@ def _step_active_command(env):
                 state["step"] += 1
             return True
 
+        if cmd_type == "move_duration":
+            now = time.time()
+            if now >= state["end_time"]:
+                print(f"[move_duration] 时间到，发送停止信号", flush=True)
+                # timeout 需要 >0，让主循环 get_base_action 有机会设置 was_active=True
+                # 然后返回 [0,0] 停止信号；过期后自动变 None 不再干预
+                set_base_velocity(Vx=0.0, Vw=0.0, timeout=1.0)
+                stop_base(env)
+                stop_real_base()
+                final = get_base_info(env)
+                _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
+                return True
+            move(env, Vx=state["vx"], Vw=state["vw"])
+            return True
+
         if cmd_type == "grasp":
             obj_name = state["obj_name"]
             if obj_name not in env.obj_body_id:
@@ -365,6 +399,8 @@ def _step_active_command(env):
                     _finish_command(cmd, {"success": True, "result": f"成功放置 {obj_name}"})
                 return True
     except Exception as e:
+        if cmd is not None and cmd.get("type") == "move_duration":
+            stop_real_base()
         _finish_command(cmd, {"success": False, "error": str(e)})
         return True
     return False
@@ -444,6 +480,22 @@ def process_commands(env):
                             "yaw_threshold": float(params.get("yaw_threshold", 10.0)),
                             "max_steps": int(params.get("max_steps", 6000)),
                             "step": 0,
+                        },
+                    }
+                    return
+                elif cmd_type == "move_duration":
+                    real_thread = start_move_duration(
+                        float(params.get("vx", 0.0)),
+                        float(params["duration"]),
+                        float(params.get("vw", 0.0)),
+                    )
+                    _active_command = {
+                        **cmd,
+                        "state": {
+                            "vx": float(params.get("vx", 0.0)),
+                            "vw": float(params.get("vw", 0.0)),
+                            "end_time": time.time() + float(params["duration"]),
+                            "real_thread": real_thread,
                         },
                     }
                     return
@@ -753,6 +805,21 @@ def api_move_to():
         "pos_threshold": data.get("pos_threshold", 0.03),
     }
     return jsonify(submit_command("move_to", params))
+
+
+@app.route("/move_duration", methods=["POST"])
+def api_move_duration():
+    """以指定速度持续移动底盘一段时间（走命令队列）"""
+    data = request.json or {}
+    vx = float(data.get("vx", 0.0))
+    vw = float(data.get("vw", 0.0))
+    duration = float(data.get("duration", 1.0))
+
+    if duration <= 0:
+        return jsonify({"error": "duration 必须大于 0"}), 400
+
+    params = {"vx": vx, "vw": vw, "duration": duration}
+    return jsonify(submit_command("move_duration", params))
 
 
 @app.route("/nav", methods=["POST"])

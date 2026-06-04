@@ -26,3 +26,9 @@ psutil==7.0.0
 # --- Image ---
 pillow==11.2.1
 
+# 核心依赖
+pyserial
+
+# 电机驱动依赖 (来自 motors/ 模块)
+deepdiff
+tqdm
