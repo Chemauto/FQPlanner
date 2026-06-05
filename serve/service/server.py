@@ -212,7 +212,7 @@ def process_commands(env):
                     result = {"success": True}
                 elif cmd_type == "nav":
                     info = nav(env, **params)
-                    result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
+                    result = {"success": info.get("reached", False), "pos": info["pos"], "yaw": info["yaw_deg"]}
                 elif cmd_type == "nav_path":
                     result = follow_path(env, **params)
                 elif cmd_type == "cmd_vel":
@@ -535,7 +535,7 @@ def api_nav_path():
         return jsonify({"success": False, "result": "缺少 path 参数"}), 400
     params = {
         "path": path,
-        "w": data.get("w", 0),
+        "w": data.get("w"),   # None when caller did not specify yaw → no alignment
     }
     if data.get("max_steps") is not None:
         params["max_steps"] = data["max_steps"]
@@ -659,7 +659,7 @@ def api_screenshot():
 # 启动函数
 # ============================================================
 
-def start_server(env, port=5001):
+def start_server(env, port=5002):
     _env_holder["env"] = env
 
     def run():

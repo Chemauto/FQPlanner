@@ -19,7 +19,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 app = Flask(__name__)
 
 MASTER_URL = "http://127.0.0.1:5000"
-SIM_URL = "http://127.0.0.1:5001"
+SIM_URL = "http://127.0.0.1:5002"
 REDIS_CFG = {"host": "127.0.0.1", "port": 6379, "db": 0, "password": None}
 
 
@@ -129,6 +129,44 @@ def task_status():
         return jsonify({"active": False, "error": "Master 服务未启动"}), 503
     except Exception as e:
         return jsonify({"active": False, "error": str(e)}), 500
+
+
+@app.route("/api/failure_pending", methods=["GET"])
+def failure_pending():
+    try:
+        resp = requests.get(f"{MASTER_URL}/api/failure_pending", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"pending": False}), 200
+
+
+@app.route("/api/save_failure_experience", methods=["POST"])
+def save_failure_experience():
+    try:
+        resp = requests.post(f"{MASTER_URL}/api/save_failure_experience",
+                             json=request.get_json(), timeout=30)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/success_pending", methods=["GET"])
+def success_pending():
+    try:
+        resp = requests.get(f"{MASTER_URL}/api/success_pending", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"pending": False}), 200
+
+
+@app.route("/api/save_success_experience", methods=["POST"])
+def save_success_experience():
+    try:
+        resp = requests.post(f"{MASTER_URL}/api/save_success_experience",
+                             json=request.get_json(), timeout=30)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 @app.route("/api/save_experience", methods=["POST"])

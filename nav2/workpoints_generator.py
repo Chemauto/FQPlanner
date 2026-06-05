@@ -57,12 +57,12 @@ def get_scene_objects(fixtures_map):
     """拉取所有可操作物体和主要家具坐标"""
     targets = {}
 
-    resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
+    resp = requests.get("http://127.0.0.1:5002/objects", timeout=3)
     if resp.status_code == 200:
         for name, data in resp.json().items():
             targets[name] = data['pos'][:2]
 
-    resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
+    resp = requests.get("http://127.0.0.1:5002/fixtures", timeout=3)
     if resp.status_code == 200:
         fixture_data = resp.json()
         for simple_name, fixture_key in fixtures_map.items():
@@ -79,7 +79,11 @@ def load_free_points(path):
 
 
 def find_covering_waypoints(free_points, targets, max_reach, min_dist):
-    """贪心算法：选最少的工作点覆盖所有目标物体"""
+    """
+    贪心算法：选最少的工作点覆盖所有目标物体
+    每个工作点覆盖距离在 [min_dist, max_reach] 内的所有目标
+    同样覆盖数量时优先选离目标平均距离最近的
+    """
     coverage = {}
     for p in free_points:
         pp = np.array([p['x'], p['y']])
@@ -100,12 +104,32 @@ def find_covering_waypoints(free_points, targets, max_reach, min_dist):
     while uncovered:
         best_name = None
         best_covers = set()
+        best_avg_dist = float('inf')  # 【补回】tiebreaker：平均距离
 
         for pname, info in coverage.items():
             new_covers = info['covers'] & uncovered
+            p = info['point']
+            pp = np.array([p['x'], p['y']])
+
             if len(new_covers) > len(best_covers):
+                # 覆盖更多目标，直接选
                 best_covers = new_covers
                 best_name = pname
+                # 计算到覆盖目标的平均距离
+                best_avg_dist = np.mean([
+                    np.linalg.norm(pp - np.array(targets[t]))
+                    for t in new_covers
+                ])
+            elif len(new_covers) == len(best_covers) and len(new_covers) > 0:
+                # 【补回】覆盖数量相同，选平均距离更近的
+                avg_dist = np.mean([
+                    np.linalg.norm(pp - np.array(targets[t]))
+                    for t in new_covers
+                ])
+                if avg_dist < best_avg_dist:
+                    best_covers = new_covers
+                    best_name = pname
+                    best_avg_dist = avg_dist
 
         if best_name is None:
             print(f"[警告] 以下目标无法被任何工作点覆盖: {uncovered}")
@@ -298,6 +322,56 @@ def generate_visualization(free_points_path, waypoints, targets, output_path):
     print(f"[vis] 图例: 白=可通行 黑=障碍 蓝=可通行采样点 绿=工作点 红=目标物体")
 
 
+def generate_scene_state(selected, targets, output_path):
+    """【补回】根据工作点自动生成 scene_state_initial.yaml 和 scene_state.yaml"""
+    # 可操作物体列表（从 /objects 拿）
+    try:
+        resp = requests.get("http://127.0.0.1:5002/objects", timeout=3)
+        objects = resp.json() if resp.status_code == 200 else {}
+    except Exception:
+        objects = {}
+
+    # 为每个工作点建立初始 location 条目
+    locations = {}
+    for item in selected:
+        locations[item['name']] = {
+            'fixture': next(
+                (s for s in item['serves'] if s not in objects),  # serves 里不是物体的就是家具名
+                None
+            ),
+            'objects': []
+        }
+    locations['robot_hand'] = {'fixture': None, 'objects': []}
+
+    # 把每个物体分配到最近的工作点
+    for obj_name, obj_data in objects.items():
+        obj_pos = np.array(obj_data['pos'][:2])
+        best_wp = None
+        best_dist = float('inf')
+        for item in selected:
+            p = item['point']
+            dist = np.linalg.norm(np.array([p['x'], p['y']]) - obj_pos)
+            if dist < best_dist:
+                best_dist = dist
+                best_wp = item['name']
+        if best_wp:
+            locations[best_wp]['objects'].append(obj_name)
+            print(f"  {obj_name} → {best_wp} (dist={best_dist:.2f})")
+
+    state = {'last_updated': '初始状态', 'locations': locations}
+
+    state_initial_path = Path(output_path).parent / 'scene_state_initial.yaml'
+    state_path = Path(output_path).parent / 'scene_state.yaml'
+
+    with open(state_initial_path, 'w') as f:
+        yaml.dump(state, f, allow_unicode=True, default_flow_style=False)
+    # scene_state 也同步更新
+    with open(state_path, 'w') as f:
+        yaml.dump(state, f, allow_unicode=True, default_flow_style=False)
+
+    print(f"场景状态已保存到 {state_initial_path}")
+
+
 if __name__ == "__main__":
     cfg = load_config()
     wp_cfg = cfg.get("waypoints", {})
@@ -333,3 +407,7 @@ if __name__ == "__main__":
 
     print("\n生成可视化图...")
     generate_visualization(free_points_path, waypoints, targets, output_vis)
+
+    # 【补回】自动生成场景状态
+    print("\n生成场景状态...")
+    generate_scene_state(selected, targets, output_yaml)

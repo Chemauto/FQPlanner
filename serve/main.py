@@ -4,7 +4,7 @@ main.py - RoboCasa 固定场景仿真主程序
 
 使用方式:
     python main.py
-    然后打开 service/web.py 或浏览器访问 http://localhost:5001
+    然后打开 service/web.py 或浏览器访问 http://localhost:5002
 """
 
 import os
@@ -40,10 +40,10 @@ if __name__ == "__main__":
     print(f"[debug] 末端位置 = {env.sim.data.body_xpos[ee_id].round(3).tolist()}")
 
     # 4. 启动 Flask API 服务
-    start_server(env, port=5001)
+    start_server(env, port=5002)
 
     print(colored("\n仿真器已就绪。", "green"))
-    print("API 地址: http://localhost:5001")
+    print("API 地址: http://localhost:5002")
     print("按 Ctrl+C 退出\n")
 
     # 5. 主循环

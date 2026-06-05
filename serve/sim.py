@@ -14,7 +14,7 @@ import urllib.request
 import urllib.error
 
 # 默认服务器地址
-SERVER_URL = "http://127.0.0.1:5001"
+SERVER_URL = "http://127.0.0.1:5002"
 TIMEOUT = 120
 
 
@@ -172,6 +172,23 @@ def navigate(x, y, target_yaw=None):
     if target_yaw is not None:
         payload["target_yaw"] = target_yaw
     return call_sim("/nav", payload)
+
+
+def navigate_path_by_points(path, target_yaw=None):
+    """
+    沿预计算路径导航（绕障）
+
+    Args:
+        path: [{"x": ..., "y": ...}, ...] 路径点列表
+        target_yaw: 终点朝向（度），None 表示不调整
+
+    Returns:
+        dict: {"success": bool, "pos": [...], "yaw": float}
+    """
+    payload = {"path": path}
+    if target_yaw is not None:
+        payload["w"] = target_yaw
+    return call_sim("/nav_path", payload)
 
 
 # ============================================================

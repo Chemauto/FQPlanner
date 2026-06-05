@@ -12,6 +12,8 @@ body 坐标系随 yaw 旋转：
   yaw=90°: body_X = 世界+Y,  body_Y = 世界-X
 """
 
+import sys
+
 import numpy as np
 
 
@@ -102,7 +104,7 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     return get_base_info(env)
 
 
-def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=500):
+def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.15, yaw_threshold=5.0, max_steps=500):
     """
     导航到世界坐标系目标点（全向 PD 控制，x/y/yaw 同时消除误差）
 
@@ -118,11 +120,12 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
         max_steps:      最大步数
 
     Returns:
-        dict: 最终底座状态
+        dict: 最终底座状态，含 "reached" 字段表示是否真正到达目标
     """
     prev_err_x = 0.0
     prev_err_y = 0.0
     prev_err_yaw = 0.0
+    reached = False
 
     for _ in range(max_steps):
         info = get_base_info(env)
@@ -134,9 +137,11 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
 
         if pos_err < pos_threshold:
             if target_yaw is None:
+                reached = True
                 break
             yaw_err = _normalize_angle_deg(target_yaw - info["yaw_deg"])
             if abs(yaw_err) < yaw_threshold:
+                reached = True
                 break
 
         d_err_x = err_x - prev_err_x
@@ -157,13 +162,15 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
 
         move(env, Vx=Vx_body, Vy=Vy_body, Vw=Vw)
 
-    return get_base_info(env)
+    info = get_base_info(env)
+    info["reached"] = reached
+    return info
 
 
 def follow_path(
     env,
     path,
-    w=0,
+    w=None,
     waypoint_threshold=0.18,
     goal_threshold=0.12,
     yaw_threshold=5.0,
@@ -221,21 +228,37 @@ def follow_path(
         Vx_body, Vy_body = _world_to_body(Vx_world, Vy_world, info["yaw_rad"])
         move(env, Vx=Vx_body, Vy=Vy_body, Vw=0.0)
 
-    # Final yaw alignment.
-    for _ in range(300):
-        info = get_base_info(env)
-        err_w = _normalize_angle_deg(float(w) - info["yaw_deg"])
-        if abs(err_w) < yaw_threshold:
-            break
-        Vw = np.clip(Kp_yaw * (err_w / 90.0), -max_turn, max_turn)
-        move(env, Vw=Vw)
-
-    info = get_base_info(env)
-    final_err = float(np.hypot(points[-1][0] - info["pos"][0], points[-1][1] - info["pos"][1]))
+    # Final alignment: combined position+yaw using nav() so there is no
+    # drift from a separate spin-then-correct sequence.
+    target_yaw = float(w) if w is not None else None
+    final_info = nav(
+        env,
+        points[-1][0], points[-1][1],
+        target_yaw=target_yaw,
+        Kp=2.0, Kd=0.2,
+        pos_threshold=goal_threshold,
+        yaw_threshold=yaw_threshold,
+        max_steps=600,
+    )
+    final_err = float(np.hypot(
+        points[-1][0] - final_info["pos"][0],
+        points[-1][1] - final_info["pos"][1],
+    ))
+    if target_yaw is not None:
+        yaw_err = abs(_normalize_angle_deg(target_yaw - final_info["yaw_deg"]))
+        success = final_err < 0.30 and yaw_err < 15.0
+    else:
+        success = final_err < 0.30
+    print(
+        f"[follow_path] 到达误差={final_err:.3f}m yaw_err={abs(_normalize_angle_deg(target_yaw - final_info['yaw_deg'])):.1f}° 成功={success}"
+        if target_yaw is not None else
+        f"[follow_path] 到达误差={final_err:.3f}m 成功={success}",
+        file=sys.stderr,
+    )
     return {
-        "success": final_err < max(goal_threshold * 1.5, 0.2),
-        "pos": info["pos"],
-        "yaw": info["yaw_deg"],
+        "success": success,
+        "pos": final_info["pos"],
+        "yaw": final_info["yaw_deg"],
         "goal_error": final_err,
         "waypoints": len(points),
     }

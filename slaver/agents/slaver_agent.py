@@ -242,7 +242,7 @@ class ToolCallingAgent(MultiStepAgent):
             self._last_status = tool_status or "failure"
             self.last_tool_result = observation
             print(f"[Slaver] 工具执行失败: {tool_name}, 状态: {self._last_status}, 交由 Master 决策", file=sys.stderr)
-            return observation
+            return "final_answer"  # 立即终止本轮，保留 failure 状态交给 Master 决策
 
         # 正常成功路径：设置 _last_status
         if tool_status:
