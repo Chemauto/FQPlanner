@@ -1,152 +1,189 @@
-# FQPlanner
+# FQPlanner_Mujoco 技术说明
 
-基于 LLM 的机器人任务规划与执行系统，采用"大脑-小脑"分层架构。
+本项目是 FQPlanner 的 MuJoCo / XLeRobot 迁移版本。保留 Master、Slaver、Web 控制台和原服务 API 形态，同时将仿真后端改为本地 XLeRobot MuJoCo 模型。
 
 ## 架构
 
-```
-用户 → Web 控制台 (8888) → Master (5000) → Redis → Slaver (MCP 工具调用) → RoboCasa 仿真 (5001)
-```
-
-- **Master** — LLM 任务规划，将自然语言分解为子任务序列
-- **Slaver** — 任务执行，通过 MCP 协议调用机器人工具
-- **serve** — RoboCasa 仿真后端，提供 Flask API
-- **deploy** — Web 控制台，可视化管理界面
-
-通信方式：Master 和 Slaver 通过 Redis Pub/Sub 通信。
-
-## 目录结构
-
-```
-FQPlanner/
-├── master/                    # Master 节点
-│   ├── run.py                 # 启动入口 (端口 5000)
-│   ├── config.yaml            # LLM 模型、Redis、日志配置
-│   ├── agents/
-│   │   ├── agent.py           # GlobalAgent 主控制器
-│   │   ├── planner.py         # 任务分解器
-│   │   └── prompts.py         # Prompt 模板
-│   └── scene/
-│       └── profile.yaml       # 场景物体定义
-│
-├── slaver/                    # Slaver 节点
-│   ├── run.py                 # 启动入口
-│   ├── config.yaml            # 工具匹配、模型、机器人配置
-│   ├── agents/
-│   │   ├── slaver_agent.py    # ToolCallingAgent (ReAct)
-│   │   └── models.py          # 模型调用封装
-│   ├── robot/
-│   │   ├── skill.py           # MCP 入口，注册所有工具
-│   │   └── module/            # 机器人技能模块
-│   │       ├── base.py        # 底盘导航 (navigate_to_target)
-│   │       ├── grasp.py       # 抓取 (grasp_object)
-│   │       ├── place.py       # 放置 (place_on_top, place_object)
-│   │       └── camera.py      # 拍照 (capture_image)
-│   └── tools/
-│       ├── tool_matcher.py    # 语义工具匹配 (sentence-transformers)
-│       ├── memory.py          # 场景记忆
-│       ├── judge.py           # 失败判断
-│       └── monitoring.py      # 日志监控
-│   └── waypoint_manager.py   # 工作点查找（根据物体名匹配最近工作点）
-│
-├── serve/                     # RoboCasa 仿真服务
-│   ├── main.py                # 启动入口 (端口 5001)
-│   ├── sim.py                 # 仿真接口封装 (供 slaver 调用)
-│   ├── tools/
-│   │   ├── arm.py             # 机械臂控制 (grasp, place, move_arm)
-│   │   └── move.py            # 底盘导航 (nav)
-│   ├── service/
-│   │   ├── server.py          # Flask API (命令队列机制)
-│   │   └── web.py             # 内嵌 Web UI
-│   └── scene/
-│       ├── make_scene.py      # 场景构建器 (MyKitchen)
-│       └── config/
-│           ├── objects.yaml   # 可操作物体配置
-│           └── target.yaml    # 放置目标点配置
-│
-├── deploy/                    # Web 控制台
-│   ├── run.py                 # Flask (端口 8888)
-│   └── templates/index.html
-│
-├── nav2/                      # 场景地图与工作点
-│   ├── map_generator.py       # 从仿真/layout 生成栅格地图
-│   ├── export_free_points.py  # 从栅格地图提取可通行点
-│   ├── select_waypoints.py    # 贪心选最优工作点
-│   └── maps/                  # 地图数据 (PGM, YAML, JSON)
-│
-├── .env                       # CLOUD_API_KEY
-└── requirements.txt           # Python 依赖
+```text
+用户
+  -> Web 控制台 (8888)
+  -> Master (5000)
+  -> Redis
+  -> Slaver / MCP 工具
+  -> serve Flask API (5001)
+  -> MuJoCo: XLeRobot + RoboCasa kitchen MJCF
 ```
 
-## 启动顺序
+## 当前后端
+
+`serve/main.py`：
+
+- 创建 `MujocoKitchenEnv`
+- 生成 / 加载 `assets/scene/scene.xml`
+- 启动 Flask API
+- 默认打开 MuJoCo viewer
+- 每帧处理命令队列并 step MuJoCo
+
+`serve/mujoco_backend.py`：
+
+- 读取 `serve/scene/config/layout.yaml`
+- 读取 `serve/scene/config/style.yaml`
+- 读取 `serve/scene/config/objects.yaml`
+- 调用 RoboCasa `KitchenArena`
+- 调用 RoboCasa / robosuite object MJCF 工具生成真实厨房 fixtures 和 objects
+- 合并本地 `assets/xlerobot/xlerobot.xml`
+- 隐藏 collision / registry / backing / eef target 等非视觉调试几何
+- 写出：
+
+```text
+assets/scene/scene.xml
+assets/scene/scene_meta.json
+```
+
+## XLeRobot
+
+当前机器人模型路径：
+
+```text
+assets/xlerobot/xlerobot.xml
+assets/xlerobot/*.stl
+```
+
+注意：
+
+- `assets/xlerobot/` 是有效 mesh 目录，`xlerobot.xml` 和 mesh 文件放在同一级。
+- 不再使用旧的 `assets/xlerobot/meshes/`。
+- 不再使用旧的 `robots/` robosuite 注册目录。
+- 不会启动时从 `/home/fangqi/WorkXCJ/XLeRobot` 同步。
+
+关键 body / actuator：
+
+```text
+body: chassis
+initial pos: [0, 0, 0.035]
+base actuators: slider_actuator_x, slider_actuator_y, hinge_actuator_z
+right gripper bodies: Fixed_Jaw_2, Moving_Jaw_2
+```
+
+## 物体和位置
+
+物体列表来自：
+
+```text
+serve/scene/config/objects.yaml
+```
+
+当前物体：
+
+```text
+pot
+cup
+bowl
+apple
+mug
+sponge
+```
+
+placement 规则：
+
+- 优先使用 `objects.yaml` 中的 `placement`。
+- 通过 fixture 的真实 `pos/size` 估算可放置区域。
+- 没有 placement 时才兜底使用 `waypoints.yaml`。
+- 同一 fixture 上随机物体使用最小距离避让，当前阈值为 `0.35m`。
+
+当前配置：
+
+- `pot`：counter，靠近 stove。
+- `cup`、`bowl`、`apple`、`mug`：counter 随机区域。
+- `sponge`：island 随机区域。
+
+## API
+
+主要端点在 `serve/service/server.py`：
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `/status` | GET | 机械臂状态 |
+| `/base_status` | GET | 底盘状态 |
+| `/objects` | GET | 物体位置 |
+| `/fixtures` | GET | fixtures 信息 |
+| `/scene` | GET | 场景综合信息 |
+| `/scene_state` | GET | 逻辑状态 |
+| `/map_data` | GET | 地图生成数据 |
+| `/grasp` | POST | 抓取物体 |
+| `/place` | POST | 放置物体 |
+| `/move_to` | POST | 移动虚拟末端 |
+| `/nav` | POST | 底盘导航 |
+| `/cmd_vel` | POST | 速度控制 |
+| `/open_gripper` | POST | 打开夹爪 |
+| `/close_gripper` | POST | 关闭夹爪 |
+| `/screenshot` | POST | 截图 |
+
+## 工具层
+
+`serve/tools/move.py`：
+
+- 使用 MuJoCo-GS-Web 的 XLeRobot 真实外观模型。
+- `chassis` 是 `freejoint`；`nav()` 根据世界坐标误差生成 body-frame 速度，再由工具层直接更新 x/y/yaw。
+- body 名称是 `chassis`。
+
+`serve/tools/arm.py`：
+
+- 当前是高层测试抽象。
+- `grasp()` 将物体绑定到虚拟末端。
+- `place()` 通过 freejoint 把物体放到目标位置。
+- 不是真实 IK / 接触抓取。
+
+## 与原 FQPlanner 的兼容性
+
+保留了原规划系统需要的主要 HTTP API 和 Slaver 工具语义，所以原 Master / Slaver 规划链路可以继续使用。
+
+可以直接复用的部分：
+
+- 自然语言任务规划
+- Slaver 工具调用流程
+- `navigate_to_target`
+- `grasp_object`
+- `place_object`
+- `place_on_top`
+- Web 控制台和 Redis 通信
+
+需要注意的部分：
+
+- 原 prompt / 文档里如果写死 PandaOmron 或 RoboCasa 原生 env，需要改成 XLeRobot / MuJoCo。
+- 任务里的物体名必须匹配当前 `objects.yaml`。
+- 真实抓取能力还不是完整物理抓取，目前是高层吸附 / 放置；服务端会分步移动虚拟末端和物体，避免一帧瞬移。
+- 如果要完全复现 RoboCasa 原始 placement sampler，还需要进一步接入 RoboCasa 原生 placement initializer。
+
+## 启动
 
 ```bash
-# 1. Redis
-redis-server
-
-# 2. RoboCasa 仿真后端
 conda activate robocasa
-cd serve && python main.py
-
-# 3. Master
-conda activate FQPlanner
-cd master && python run.py
-
-# 4. Slaver（必须在 Master 之后启动，否则机器人列表为空）
-cd slaver && python run.py
-
-# 5. Web 控制台（可选）
-cd deploy && python run.py
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
+python main.py
 ```
 
-## 关键 API（serve/service/server.py）
+不打开 viewer：
 
-| 端点 | 方法 | 参数 | 说明 |
-|------|------|------|------|
-| `/status` | GET | - | 机械臂状态 |
-| `/base_status` | GET | - | 底盘状态 |
-| `/objects` | GET | - | 所有物体位置和抓取状态 |
-| `/grasp` | POST | `obj_name`, `snap_threshold` | 抓取物体 |
-| `/place` | POST | `obj_name`, `target`, `snap_threshold` | 放置物体到坐标 |
-| `/nav` | POST | `x`, `y`, `w`, `yaw` | 底盘导航 |
-| `/move_to` | POST | `target`, `max_steps`, `pos_threshold` | 移动机械臂 |
-| `/open_gripper` | POST | - | 打开夹爪 |
-| `/close_gripper` | POST | - | 关闭夹爪 |
-| `/screenshot` | POST | `camera_name`, `width`, `height` | 捕获相机截图 (base64 JPEG) |
+```bash
+python main.py --no-viewer
+```
 
-## 关键设计
+完整规划链路：
 
-### 命令队列机制（serve/service/server.py）
-Flask API 和仿真主循环在不同线程。API 收到请求后放入队列，主循环每帧调用 `process_commands()` 处理，避免多线程同时调用 `env.step()`。
+```bash
+redis-server
 
-### 物体抓取/放置（serve/tools/arm.py）
-- 抓取：末端靠近物体 → `set_joint_qpos` 将物体瞬移到末端 → 关闭夹爪
-- 放置：`set_joint_qpos` 将物体瞬移到目标位置 → 打开夹爪
-- 使用 `env.sim.data.set_joint_qpos(joint_name, [x,y,z,qw,qx,qy,qz])` 操作物体
+conda activate FQPlanner
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
+python master/run.py
+python slaver/run.py
+python deploy/run.py
+```
 
-### 仿真接口（serve/sim.py）
-统一的 HTTP 客户端封装，供 slaver 的技能模块调用。通过 `call_sim(endpoint, data)` 访问仿真 API。
+## 开发注意
 
-### MCP 工具注册（slaver/robot/skill.py）
-技能模块通过 `register_tools(mcp)` 函数注册 MCP 工具。Slaver 启动时加载所有模块，工具列表通过 sentence-transformers 做语义匹配。
-
-## 机器人
-
-PandaOmron：Franka Panda 机械臂 + Omron 移动底盘。
-- 12 维动作空间：`[dx,dy,dz, droll,dpitch,dyaw, gripper, base_fwd,base_side,base_yaw, torso, mode]`
-- `action[11] < 0` = 臂模式，`action[11] > 0` = 底盘模式
-
-## 当前场景物体
-
-在 `serve/scene/config/objects.yaml` 中配置：
-- pot（锅）、cup（杯子）、bowl（碗）、apple（苹果）、mug（马克杯）、sponge（海绵）
-- 家具：counter（台面）、island（岛台）、stove（炉灶）、sink（水槽）、cabinet（柜子）
-
-## LLM
-
-使用 MiMo 模型（`mimo-v2.5`，多模态），API Key 从 `.env` 读取。Master 和 Slaver 各自独立调用 LLM。
-
-## 两个 Conda 环境
-
-- `FQPlanner` — Master、Slaver、Web 控制台
-- `robocasa` — RoboCasa 仿真后端（依赖 MuJoCo、robosuite）
+- 修改 `objects.yaml` 后，重启 `serve/main.py` 会重新生成场景 XML。
+- 修改 XLeRobot 模型后，需要直接更新本项目内 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/*.stl`。
+- 不要恢复旧的 `robots/` 目录；当前不通过 robosuite robot registry 加载 XLeRobot。
+- 不要重新创建 `assets/xlerobot/meshes/` 或 `assets/xlerobot/assets/`；当前 robot XML 的 meshdir 是 `./`，生成场景 XML 的 meshdir 是 `../xlerobot/`。

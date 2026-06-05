@@ -1,20 +1,20 @@
 """
 move.py - 机器人底座移动控制
 
-动作空间（12维）：
-  action[7]  → forward（body X 轴，前进/后退）
-  action[8]  → side（body Y 轴，左/右平移，正=左）
-  action[9]  → yaw（原地旋转，正=逆时针）
-  action[11] → 模式（正=底座模式）
-
-body 坐标系随 yaw 旋转：
-  yaw=0°:  body_X = 世界+X,  body_Y = 世界+Y
-  yaw=90°: body_X = 世界+Y,  body_Y = 世界-X
+XLeRobot 差速驱动模型：2 个 motor actuator 通过 tendon 控制轮子。
+ctrl[0] = forward (前进/后退), ctrl[1] = turn (左转/右转)
+与 MuJoCo-GS-Web 实物接口一致。
 """
 
 import sys
 
 import numpy as np
+import mujoco
+
+
+def _normalize_angle(angle):
+    """角度归一化到 [-pi, pi]"""
+    return float(np.arctan2(np.sin(angle), np.cos(angle)))
 
 
 def _normalize_angle_deg(angle):
@@ -26,19 +26,6 @@ def _normalize_angle_deg(angle):
     return angle
 
 
-def _world_to_body(Vx_world, Vy_world, yaw_rad):
-    """
-    世界坐标系速度 → body 坐标系速度
-
-    yaw=0° 时: body_X = 世界+X, body_Y = 世界+Y
-    """
-    c = np.cos(yaw_rad)
-    s = np.sin(yaw_rad)
-    Vx_body = Vx_world * c + Vy_world * s
-    Vy_body = -Vx_world * s + Vy_world * c
-    return Vx_body, Vy_body
-
-
 def get_base_info(env):
     """
     获取底座全部运动相关数据
@@ -46,33 +33,36 @@ def get_base_info(env):
     Returns:
         dict:
             pos:       世界坐标 [x, y, z]
-            yaw_deg:   朝向（度，0-360）
+            yaw_deg:   朝向（度）
             yaw_rad:   朝向（弧度）
-            qpos:      关节值 [forward, side, yaw]
-            qvel:      关节速度 [forward, side, yaw]
-            ctrl:      控制信号 [forward, side, yaw]
+            qpos:      关节值 [x, y, yaw]
+            qvel:      关节速度 [vx, vy, vyaw]
+            ctrl:      控制信号 [forward, turn, ...]
     """
-    base_id = env.sim.model.body_name2id("mobilebase0_base")
+    model = env.sim.model
+    data = env.sim.data
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
 
-    # 世界坐标
-    pos = env.sim.data.body_xpos[base_id].copy()
-    quat = env.sim.data.body_xquat[base_id]  # [w, x, y, z]
+    pos = data.xpos[base_id].copy()
+    quat = data.xquat[base_id]
     w, x, y, z = quat
     yaw_rad = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     yaw_deg = np.rad2deg(yaw_rad)
 
-    # 关节值
-    qpos = env.sim.data.qpos[0:3].copy()
-    qvel = env.sim.data.qvel[0:3].copy()
-    ctrl = env.sim.data.ctrl[7:10].copy()
+    qpos = [float(pos[0]), float(pos[1]), float(yaw_rad)]
+    qvel = [0.0, 0.0, 0.0]
+    if getattr(env, "base_free_joint_id", -1) >= 0:
+        dadr = model.jnt_dofadr[env.base_free_joint_id]
+        qvel = data.qvel[dadr:dadr + 3].copy().tolist()
+    ctrl = data.ctrl[:min(env.model.nu, data.ctrl.size)].copy().tolist()
 
     return {
         "pos": pos.tolist(),
         "yaw_deg": round(float(yaw_deg), 2),
         "yaw_rad": round(float(yaw_rad), 4),
-        "qpos": qpos.tolist(),
-        "qvel": qvel.tolist(),
-        "ctrl": ctrl.tolist(),
+        "qpos": qpos,
+        "qvel": qvel,
+        "ctrl": ctrl,
     }
 
 
@@ -80,33 +70,55 @@ def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     """
     底座速度控制（一步）
 
+    差速驱动：ctrl[0]=forward, ctrl[1]=turn
+    Vy 被忽略（差速驱动物理上不能侧移）
+
     Args:
         env: 环境对象
         Vx:  前进速度 [-1, 1]，body X 轴方向（前进为正）
-        Vy:  侧移速度 [-1, 1]，body Y 轴方向（左移为正）
+        Vy:  忽略（差速驱动不支持侧移）
         Vw:  旋转速度 [-1, 1]，逆时针为正
 
     Returns:
-        dict: 执行后的底座状态（同 get_base_info）
+        dict: 执行后的底座状态
     """
-    Vx = np.clip(Vx, -1.0, 1.0)
-    Vy = np.clip(Vy, -1.0, 1.0)
-    Vw = np.clip(Vw, -1.0, 1.0)
+    forward = np.clip(Vx, -1.0, 1.0)
+    # MuJoCo tendon sign is opposite to the public Vw convention.
+    turn = -np.clip(Vw, -1.0, 1.0)
 
-    action = np.zeros(env.action_dim)
-    action[7] = Vx
-    action[8] = Vy
-    action[9] = Vw
-    action[11] = 1.0  # 底座模式
-
-    env.step(action)
+    env.data.ctrl[0] = forward
+    env.data.ctrl[1] = turn
+    env.step()
 
     return get_base_info(env)
 
 
-def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.15, yaw_threshold=5.0, max_steps=500):
+def stop_base(env):
+    """Stop commanded base motion and clear residual chassis/wheel velocity."""
+    env.data.ctrl[0] = 0.0
+    env.data.ctrl[1] = 0.0
+
+    if getattr(env, "base_free_joint_id", -1) >= 0:
+        dadr = env.model.jnt_dofadr[env.base_free_joint_id]
+        env.data.qvel[dadr:dadr + 6] = 0.0
+
+    for joint_name in ("left_wheel_joint", "right_wheel_joint"):
+        joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if joint_id >= 0:
+            dadr = env.model.jnt_dofadr[joint_id]
+            env.data.qvel[dadr] = 0.0
+
+    env.sim.forward()
+    return get_base_info(env)
+
+
+def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=800):
     """
-    导航到世界坐标系目标点（全向 PD 控制，x/y/yaw 同时消除误差）
+    导航到世界坐标系目标点（差速驱动 PD 控制）
+
+    差速驱动不能侧移，策略：
+    1. 计算到目标的方向偏差 (heading_error)
+    2. 同时输出 forward 和 turn，大偏差时衰减前进速度先转向
 
     Args:
         env:            环境对象
@@ -122,45 +134,61 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.15, yaw_thre
     Returns:
         dict: 最终底座状态，含 "reached" 字段表示是否真正到达目标
     """
-    prev_err_x = 0.0
-    prev_err_y = 0.0
-    prev_err_yaw = 0.0
+    prev_heading_err = 0.0
+    prev_pos_err = 0.0
     reached = False
 
     for _ in range(max_steps):
         info = get_base_info(env)
         x_now, y_now = info["pos"][0], info["pos"][1]
+        yaw_now = info["yaw_rad"]
 
         err_x = x - x_now
         err_y = y - y_now
         pos_err = float(np.hypot(err_x, err_y))
 
+        # 到位后检查朝向
         if pos_err < pos_threshold:
             if target_yaw is None:
                 reached = True
                 break
-            yaw_err = _normalize_angle_deg(target_yaw - info["yaw_deg"])
-            if abs(yaw_err) < yaw_threshold:
+            yaw_err_deg = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+            if abs(yaw_err_deg) < yaw_threshold:
                 reached = True
                 break
+            # 原地转向到目标朝向
+            Vw = np.clip(Kp * (yaw_err_deg / 90.0), -1.0, 1.0)
+            move(env, Vx=0.0, Vw=Vw)
+            continue
 
-        d_err_x = err_x - prev_err_x
-        d_err_y = err_y - prev_err_y
-        prev_err_x = err_x
-        prev_err_y = err_y
+        # 计算到目标的世界方向
+        angle_to_target = np.arctan2(err_y, err_x)
+        heading_err = _normalize_angle(angle_to_target - yaw_now)
 
-        Vx_world = np.clip(Kp * err_x + Kd * d_err_x, -1.0, 1.0)
-        Vy_world = np.clip(Kp * err_y + Kd * d_err_y, -1.0, 1.0)
-        Vx_body, Vy_body = _world_to_body(Vx_world, Vy_world, info["yaw_rad"])
+        # PD 控制
+        d_heading = heading_err - prev_heading_err
+        prev_heading_err = heading_err
+        d_pos = pos_err - prev_pos_err
+        prev_pos_err = pos_err
 
-        Vw = 0.0
-        if target_yaw is not None:
-            err_yaw = _normalize_angle_deg(target_yaw - info["yaw_deg"])
-            d_err_yaw = err_yaw - prev_err_yaw
-            prev_err_yaw = err_yaw
-            Vw = np.clip(Kp * (err_yaw / 90.0) + Kd * (d_err_yaw / 90.0), -1.0, 1.0)
+        turn = np.clip(Kp * heading_err + Kd * d_heading, -1.0, 1.0)
 
-        move(env, Vx=Vx_body, Vy=Vy_body, Vw=Vw)
+        # 前进速度：距离越远越快，朝向偏差大时衰减
+        forward = np.clip(Kp * pos_err, -1.0, 1.0)
+        forward *= max(0.0, np.cos(heading_err))
+        forward = np.clip(forward + Kd * d_pos * 0.1, -1.0, 1.0)
+
+        move(env, Vx=forward, Vw=turn)
+
+    # 最终朝向对齐
+    if target_yaw is not None:
+        for _ in range(200):
+            info = get_base_info(env)
+            yaw_err_deg = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+            if abs(yaw_err_deg) < yaw_threshold:
+                break
+            Vw = np.clip(Kp * (yaw_err_deg / 90.0), -1.0, 1.0)
+            move(env, Vx=0.0, Vw=Vw)
 
     info = get_base_info(env)
     info["reached"] = reached

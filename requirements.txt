@@ -13,6 +13,7 @@ torch==2.9.0
 sentence-transformers==2.5.1
 scikit-learn==1.5.2
 numpy==2.2.5
+mujoco>=3.2
 
 # --- Data/Config ---
 PyYAML==6.0.2
@@ -25,4 +26,9 @@ psutil==7.0.0
 # --- Image ---
 pillow==11.2.1
 
+# 核心依赖
+pyserial
 
+# 电机驱动依赖 (来自 motors/ 模块)
+deepdiff
+tqdm

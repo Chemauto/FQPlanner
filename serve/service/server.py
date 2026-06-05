@@ -4,20 +4,38 @@ server.py - Flask API 服务
 """
 
 import os
+import sys
 import time
 import threading
 import numpy as np
-from flask import Flask, request, jsonify, send_file
+import mujoco
+import yaml
+from pathlib import Path
+from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 
 from tools.arm import (
     get_arm_info, get_obj_pos,
-    move_arm, grasp, place,
+    move_arm,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, follow_path
-from utils.utils import get_fixture_detail
-from scene.scene_memory import get_all_locations
+from tools.move import get_base_info, nav, move, stop_base
+from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+try:
+    from serve_real.base_bridge import start_move_duration, stop_real_base
+except Exception as e:
+    print(f"[real_base] bridge 未启用: {e}", flush=True)
+
+    def start_move_duration(vx, duration, vw=0.0):
+        return None
+
+    def stop_real_base():
+        return None
 
 app = Flask(__name__)
 CORS(app)
@@ -25,6 +43,7 @@ CORS(app)
 _env_holder = {"env": None}
 _cmd_queue = []      # 命令队列
 _results = {}        # 命令结果缓存
+_active_command = None
 _queue_lock = threading.Lock()
 _env_lock = threading.RLock()
 _base_cmd = {
@@ -33,8 +52,12 @@ _base_cmd = {
     "Vw": 0.0,
     "expires_at": 0.0,
     "last_log_at": 0.0,
+    "was_active": False,
 }
 _base_status_cache = {}
+
+NAV_SUBSTEPS = 1
+ARM_STEP = 0.025
 
 # 录制状态
 _recording = {
@@ -48,13 +71,46 @@ _recording = {
 }
 
 RECORD_CAMERAS = [
-    ("overhead_cam",       "Top",   False),
-    ("side_cam",           "Side",  True),
-    ("robot0_frontview",   "Front", True),
-    ("robot0_eye_in_hand", "Eye",   False),
+    ("overhead_cam",   "Top",         False),
+    ("head_cam",       "Head",        False),
+    ("right_arm_cam",  "Right wrist", False),
+    ("left_arm_cam",   "Left wrist",  False),
 ]
 
 _video_dir = os.path.join(os.path.dirname(__file__), "..", "videos")
+_camera_config_cache = None
+
+
+def _camera_config():
+    global _camera_config_cache
+    if _camera_config_cache is None:
+        scene_dir = "scene"
+        env = _get_env()
+        if env is not None:
+            scene_dir = env.scene_dir
+        path = os.path.join(os.path.abspath(scene_dir), "config", "camera.yaml")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                _camera_config_cache = yaml.safe_load(f) or {}
+        else:
+            _camera_config_cache = {}
+    return _camera_config_cache
+
+
+def _screenshot_defaults():
+    return (_camera_config().get("screenshot", {}) or {})
+
+
+def _preview_config():
+    return (_camera_config().get("preview", {}) or {})
+
+
+def _camera_labels():
+    return {
+        name: values.get("label", name)
+        for name, values in (_camera_config().get("cameras", {}) or {}).items()
+        if isinstance(values, dict)
+    }
 
 
 def _render_combined_frame(env, view_w, view_h):
@@ -77,6 +133,24 @@ def _render_combined_frame(env, view_w, view_h):
     top = np.hstack([panels[0], panels[1]])
     bottom = np.hstack([panels[2], panels[3]])
     return np.vstack([top, bottom])
+
+
+def _render_camera_preview(env, camera_names, width, height):
+    from PIL import Image, ImageDraw
+    labels = _camera_labels()
+    panels = []
+    for name in camera_names:
+        try:
+            img = env.sim.render(width, height, camera_name=name)
+        except Exception:
+            img = np.zeros((height, width, 3), dtype=np.uint8)
+        panel = Image.fromarray(img)
+        label = labels.get(name, name)
+        draw = ImageDraw.Draw(panel)
+        draw.rectangle([0, 0, len(label) * 8 + 12, 20], fill=(0, 0, 0))
+        draw.text((5, 3), label, fill=(255, 255, 255))
+        panels.append(panel)
+    return panels
 
 
 def try_record_frame():
@@ -104,8 +178,14 @@ def get_lock():
     return _env_lock
 
 
+def has_active_base_command():
+    """当前是否有正在执行的底盘命令 (nav/cmd_vel/move_duration)"""
+    return _active_command is not None and _active_command.get("type") in ("nav", "cmd_vel", "move_duration")
+
+
 def set_base_velocity(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
     """Store the latest velocity command for the main simulation loop."""
+    print(f"[set_base_velocity] Vx={Vx}, Vw={Vw}, timeout={timeout}", flush=True)
     with _queue_lock:
         _base_cmd["Vx"] = float(Vx)
         _base_cmd["Vy"] = float(Vy)
@@ -120,17 +200,24 @@ def set_base_velocity(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
             _base_cmd["last_log_at"] = now
 
 
-def get_base_action(action_dim):
-    """Build the current base action, expiring to zero if cmd_vel stops."""
-    action = np.zeros(action_dim)
+def get_base_action():
+    """返回当前底座速度命令 [forward, turn]，不包含手臂 ctrl。
+
+    cmd_vel 过期后返回 None，主循环不写 ctrl，保留 viewer 手动控制值。
+    过期瞬间返回一次 [0, 0] 以确保机器人停止。
+    """
     with _queue_lock:
         if time.time() > _base_cmd["expires_at"]:
-            return action
-        action[7] = np.clip(_base_cmd["Vx"], -1.0, 1.0)
-        action[8] = np.clip(_base_cmd["Vy"], -1.0, 1.0)
-        action[9] = np.clip(_base_cmd["Vw"], -1.0, 1.0)
-        action[11] = 1.0
-    return action
+            if _base_cmd["was_active"]:
+                _base_cmd["was_active"] = False
+                print("[get_base_action] cmd_vel 过期，返回停止信号 [0,0]", flush=True)
+                return np.zeros(2)
+            return None
+        _base_cmd["was_active"] = True
+        action = np.zeros(2)
+        action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)   # forward
+        action[1] = -np.clip(_base_cmd["Vw"], -1.0, 1.0)   # turn
+        return action
 
 
 def _get_env():
@@ -142,6 +229,16 @@ def _read_base_info(env):
     _base_status_cache.clear()
     _base_status_cache.update(_np_to_list(info))
     return info
+
+
+def _is_body_descendant(model, body_id, ancestor_id):
+    current = int(body_id)
+    ancestor_id = int(ancestor_id)
+    while current > 0:
+        if current == ancestor_id:
+            return True
+        current = int(model.body_parentid[current])
+    return False
 
 
 def _np_to_list(obj):
@@ -179,27 +276,188 @@ def submit_command(cmd_type, params):
     return result
 
 
+def _finish_command(cmd, result):
+    global _active_command
+    if cmd.get("type") in ("nav", "cmd_vel", "move_duration"):
+        env = _get_env()
+        if env is not None:
+            try:
+                _read_base_info(env)
+            except Exception:
+                pass
+    with _queue_lock:
+        _results[cmd["id"]] = result
+    cmd["event"].set()
+    _active_command = None
+
+
+def _normalize_angle_deg(angle):
+    return (float(angle) + 180.0) % 360.0 - 180.0
+
+
+def _step_active_command(env):
+    cmd = _active_command
+    if cmd is None:
+        return False
+    try:
+        cmd_type = cmd["type"]
+        state = cmd["state"]
+        if cmd_type == "nav":
+            for _ in range(NAV_SUBSTEPS):
+                info = get_base_info(env)
+                x_now, y_now = info["pos"][0], info["pos"][1]
+                yaw_now = info["yaw_rad"]
+                err_x = state["x"] - x_now
+                err_y = state["y"] - y_now
+                pos_err = float(np.hypot(err_x, err_y))
+                yaw_err = 0.0
+                yaw_done = state["target_yaw"] is None
+                if state["target_yaw"] is not None:
+                    yaw_err = _normalize_angle_deg(state["target_yaw"] - info["yaw_deg"])
+                    yaw_done = abs(yaw_err) < state["yaw_threshold"]
+                if pos_err < state["pos_threshold"] and yaw_done:
+                    final = get_base_info(env)
+                    _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
+                    return True
+                if state["step"] >= state["max_steps"]:
+                    final = get_base_info(env)
+                    _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
+                    return True
+                # 差速驱动 PD 控制
+                if pos_err >= state["pos_threshold"]:
+                    angle_to_target = np.arctan2(err_y, err_x)
+                    heading_err = np.arctan2(np.sin(angle_to_target - yaw_now), np.cos(angle_to_target - yaw_now))
+                    Kp = state["kp"]
+                    turn = np.clip(Kp * heading_err, -1.0, 1.0)
+                    forward = np.clip(Kp * pos_err, -0.8, 0.8)
+                    forward *= max(0.0, np.cos(heading_err))
+                    move(env, Vx=forward, Vw=turn)
+                else:
+                    Vw = np.clip(2.0 * (yaw_err / 90.0), -1.0, 1.0)
+                    move(env, Vx=0.0, Vw=Vw)
+                state["step"] += 1
+            return True
+
+        if cmd_type == "move_duration":
+            now = time.time()
+            if now >= state["end_time"]:
+                print(f"[move_duration] 时间到，发送停止信号", flush=True)
+                # timeout 需要 >0，让主循环 get_base_action 有机会设置 was_active=True
+                # 然后返回 [0,0] 停止信号；过期后自动变 None 不再干预
+                set_base_velocity(Vx=0.0, Vw=0.0, timeout=1.0)
+                stop_base(env)
+                stop_real_base()
+                final = get_base_info(env)
+                _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
+                return True
+            move(env, Vx=state["vx"], Vw=state["vw"])
+            return True
+
+        if cmd_type == "grasp":
+            obj_name = state["obj_name"]
+            if obj_name not in env.obj_body_id:
+                _finish_command(cmd, {"success": False, "result": f"物体 {obj_name} 不存在"})
+                return True
+            if state["phase"] == "approach":
+                target = env.get_object_pos(obj_name).copy()
+                target[2] += 0.04
+                if _move_virtual_ee(env, target):
+                    env.grasped_object = obj_name
+                    state["phase"] = "lift"
+                    state["lift_target"] = target + np.array([0.0, 0.0, 0.20])
+                return True
+            if state["phase"] == "lift":
+                if _move_virtual_ee(env, state["lift_target"]):
+                    try:
+                        move_object(obj_name, "robot_hand")
+                    except Exception as e:
+                        print(f"[SceneMemory] 更新失败: {e}", flush=True)
+                    _finish_command(cmd, {"success": True, "result": f"成功抓取 {obj_name}"})
+                return True
+
+        if cmd_type == "place":
+            obj_name = state["obj_name"]
+            if obj_name not in env.obj_body_id:
+                _finish_command(cmd, {"success": False, "result": f"物体 {obj_name} 不存在"})
+                return True
+            if state["phase"] == "move":
+                if env.grasped_object != obj_name:
+                    env.grasped_object = obj_name
+                if _move_virtual_ee(env, state["target_pos"]):
+                    env.set_object_pos(obj_name, state["target_pos"])
+                    env.grasped_object = None
+                    state["phase"] = "retreat"
+                    state["retreat_target"] = state["target_pos"] + np.array([0.0, 0.0, 0.20])
+                return True
+            if state["phase"] == "retreat":
+                if _move_virtual_ee(env, state["retreat_target"]):
+                    try:
+                        waypoint_name = coords_to_waypoint(state["target_pos"].tolist())
+                        move_object(obj_name, waypoint_name)
+                    except Exception as e:
+                        print(f"[SceneMemory] 更新失败: {e}", flush=True)
+                    _finish_command(cmd, {"success": True, "result": f"成功放置 {obj_name}"})
+                return True
+    except Exception as e:
+        if cmd is not None and cmd.get("type") == "move_duration":
+            stop_real_base()
+        _finish_command(cmd, {"success": False, "error": str(e)})
+        return True
+    return False
+
+
+def _move_virtual_ee(env, target):
+    target = np.asarray(target, dtype=float)
+    delta = target - env.virtual_ee_pos
+    dist = float(np.linalg.norm(delta))
+    if dist <= ARM_STEP:
+        env.virtual_ee_pos = target.copy()
+        if env.grasped_object:
+            env.set_object_pos(env.grasped_object, env.virtual_ee_pos)
+        return True
+    env.virtual_ee_pos = env.virtual_ee_pos + delta / dist * ARM_STEP
+    if env.grasped_object:
+        env.set_object_pos(env.grasped_object, env.virtual_ee_pos)
+    return False
+
+
 def process_commands(env):
     """
     主循环调用：处理队列中的所有命令
     在主循环线程中执行，不需要锁
     """
-    with _queue_lock:
-        cmds = list(_cmd_queue)
-        _cmd_queue.clear()
+    global _active_command
 
-    for cmd in cmds:
+    if _step_active_command(env):
+        return
+
+    with _queue_lock:
+        cmd = _cmd_queue.pop(0) if _cmd_queue else None
+    if cmd is None:
+        return
+
+    for cmd in [cmd]:
         cmd_id = cmd["id"]
         cmd_type = cmd["type"]
         params = cmd["params"]
         try:
             with _env_lock:
                 if cmd_type == "grasp":
-                    success = grasp(env, **params)
-                    result = {"success": success}
+                    _active_command = {
+                        **cmd,
+                        "state": {"obj_name": params["obj_name"], "phase": "approach"},
+                    }
+                    return
                 elif cmd_type == "place":
-                    success = place(env, **params)
-                    result = {"success": success}
+                    _active_command = {
+                        **cmd,
+                        "state": {
+                            "obj_name": params["obj_name"],
+                            "target_pos": np.asarray(params["target_pos"], dtype=float),
+                            "phase": "move",
+                        },
+                    }
+                    return
                 elif cmd_type == "move_to":
                     reached = move_arm(env, **params)
                     info = get_arm_info(env)
@@ -222,24 +480,58 @@ def process_commands(env):
                     from PIL import Image as PILImage
                     from io import BytesIO
                     import base64
-                    cam = params.get("camera_name", "overhead_cam")
-                    w = params.get("width", 640)
-                    h = params.get("height", 480)
+                    defaults = _screenshot_defaults()
+                    cam = params.get("camera_name") or defaults.get("default_camera", "overhead_cam")
+                    w = params.get("width") or defaults.get("width", 640)
+                    h = params.get("height") or defaults.get("height", 480)
+                    quality = int(defaults.get("jpeg_quality", 80))
                     img = env.sim.render(w, h, camera_name=cam)
                     if img is None:
                         result = {"success": False, "result": f"相机 '{cam}' 渲染失败"}
                     else:
                         pil_img = PILImage.fromarray(img)
                         buf = BytesIO()
-                        pil_img.save(buf, format="JPEG", quality=80)
+                        pil_img.save(buf, format="JPEG", quality=quality)
                         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-                        result = {"success": True, "image": img_b64, "camera": cam}
+                        result = {
+                            "success": True,
+                            "image": img_b64,
+                            "camera": cam,
+                            "width": int(w),
+                            "height": int(h),
+                        }
+                elif cmd_type == "camera_preview":
+                    from io import BytesIO
+                    import base64
+                    from PIL import Image
+                    preview = _preview_config()
+                    camera_name = params.get("camera_name")
+                    camera_names = [camera_name] if camera_name else preview.get("cameras", ["overhead_cam"])
+                    w = int(params.get("width") or preview.get("width", 320))
+                    h = int(params.get("height") or preview.get("height", 240))
+                    quality = int(preview.get("jpeg_quality", 80))
+                    panels = _render_camera_preview(env, camera_names, w, h)
+                    if len(panels) == 1:
+                        image = panels[0]
+                    else:
+                        while len(panels) < 4:
+                            panels.append(Image.new("RGB", (w, h), (0, 0, 0)))
+                        image = Image.new("RGB", (w * 2, h * 2))
+                        for idx, panel in enumerate(panels[:4]):
+                            image.paste(panel, ((idx % 2) * w, (idx // 2) * h))
+                    buf = BytesIO()
+                    image.save(buf, format="JPEG", quality=quality)
+                    result = {
+                        "success": True,
+                        "image": base64.b64encode(buf.getvalue()).decode("utf-8"),
+                        "camera": camera_name,
+                    }
                 else:
                     result = {"error": f"未知命令: {cmd_type}"}
         except Exception as e:
             result = {"error": str(e)}
 
-        if cmd_type in ("nav", "nav_path", "cmd_vel"):
+        if cmd_type in ("nav", "cmd_vel"):
             try:
                 _read_base_info(env)
             except Exception:
@@ -299,12 +591,11 @@ def api_fixtures():
         return jsonify({"error": "仿真器未初始化"}), 503
     result = {}
     for name, fixture in env.fixtures.items():
-        try:
-            body_id = env.sim.model.body_name2id(fixture.root_body)
-            pos = env.sim.data.body_xpos[body_id].copy()
-            result[name] = {"pos": pos.tolist()}
-        except Exception:
-            pass
+        result[name] = {
+            "pos": list(fixture.pos),
+            "size": list(fixture.size),
+            "type": fixture.type,
+        }
     return jsonify(result)
 
 @app.route("/scene", methods=["GET"])
@@ -324,13 +615,12 @@ def api_scene():
         # 家具
         fixtures = {}
         for name in env.fixtures:
-            detail = get_fixture_detail(env, name)
-            for fname, info in detail.items():
-                fixtures[fname] = {
-                    "pos": info["pos"].tolist(),
-                    "size": info["size"].tolist(),
-                    "type": info["type"],
-                }
+            fxtr = env.fixtures[name]
+            fixtures[name] = {
+                "pos": np.asarray(fxtr.pos, dtype=float).tolist(),
+                "size": np.asarray(fxtr.size, dtype=float).tolist(),
+                "type": fxtr.type,
+            }
 
         # 机器人
         arm_info = get_arm_info(env)
@@ -491,6 +781,21 @@ def api_move_to():
     return jsonify(submit_command("move_to", params))
 
 
+@app.route("/move_duration", methods=["POST"])
+def api_move_duration():
+    """以指定速度持续移动底盘一段时间（走命令队列）"""
+    data = request.json or {}
+    vx = float(data.get("vx", 0.0))
+    vw = float(data.get("vw", 0.0))
+    duration = float(data.get("duration", 1.0))
+
+    if duration <= 0:
+        return jsonify({"error": "duration 必须大于 0"}), 400
+
+    params = {"vx": vx, "vw": vw, "duration": duration}
+    return jsonify(submit_command("move_duration", params))
+
+
 @app.route("/nav", methods=["POST"])
 def api_nav():
     data = request.json or {}
@@ -542,6 +847,7 @@ def api_nav_path():
     return jsonify(submit_command("nav_path", params))
 
 
+
 @app.route("/open_gripper", methods=["POST"])
 def api_open_gripper():
     return jsonify(submit_command("open_gripper", {}))
@@ -576,13 +882,20 @@ def api_map_data():
         model = env.sim.model
         data = env.sim.data
 
-        # 排除的 body（机器人相关）
+        # 排除机器人 body。XLeRobot 的许多子 body 名称不是稳定的
+        # "robot/arm" 前缀，必须从 chassis 子树排除，避免地图把机器人自身
+        # 投影成静态障碍物。
         robot_bodies = set()
+        chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
         for i in range(model.nbody):
-            name = (model.body_id2name(i) or "").lower()
-            if any(k in name for k in ("robot", "panda", "omron", "mobilebase",
-                                        "gripper", "finger", "hand", "torso",
-                                        "camera", "link", "joint", "site")):
+            name = (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) or "").lower()
+            if chassis_id >= 0 and _is_body_descendant(model, i, chassis_id):
+                robot_bodies.add(i)
+            elif any(k in name for k in (
+                "chassis", "arm", "jaw", "wrist", "pitch", "elbow", "rotation",
+                "servo", "motor", "wheel", "base_plate", "head", "battery",
+                "standoff", "mount",
+            )):
                 robot_bodies.add(i)
 
         # 收集障碍物的 2D 矩形 (col_min, row_min, col_max, row_max)
@@ -592,7 +905,7 @@ def api_map_data():
             if body_id in robot_bodies:
                 continue
 
-            name = (model.geom_id2name(i) or "").lower()
+            name = (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i) or "").lower()
             if any(k in name for k in ("floor", "ground", "ceiling", "skybox", "visual", "light")):
                 continue
 
@@ -647,12 +960,36 @@ def api_map_data():
 def api_screenshot():
     """从指定相机捕获单帧截图，返回 base64 编码的 JPEG 图像"""
     data = request.json or {}
+    defaults = _screenshot_defaults()
     params = {
-        "camera_name": data.get("camera_name", "overhead_cam"),
-        "width": data.get("width", 640),
-        "height": data.get("height", 480),
+        "camera_name": data.get("camera_name") or defaults.get("default_camera", "overhead_cam"),
+        "width": data.get("width") or defaults.get("width", 640),
+        "height": data.get("height") or defaults.get("height", 480),
     }
     return jsonify(submit_command("screenshot", params))
+
+
+@app.route("/camera/status", methods=["GET"])
+def api_camera_status():
+    """返回相机渲染配置"""
+    return jsonify({
+        "success": True,
+        "config": _camera_config(),
+    })
+
+
+@app.route("/camera/latest", methods=["GET"])
+def api_camera_latest():
+    """按需渲染相机图片；默认四宫格，?camera=name 返回单路相机"""
+    result = submit_command("camera_preview", {
+        "camera_name": request.args.get("camera"),
+        "width": request.args.get("width"),
+        "height": request.args.get("height"),
+    })
+    if not result.get("success"):
+        return jsonify(result), 500
+    import base64
+    return Response(base64.b64decode(result["image"]), mimetype="image/jpeg")
 
 
 # ============================================================

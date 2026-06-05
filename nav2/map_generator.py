@@ -1,5 +1,5 @@
 """
-map_generator.py - 从 RoboCasa 仿真生成 Nav2 占据地图
+map_generator.py - 从 XLeRobot MuJoCo 仿真生成 Nav2 占据地图
 
 两种模式:
   1. 运行时模式（推荐）: 调用 Flask /map_data 端点，从 MuJoCo 仿真读取实际障碍物
@@ -250,6 +250,17 @@ def apply_inflation(img, radius_m):
         return img
 
 
+def clear_robot_footprint(img, radius_m):
+    if radius_m <= 0:
+        return img
+    base = fetch_base_status()
+    if not base or "pos" not in base:
+        return img
+    draw = ImageDraw.Draw(img)
+    draw_circle(draw, base["pos"][0], base["pos"][1], radius_m, fill=FREE)
+    return img
+
+
 def generate_from_sim(
     output_dir,
     inflate_radius=0.0,
@@ -299,6 +310,9 @@ def generate_from_sim(
     # 转 PGM 图像
     img = Image.new("L", (w, h))
     img.putdata(grid)
+
+    # 保险：即使仿真端过滤遗漏，也清理机器人初始 footprint。
+    img = clear_robot_footprint(img, clear_robot_radius)
 
     # 膨胀
     img = apply_inflation(img, inflate_radius)

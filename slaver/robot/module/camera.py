@@ -1,5 +1,5 @@
 """
-摄像头模块 - 双相机截图 + VLM 综合分析
+摄像头模块 - 多相机截图 + VLM 综合分析
 """
 
 import json
@@ -16,7 +16,7 @@ load_dotenv(os.path.join(_project_root, '.env'))
 
 import yaml
 
-from serve.sim import capture_screenshot
+from serve.service.client import capture_screenshot
 
 # ============================================================
 # 从 config.yaml 加载配置
@@ -28,7 +28,20 @@ with open(_config_path) as _f:
 _camera_cfg = _cfg.get("camera", {})
 _vlm_cfg = _camera_cfg.get("vlm", {})
 
-CAMERAS = _camera_cfg.get("cameras", ["robot0_frontview", "robot0_eye_in_hand"])
+_serve_camera_config_path = os.path.join(
+    _project_root, "serve", "scene", "config", "camera.yaml"
+)
+_serve_camera_cfg = {}
+if os.path.exists(_serve_camera_config_path):
+    with open(_serve_camera_config_path, "r", encoding="utf-8") as _f:
+        _serve_camera_cfg = yaml.safe_load(_f) or {}
+
+CAMERAS = (
+    (_serve_camera_cfg.get("preview") or {}).get("cameras")
+    or list((_serve_camera_cfg.get("cameras") or {}).keys())
+    or _camera_cfg.get("cameras")
+    or ["overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam"]
+)
 VLM_MODEL = _vlm_cfg.get("model", "mimo-v2.5")
 VLM_API_BASE = _vlm_cfg.get("api_base", "https://api.xiaomimimo.com/v1")
 VLM_MAX_TOKENS = _vlm_cfg.get("max_tokens", 1000)
@@ -40,7 +53,7 @@ VLM_MAX_TOKENS = _vlm_cfg.get("max_tokens", 1000)
 
 def _call_vlm(images, context=""):
     """
-    双图 VLM 分析
+    多图 VLM 分析
 
     Args:
         images: {camera_name: base64_str}
@@ -53,8 +66,8 @@ def _call_vlm(images, context=""):
         if context:
             prompt = f"""你是机器人场景监控系统。当前任务：{context}
 
-以下是两张来自机器人前视和手眼相机的场景图片。
-请综合两张图片信息，判断任务执行后场景是否符合预期。
+以下是来自机器人不同视角的场景图片。
+请综合所有图片信息，判断任务执行后场景是否符合预期。
 - normal：场景状态符合任务预期
 - abnormal：场景状态不符合预期、有异常
 
@@ -62,8 +75,8 @@ def _call_vlm(images, context=""):
         else:
             prompt = """你是机器人场景监控系统。
 
-以下是两张来自机器人前视和手眼相机的场景图片。
-请综合两张图片分析场景是否正常。
+以下是来自机器人不同视角的场景图片。
+请综合所有图片分析场景是否正常。
 - normal：物体在预期位置，没有异常
 - abnormal：物体位置不对、有障碍物、场景异常
 
@@ -111,7 +124,7 @@ def register_tools(mcp):
 
     @mcp.tool()
     async def capture_image(context: str = "") -> str:
-        """拍照：从机器人前视和手眼两个相机捕获当前场景，用 VLM 综合分析。
+        """拍照：从机器人多个相机捕获当前场景，用 VLM 综合分析。
         注意：每个任务最多拍照1次。拍照后必须立即执行具体操作（导航/抓取/放置），不要连续拍照。
 
         Args:
@@ -146,4 +159,4 @@ def register_tools(mcp):
         )
         return json.dumps([response, {"_status": "none"}])
 
-    print("[camera.py] 摄像头模块已注册 (双相机 VLM)", file=sys.stderr)
+    print(f"[camera.py] 摄像头模块已注册 ({len(CAMERAS)} 相机 VLM): {CAMERAS}", file=sys.stderr)

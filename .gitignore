@@ -180,4 +180,4 @@ cython_debug/
 .agents
 .claude
 .codex
-serve/videos/
+serve/videos/dump.rdb

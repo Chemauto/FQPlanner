@@ -1,137 +1,123 @@
-# FQPlanner
+# FQPlanner_Mujoco
 
-FQPlanner 是基于"大脑-小脑"分层架构的机器人操作系统，通过大语言模型实现任务规划与执行。
+FQPlanner_Mujoco 是 FQPlanner 的 MuJoCo / XLeRobot 迁移版本。当前目标是保留原来的 Master / Slaver / Web / 场景配置和规划调用方式，同时把仿真后端换成本地 XLeRobot 机器人模型。
 
-**核心功能**
-- **任务规划** — LLM 自动分解复杂任务为子任务序列
-- **仿真执行** — RoboCasa 物理仿真后端，支持导航、抓取、放置等操作
-- **Web 控制台** — 可视化任务发布、场景查看、视频录制
-- **MCP 工具调用** — Slaver 通过 MCP 协议调用机器人技能模块
+## 当前状态
 
-## 快速入门
+- 机器人模型：使用本项目内的 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/*.stl`。
+- 厨房场景：通过 RoboCasa 的 `KitchenArena + ManipulationTask` 导出真实厨房 fixtures / object MJCF，再合并到 XLeRobot MuJoCo XML。
+- 运行后端：`serve/main.py` 启动 MuJoCo viewer 和 Flask API，端口 `5001`。
+- 项目自包含 XLeRobot 文件，不会启动时从 `/home/fangqi/WorkXCJ/XLeRobot` 同步。
+- `serve/scene/config/objects.yaml` 控制有哪些物体和 placement；cup、bowl、apple、mug 当前都在 counter 上随机采样，并带最小距离避让。
 
-### 1. 环境要求
+## 快速启动
 
-- Python 3.10+
-- Conda
-- Redis
-- RoboCasa（仿真后端，依赖 MuJoCo / robosuite）
-
-### 2. 安装
+### 1. 启动仿真后端
 
 ```bash
-git clone https://github.com/Chemauto/FQPlanner.git
-cd FQPlanner
-
-# 创建 FQPlanner 环境（Master / Slaver / Web 控制台）
-conda create -n FQPlanner python=3.10
-conda activate FQPlanner
-pip install -r requirements.txt
-
-# RoboCasa 环境需单独安装，参考 robocasa 文档
+conda activate robocasa
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
+python main.py
 ```
 
-### 3. 配置 API Key
+启动后会打开 MuJoCo viewer，并启动 API：
 
-新建 `.env` 文件：
-
-```bash
-CLOUD_API_KEY=sk-xxxxxxxxxxxxxxx
+```text
+http://127.0.0.1:5001
 ```
 
-当前使用阿里云 Qwen 模型（`qwen3.6-35b-a3b`），配置在 `master/config.yaml` 和 `slaver/config.yaml` 中。
-
-### 4. 启动系统
-
-按顺序启动，需要 3-4 个终端：
+只启动 API、不打开 viewer：
 
 ```bash
-# 终端 1 — Redis
+python main.py --no-viewer
+```
+
+### 2. 启动规划系统
+
+```bash
 redis-server
 
-# 终端 2 — RoboCasa 仿真后端（robocasa 环境）
-conda activate robocasa
-cd serve && python main.py
-
-# 终端 3 — Master（FQPlanner 环境）
 conda activate FQPlanner
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python master/run.py
-
-# 终端 4 — Slaver（必须在 Master 之后启动）
-conda activate FQPlanner
 python slaver/run.py
-
-# 终端 5 — Web 控制台（可选）
-conda activate FQPlanner
 python deploy/run.py
 ```
 
-### 5. 发布任务
+Web 控制台：
 
-访问 http://127.0.0.1:8888 ，输入自然语言任务：
-
-- "抓取苹果"
-- "把杯子放到岛台上"
-- "导航到水槽旁边"
-
-## 项目结构
-
-```
-FQPlanner/
-├── master/                    # Master 节点（任务规划）
-│   ├── run.py                 #   启动脚本 (端口 5000)
-│   ├── config.yaml            #   LLM、Redis、日志配置
-│   ├── agents/                #   规划 Agent、Prompt 模板
-│   └── scene/profile.yaml     #   场景物体定义
-│
-├── slaver/                    # Slaver 节点（任务执行）
-│   ├── run.py                 #   启动脚本
-│   ├── config.yaml            #   工具匹配、模型、机器人配置
-│   ├── agents/                #   执行 Agent (ReAct)
-│   ├── robot/
-│   │   ├── skill.py           #     MCP 入口，注册所有工具
-│   │   └── module/            #     技能模块（base / grasp / place）
-│   └── tools/                 #   工具匹配、场景记忆、失败判断
-│
-├── serve/                     # RoboCasa 仿真服务
-│   ├── main.py                #   启动脚本 (端口 5001)
-│   ├── sim.py                 #   仿真接口封装
-│   ├── tools/arm.py           #   机械臂控制
-│   ├── tools/move.py          #   底盘导航
-│   ├── service/server.py      #   Flask API
-│   └── scene/                 #   场景配置
-│
-├── deploy/                    # Web 控制台
-│   ├── run.py                 #   Flask (端口 8888)
-│   └── templates/index.html   #   前端页面
-│
-├── .env                       # API Key
-└── requirements.txt           # Python 依赖
+```text
+http://127.0.0.1:8888
 ```
 
-## Conda 环境
+## 关键路径
 
-| 环境 | 用途 | 说明 |
-|------|------|------|
-| `FQPlanner` | Master、Slaver、Web 控制台 | flask, redis, requests, pyyaml, sentence-transformers |
-| `robocasa` | RoboCasa 仿真后端 | robosuite, mujoco, flask |
+```text
+assets/xlerobot/xlerobot.xml              # 当前使用的 XLeRobot 模型
+assets/xlerobot/*.stl                     # 当前使用的 XLeRobot STL 网格
+assets/scene/scene.xml                    # 生成后的厨房 + XLeRobot 场景
+assets/scene/scene_meta.json              # 生成后的 fixtures / objects 元信息
+serve/mujoco_backend.py                   # 场景导出、XML 合并、MuJoCo Env 适配器
+serve/main.py                             # MuJoCo viewer + Flask API 入口
+serve/scene/config/objects.yaml           # 可操作物体和 placement 配置
+serve/scene/config/layout.yaml            # 厨房布局
+serve/scene/config/style.yaml             # RoboCasa 风格 / 材质配置
+```
 
-## 可用工具
+## 可用物体
 
-| 工具 | 参数 | 说明 |
-|------|------|------|
-| `navigate_to_target` | `target` | 导航底盘到坐标，如 `"(1.5, -0.5)"` |
-| `grasp_object` | `object_name` | 抓取物体 |
-| `place_on_top` | `obj_name`, `target_name` | 放到目标物体上方 |
-| `place_object` | `obj_name`, `x`, `y`, `z` | 放到指定坐标 |
-| `release_object` | 无 | 释放当前抓取的物体 |
+当前 `objects.yaml` 中的可操作物体：
+
+```text
+pot
+cup
+bowl
+apple
+mug
+sponge
+```
+
+当前放置逻辑：
+
+- `pot`：counter，靠近 stove 参照区域。
+- `cup`、`bowl`、`apple`、`mug`：counter 随机区域，带位置避让。
+- `sponge`：island 随机区域。
+
+## API 兼容性
+
+仿真后端保留了原 Slaver 调用需要的主要 API：
+
+```text
+GET  /status
+GET  /base_status
+GET  /objects
+GET  /fixtures
+GET  /scene
+GET  /scene_state
+GET  /map_data
+POST /grasp
+POST /place
+POST /move_to
+POST /nav
+POST /cmd_vel
+POST /open_gripper
+POST /close_gripper
+POST /screenshot
+```
+
+因此原来的规划链路可以继续通过 Slaver 的工具调用访问仿真后端。
+
+## 注意事项
+
+- 当前不是 RoboCasa 原生环境 reset；RoboCasa 用于导出真实厨房和物体 MJCF。
+- 当前抓取 / 放置是高层测试实现：服务端会分步移动虚拟末端和物体用于可视化，但不是完整接触抓取和 IK。
+- XLeRobot 使用 `/home/fangqi/WorkXCJ/MuJoCo-GS-Web` 的真实外观模型；底盘 body 是 `chassis`，为 `freejoint`，当前生成场景把初始位置放在岛台和台面之间：`[3.2, -1.5, 0.38]`。
+- 如果要完全复现 RoboCasa 原始物体采样，需要继续接入 RoboCasa 原生 placement sampler；当前实现是基于 fixture `pos/size` 的轻量 placement。
 
 ## 文档
 
-- [使用指南](usage.md) — 启动步骤和 API 说明
-- [CLAUDE.md](CLAUDE.md) — 项目完整技术文档
-- [serve/tools/README.md](serve/tools/README.md) — 机械臂和底盘控制
-
-## 致谢
-
-本项目基于 [FlagScale](https://github.com/flagos-ai/FlagScale) 和 [RoboOS](https://github.com/FlagOpen/RoboOS) 进行开发。仿真后端使用 [RoboCasa](https://github.com/ARISE-Initiative/robocasa)。
+- [usage.md](usage.md) — 启动和 API 使用说明
+- [CLAUDE.md](CLAUDE.md) — 当前技术状态和开发注意事项
+- [task_plan.md](task_plan.md) — 迁移计划
+- [findings.md](findings.md) — 迁移发现
+- [progress.md](progress.md) — 进度记录
