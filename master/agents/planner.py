@@ -74,7 +74,7 @@ class GlobalTaskPlanner:
         # ===== 注入真实物体坐标 =====
         try:
             import requests
-            resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
+            resp = requests.get("http://127.0.0.1:5002/objects", timeout=3)
             if resp.status_code == 200:
                 sim_objects = resp.json()
                 if isinstance(all_environments_info, dict):

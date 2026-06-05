@@ -43,8 +43,9 @@ class TaskQueue:
                 return task
         return None
 
-    def mark_done(self, task: Dict):
+    def mark_done(self, task: Dict, status: str = "success"):
         task["done"] = True
+        task["status"] = status  # "success" | "failure" | "exception" | "timeout"
 
     def append_tasks(self, new_subtasks: list):
         for task in new_subtasks:
@@ -95,6 +96,11 @@ class GlobalAgent:
         self._last_subtask_result = None  # Slaver 返回的子任务结果（含 VLM 描述）
         self._memory_dir = os.path.join(os.path.dirname(__file__), '..', 'memory')
         self._experience_file = os.path.join(self._memory_dir, 'experiences.md')
+        self._skills_dir = os.path.join(self._memory_dir, 'skills')
+        self._exploration_rate = self.config.get('experience', {}).get('exploration_rate', 0.8)
+        self._pending_failure = None   # 等待人工录入的失败信息
+        self._pending_success = None   # 等待人工决定是否录入的成功信息
+        self._dispatch_token = 0       # 每次新任务自增，旧 dispatch thread 检测到变化后退出
 
         self.logger.info(f"Configuration loaded from {config_path} ...")
         self.logger.info(f"Master Configuration:\n{self.config}")
@@ -205,6 +211,9 @@ class GlobalAgent:
             self.logger.info(
                 "===================================================================="
             )
+            # 即使结果不完整也要释放 busy，否则 wait_agents_free 永远不返回
+            if robot_name:
+                self.collaborator.update_agent_busy(robot_name, False)
 
     def _extract_json(self, input_string):
         if not isinstance(input_string, str):
@@ -232,7 +241,22 @@ class GlobalAgent:
             except json.JSONDecodeError as e:
                 self.logger.warning(f"Could not parse JSON from string content: {e}")
         return None
-
+    
+    def _get_skill_name(self, task_desc: str) -> str:
+        if isinstance(task_desc, list):
+            task_desc = " ".join(str(x) for x in task_desc)
+        elif not isinstance(task_desc, str):
+            task_desc = str(task_desc)
+        task_lower = (task_desc or "").lower()
+        if any(w in task_lower for w in ['抓', 'grasp', '拿', '捡', '取']):
+            return 'grasp'
+        elif any(w in task_lower for w in ['放', 'place', '放置', '放到', '放在']):
+            return 'place'
+        elif any(w in task_lower for w in ['导航', 'navigate', '去', '移动到']):
+            return 'navigate'
+        else:
+            return 'multi_step'
+    
     def _start_listener(self):
         threading.Thread(
             target=lambda: self.collaborator.listen(
@@ -287,7 +311,10 @@ class GlobalAgent:
         """Publish a global task to all Agents"""
         self.logger.info(f"Publishing global task: {task}")
 
-        experiences = self._load_experiences()
+        # 每条新顶层任务独立规划，清空历史避免旧任务计划干扰 LLM
+        self.conversation_history = []
+
+        experiences = self._load_experiences(task=task)
         response = self.planner.forward(task, self.conversation_history, experiences)
         self.logger.info(f"Raw response from planner: {response}")
         reasoning_and_subtasks = self._extract_json(response)
@@ -323,11 +350,19 @@ class GlobalAgent:
         task_id = task_id or str(uuid.uuid4()).replace("-", "")
         self.current_task_queue = task_queue
         self.current_task_id = task_id
-        self.current_task_desc = task
+        self.current_task_desc = task if isinstance(task, str) else (task[0] if task else "")
+
+        # 使旧 dispatch thread 失效，并重置共享状态
+        self._dispatch_token += 1
+        my_token = self._dispatch_token
+        self._pending_failure = None
+        self._pending_success = None
+        for agent_name in self.collaborator.read_all_agents_name():
+            self.collaborator.update_agent_busy(agent_name, False)
 
         threading.Thread(
             target=asyncio.run,
-            args=(self._dispath_subtasks_async(task, task_id, task_queue, refresh),),
+            args=(self._dispath_subtasks_async(task, task_id, task_queue, refresh, my_token),),
             daemon=True,
         ).start()
 
@@ -338,12 +373,21 @@ class GlobalAgent:
         task: str,
         task_id: str,
         task_queue: TaskQueue,
-        refresh: bool
+        refresh: bool,
+        dispatch_token: int = 0,
     ):
         """逐个发送子任务，每个完成后检查场景变化并增量规划。"""
         robot_name = None
+        task_had_failure = False  # 任一非拍照子任务失败则置 True
+
+        def _superseded():
+            """检查是否被新任务取代。"""
+            return self._dispatch_token != dispatch_token
 
         while not task_queue.all_done():
+            if _superseded():
+                self.logger.info(f"[Dispatch] Token 已过期，退出旧任务 dispatch")
+                return
             if task_id in self.terminated_tasks:
                 self.logger.warning(f"[TERMINATE] Stopping task {task_id}")
                 self.terminated_tasks.discard(task_id)
@@ -367,22 +411,30 @@ class GlobalAgent:
             self._last_subtask_result = None
 
             self.logger.info(f"Sending: {current['subtask']}")
+            # 先标 busy 再发消息，防止机器人响应过快导致 busy flag 竞争
+            self.collaborator.update_agent_busy(robot_name, True)
             self.collaborator.send(
                 f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
             )
-            self.collaborator.update_agent_busy(robot_name, True)
             self.collaborator.wait_agents_free([robot_name])
 
-            task_queue.mark_done(current)
+            if _superseded():
+                self.logger.info(f"[Dispatch] 等待期间被新任务取代，退出")
+                return
+
+            subtask_status = self._last_subtask_status or "success"
+            task_queue.mark_done(current, status=subtask_status)
 
             # 子任务失败/异常时，拍照诊断（但拍照任务本身失败不再触发拍照，避免死循环）
             is_camera_task = "拍照" in current["subtask"]
             if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
+                task_had_failure = True
                 self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
-                self._send_camera_task(
-                    robot_name, task_id,
-                    f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
-                )
+                if self.config.get('camera', {}).get('enabled', True):
+                    self._send_camera_task(
+                        robot_name, task_id,
+                        f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
+                    )
 
                 # VLM 发现异常时，让 Master LLM 决定如何调整
                 if self._last_subtask_result and "abnormal" in self._last_subtask_result:
@@ -422,19 +474,45 @@ class GlobalAgent:
                         f"{[t['subtask'] for t in new_tasks]}"
                     )
 
-        # 所有子任务完成后，拍照验证最终场景
-        if robot_name and task_queue.all_done():
+        # 所有子任务完成后，拍照验证最终场景（仅当 dispatch 未被取代时）
+        if robot_name and task_queue.all_done() and not _superseded():
             self.logger.info("[Camera] 所有子任务完成，拍照验证最终场景...")
-            self._send_camera_task(
-                robot_name, task_id,
-                f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
-            )
+            if self.config.get('camera', {}).get('enabled', True):
+                self._send_camera_task(
+                    robot_name, task_id,
+                    f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
+                )
             if self._last_subtask_result and "abnormal" in self._last_subtask_result:
                 self.logger.warning(f"[Camera] 最终验证发现异常: {self._last_subtask_result}")
             else:
                 self.logger.info("[Camera] 最终验证通过，场景正常")
 
         self.logger.info(f"Task_id ({task_id}) [{task}] all done.")
+
+        if not _superseded():
+            all_tasks = task_queue.tasks
+            task_desc = task if isinstance(task, str) else str(task)
+            completed_cnt = len(task_queue.get_completed())
+            total_cnt = len(all_tasks)
+
+            if not task_queue.all_done() or task_had_failure:
+                # 整体失败
+                self._pending_failure = {
+                    "task_id": task_id,
+                    "task_desc": task_desc,
+                    "completed": completed_cnt,
+                    "total": total_cnt,
+                }
+                self.logger.info(f"[Experience] Task failed, waiting for human input")
+            else:
+                # 整体成功，询问用户是否录入正向经验
+                self._pending_success = {
+                    "task_id": task_id,
+                    "task_desc": task_desc,
+                    "completed": completed_cnt,
+                    "total": total_cnt,
+                }
+                self.logger.info(f"[Experience] Task succeeded, asking user for optional experience")
 
     def _send_camera_task(self, robot_name: str, task_id: str, description: str):
         """发送拍照子任务并等待完成。"""
@@ -445,10 +523,10 @@ class GlobalAgent:
         }
         self._last_subtask_status = None
         self._last_subtask_result = None
+        self.collaborator.update_agent_busy(robot_name, True)
         self.collaborator.send(
             f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
         )
-        self.collaborator.update_agent_busy(robot_name, True)
         self.collaborator.wait_agents_free([robot_name])
         self.logger.info(f"[Camera] 拍照完成，状态: {self._last_subtask_status}")
 
@@ -465,13 +543,19 @@ class GlobalAgent:
                 "robot_name": t["robot_name"],
                 "subtask": t["subtask"],
                 "done": t["done"],
+                "status": t.get("status"),  # None | "success" | "failure" | "exception" | "timeout"
             })
 
+        failed = any(
+            t["done"] and t.get("status") in ("failure", "exception", "timeout")
+            for t in tasks
+        )
         return {
             "active": True,
             "task_id": self.current_task_id,
             "task": self.current_task_desc,
             "all_done": q.all_done(),
+            "failed": failed,
             "total": len(tasks),
             "completed": len([t for t in tasks if t["done"]]),
             "subtask_list": tasks,
@@ -569,75 +653,131 @@ class GlobalAgent:
                 summary_parts.append(f"{loc} 中" + "，".join(parts))
         return "；".join(summary_parts) if summary_parts else "无变化"
 
-    def _load_experiences(self) -> str:
-        """读取经验库 md 文件，返回格式化的经验段落供注入 prompt。"""
-        if not os.path.exists(self._experience_file):
-            return ""
-
-        with open(self._experience_file, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-
-        if not content:
-            return ""
-
-        # 解析 md 文件，提取每个经验条目
-        sections = {"正向经验": [], "避免规则": []}
-        current_section = None
-        current_entry = []
-
-        for line in content.split("\n"):
-            if line.strip() == "## 正向经验":
-                if current_section and current_entry:
-                    sections[current_section].append("\n".join(current_entry))
-                current_section = "正向经验"
-                current_entry = []
-            elif line.strip() == "## 避免规则":
-                if current_section and current_entry:
-                    sections[current_section].append("\n".join(current_entry))
-                current_section = "避免规则"
-                current_entry = []
-            elif line.startswith("### ") and current_section:
-                if current_entry:
-                    sections[current_section].append("\n".join(current_entry))
-                current_entry = [line]
-            elif current_section:
-                current_entry.append(line)
-
-        if current_section and current_entry:
-            sections[current_section].append("\n".join(current_entry))
+    def _load_experiences(self, task: str = "") -> str:
+        os.makedirs(self._skills_dir, exist_ok=True)
+        skill_name = self._get_skill_name(task or self.current_task_desc or "")
 
         parts = []
-        for entry in sections["正向经验"]:
-            # 提取 ### 标题行和教训行
-            lines = [l for l in entry.strip().split("\n") if l.strip()]
-            summary = ""
-            for l in lines:
-                if l.startswith("- 教训：") or l.startswith("- 结果："):
-                    summary = l.lstrip("- ")
-                    break
-            if summary:
-                parts.append(f"✓ {summary}")
+        skill_file = os.path.join(self._skills_dir, f'{skill_name}.md')
+        if os.path.exists(skill_file):
+            with open(skill_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            if content:
+                parts.append(f"### {skill_name} 专项经验\n{content}")
 
-        for entry in sections["避免规则"]:
-            lines = [l for l in entry.strip().split("\n") if l.strip()]
-            for l in lines:
-                if l.startswith("- 规则："):
-                    parts.append(f"✗ {l.lstrip('- ')}")
-                    break
+        if skill_name != 'multi_step':
+            multi_file = os.path.join(self._skills_dir, 'multi_step.md')
+            if os.path.exists(multi_file):
+                with open(multi_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                if content:
+                    parts.append(f"### 复合任务经验\n{content}")
 
         if not parts:
             return ""
 
-        return "\n\n## 过往经验（请参考以下经验进行规划）：\n" + "\n".join(parts)
+        exploration_hint = ""
+        if self._exploration_rate > 0:
+            explore_pct = int(self._exploration_rate * 100)
+            refer_pct = 100 - explore_pct
+            exploration_hint = f"\n> 参考策略：{refer_pct}% 借鉴以下经验，{explore_pct}% 自由探索新方案。"
 
-    def save_experience(self, task_id: str, exp_type: str, note: str = ""):
-        """保存经验到 md 文件，通过 LLM 生成精炼的经验总结。"""
-        os.makedirs(self._memory_dir, exist_ok=True)
+        return f"\n\n## 过往经验（请参考）：{exploration_hint}\n" + "\n\n".join(parts)
+
+    def classify_and_save_failure_experience(self, raw_input: str) -> dict:
+        """LLM 将人工输入的失败经验归类到对应 skill 文件的避免规则中。"""
+        os.makedirs(self._skills_dir, exist_ok=True)
+        task_desc = (self._pending_failure or {}).get('task_desc', self.current_task_desc or '未知任务')
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        from agents.prompts import EXPERIENCE_CLASSIFY
+        prompt = EXPERIENCE_CLASSIFY.format(task_desc=task_desc, raw_input=raw_input)
+        try:
+            response = self.planner.generate(prompt)
+            result = self._extract_json(response)
+            if not result:
+                raise ValueError("LLM returned invalid JSON")
+            skill = result.get('skill', 'multi_step')
+            rule = result.get('rule', raw_input)
+            if skill not in ('navigate', 'grasp', 'place', 'multi_step'):
+                skill = 'multi_step'
+        except Exception as e:
+            self.logger.warning(f"[Experience] LLM classification failed: {e}")
+            skill = self._get_skill_name(task_desc)
+            rule = raw_input
+
+        skill_file = os.path.join(self._skills_dir, f'{skill}.md')
+        entry = f"\n### {date_str}\n- 任务：{task_desc}\n- 规则：{rule}\n"
+
+        if os.path.exists(skill_file):
+            with open(skill_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+        else:
+            content = f"# {skill} Skill 经验库\n\n## 避免规则\n"
+
+        if '## 避免规则' not in content:
+            content += '\n## 避免规则\n'
+        pos = content.find('## 避免规则') + len('## 避免规则')
+        content = content[:pos] + entry + content[pos:]
+
+        with open(skill_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        self._pending_failure = None
+        self.logger.info(f"[Experience] Saved failure rule to {skill}.md: {rule}")
+        return {"success": True, "skill": skill, "rule": rule}
+
+    def classify_and_save_success_experience(self, raw_input: str) -> dict:
+        """LLM 将人工输入的正向经验归类到对应 skill 文件的正向经验区块中。"""
+        os.makedirs(self._skills_dir, exist_ok=True)
+        task_desc = (self._pending_success or {}).get('task_desc', self.current_task_desc or '未知任务')
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        from agents.prompts import EXPERIENCE_CLASSIFY_SUCCESS
+        prompt = EXPERIENCE_CLASSIFY_SUCCESS.format(task_desc=task_desc, raw_input=raw_input)
+        try:
+            response = self.planner.generate(prompt)
+            result = self._extract_json(response)
+            if not result:
+                raise ValueError("LLM returned invalid JSON")
+            skill = result.get('skill', 'multi_step')
+            tip = result.get('tip', raw_input)
+            if skill not in ('navigate', 'grasp', 'place', 'multi_step'):
+                skill = 'multi_step'
+        except Exception as e:
+            self.logger.warning(f"[Experience] LLM classification failed: {e}")
+            skill = self._get_skill_name(task_desc)
+            tip = raw_input
+
+        skill_file = os.path.join(self._skills_dir, f'{skill}.md')
+        entry = f"\n### {date_str}\n- 任务：{task_desc}\n- 策略：{tip}\n"
+
+        if os.path.exists(skill_file):
+            with open(skill_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+        else:
+            content = f"# {skill} Skill 经验库\n\n## 正向经验\n\n## 避免规则\n"
+
+        section = '## 正向经验'
+        if section not in content:
+            content = content.replace('## 避免规则', f'{section}\n\n## 避免规则')
+        pos = content.find(section) + len(section)
+        content = content[:pos] + entry + content[pos:]
+
+        with open(skill_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        self._pending_success = None
+        self.logger.info(f"[Experience] Saved success tip to {skill}.md: {tip}")
+        return {"success": True, "skill": skill, "tip": tip}
+
+    def save_experience(self, exp_type: str, note: str = ""):
+        """保存经验到对应 skill 文件，note 是失败原因或成功备注"""
+        os.makedirs(self._skills_dir, exist_ok=True)
 
         task_desc = self.current_task_desc or "未知任务"
         date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # 收集子任务执行摘要
         subtask_summary = "无子任务记录"
         if self.current_task_queue:
             lines = []
@@ -647,9 +787,8 @@ class GlobalAgent:
             subtask_summary = "\n".join(lines)
 
         feedback_type = "正向（方案有效）" if exp_type == "positive" else "负向（方案有问题）"
-        user_note_section = f"用户备注：{note}" if note else ""
+        user_note_section = f"用户备注（失败原因）：{note}" if note else ""
 
-        # 调用 LLM 生成经验总结
         from agents.prompts import EXPERIENCE_GENERATION
         prompt = EXPERIENCE_GENERATION.format(
             task=task_desc,
@@ -660,7 +799,6 @@ class GlobalAgent:
 
         try:
             response = self.planner.generate(prompt)
-            # 清理 LLM 输出
             experience_text = response.strip()
             if experience_text.startswith("```"):
                 experience_text = re.sub(r"^```\w*\n?", "", experience_text)
@@ -668,26 +806,25 @@ class GlobalAgent:
             if not experience_text:
                 experience_text = note or ("此方案有效，可复用" if exp_type == "positive" else "此方案有问题，需避免")
         except Exception as e:
-            self.logger.warning(f"[Experience] LLM generation failed, using fallback: {e}")
+            self.logger.warning(f"[Experience] LLM generation failed: {e}")
             experience_text = note or ("此方案有效，可复用" if exp_type == "positive" else "此方案有问题，需避免")
 
-        # 写入 md 文件
+        # 写入对应 skill 文件
+        skill_name = self._get_skill_name(task_desc)
+        skill_file = os.path.join(self._skills_dir, f'{skill_name}.md')
+
         if exp_type == "positive":
             section = "## 正向经验"
-            entry = f"\n### {date_str} {task_desc}\n"
-            entry += f"- 任务：{task_desc}\n"
-            entry += f"- 教训：{experience_text}\n"
+            entry = f"\n### {date_str} {task_desc}\n- 任务：{task_desc}\n- 教训：{experience_text}\n"
         else:
             section = "## 避免规则"
-            entry = f"\n### {date_str} {task_desc}\n"
-            entry += f"- 任务：{task_desc}\n"
-            entry += f"- 规则：{experience_text}\n"
+            entry = f"\n### {date_str} {task_desc}\n- 任务：{task_desc}\n- 规则：{experience_text}\n"
 
-        if os.path.exists(self._experience_file):
-            with open(self._experience_file, "r", encoding="utf-8") as f:
+        if os.path.exists(skill_file):
+            with open(skill_file, 'r', encoding='utf-8') as f:
                 content = f.read()
         else:
-            content = "# 经验库\n\n## 正向经验\n\n## 避免规则\n"
+            content = f"# {skill_name} Skill 经验库\n\n## 正向经验\n\n## 避免规则\n"
 
         section_pos = content.find(section)
         if section_pos == -1:
@@ -696,11 +833,11 @@ class GlobalAgent:
             insert_pos = section_pos + len(section)
             content = content[:insert_pos] + "\n" + entry + content[insert_pos:]
 
-        with open(self._experience_file, "w", encoding="utf-8") as f:
+        with open(skill_file, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        self.logger.info(f"[Experience] Saved {exp_type}: {experience_text}")
-        return {"success": True, "message": f"经验已保存（{exp_type}）", "experience": experience_text}
+        self.logger.info(f"[Experience] Saved {exp_type} to {skill_name}.md: {experience_text}")
+        return {"success": True, "skill": skill_name, "message": f"经验已保存到 {skill_name}.md", "experience": experience_text}
 
     def get_experiences(self) -> str:
         """返回经验库全文（供前端展示）。"""

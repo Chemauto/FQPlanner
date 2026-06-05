@@ -140,7 +140,7 @@ def fetch_obstacles_from_sim():
     import json
     import urllib.request
 
-    url = "http://127.0.0.1:5001/map_data"
+    url = "http://127.0.0.1:5002/map_data"
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -155,7 +155,7 @@ def fetch_base_status():
     import json
     import urllib.request
 
-    url = "http://127.0.0.1:5001/base_status"
+    url = "http://127.0.0.1:5002/base_status"
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -282,7 +282,7 @@ def generate_from_sim(
         "x_min": x_min, "x_max": x_max,
         "y_min": y_min, "y_max": y_max,
     })
-    url = f"http://127.0.0.1:5001/map_data?{params}"
+    url = f"http://127.0.0.1:5002/map_data?{params}"
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=60) as resp:

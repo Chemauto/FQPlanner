@@ -74,8 +74,12 @@ def _load_perception_config():
 
 
 def get_object_pos(obj_name):
-    """查询物体坐标：记忆模式用场景状态，实时模式调API"""
-    use_realtime = _load_perception_config()
+    # 读配置
+    import yaml, os
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    use_realtime = config.get('perception', {}).get('use_realtime_coords', True)
     
     if not use_realtime:
         # 记忆模式：直接跳到记忆查询，不调任何 API
@@ -109,12 +113,12 @@ def get_object_pos(obj_name):
     
     # 实时模式：调 API
     try:
-        resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
+        resp = requests.get("http://127.0.0.1:5002/objects", timeout=3)
         if resp.status_code == 200:
             objects = resp.json()
             if obj_name in objects:
                 return objects[obj_name]['pos']
-        resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
+        resp = requests.get("http://127.0.0.1:5002/fixtures", timeout=3)
         if resp.status_code == 200:
             fixtures = resp.json()
             if obj_name in fixtures:
@@ -127,6 +131,50 @@ def get_object_pos(obj_name):
     except Exception as e:
         print(f"[waypoint] 查询物体位置失败: {e}", file=sys.stderr)
     return None
+
+
+def _find_in_scene_state(target_name):
+    """
+    记忆模式：从 scene_state.yaml 直接查找目标对应的工作点。
+    支持家具模糊匹配（sink ↔ sink_island_group）和物体精确匹配。
+    返回 waypoint dict 或 None。
+    """
+    try:
+        _serve_path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '..', 'serve'))
+        if _serve_path not in sys.path:
+            sys.path.insert(0, _serve_path)
+        from scene.scene_memory import load_state
+
+        state = load_state()
+        waypoints = load_waypoints()
+        wp_map = {wp['name']: wp for wp in waypoints}
+
+        for loc, info in state['locations'].items():
+            if loc == 'robot_hand':
+                continue
+            wp = wp_map.get(loc)
+            if not wp:
+                continue
+            # 家具模糊匹配（如 sink ↔ sink_island_group）
+            fixture = info.get('fixture') or ''
+            if fixture and (target_name in fixture or fixture in target_name):
+                print(f"[waypoint] 记忆: '{target_name}' → 家具 '{fixture}' @ {loc}", file=sys.stderr)
+                return {'name': wp['name'], 'x': wp['pos'][0], 'y': wp['pos'][1],
+                        'yaw_deg': wp.get('yaw_deg', 0.0)}
+            # 物体精确匹配
+            if target_name in (info.get('objects') or []):
+                print(f"[waypoint] 记忆: '{target_name}' 在 {loc}", file=sys.stderr)
+                return {'name': wp['name'], 'x': wp['pos'][0], 'y': wp['pos'][1],
+                        'yaw_deg': wp.get('yaw_deg', 0.0)}
+    except Exception as e:
+        print(f"[waypoint] scene_state 查询失败: {e}", file=sys.stderr)
+    return None
+
+
+def _wp_dict(wp):
+    return {'name': wp['name'], 'x': wp['pos'][0], 'y': wp['pos'][1],
+            'yaw_deg': wp.get('yaw_deg', 0.0)}
 
 
 def find_waypoint(target):
@@ -151,15 +199,44 @@ def find_waypoint(target):
     except ValueError:
         target_name = str(target).strip()
 
-    # 用名称查实时坐标
+    waypoints = load_waypoints()
+
+    # ── 记忆模式：直接查 scene_state，不查实时坐标 ──────────────────────────
+    if target_name and not _load_perception_config():
+        wp = _find_in_scene_state(target_name)
+        if wp:
+            return wp
+        # scene_state 未记录，按 serves 回退
+        serving = [w for w in waypoints
+                   if any(target_name in s or s in target_name for s in w.get('serves', []))]
+        if serving:
+            print(f"[waypoint] 记忆(serves回退): '{target_name}' → {serving[0]['name']}", file=sys.stderr)
+            return _wp_dict(serving[0])
+        print(f"[waypoint] 记忆模式未找到 '{target_name}'，使用第一个工作点", file=sys.stderr)
+        return _wp_dict(waypoints[0])
+
+    # ── 实时模式：用名称查实时坐标 ──────────────────────────────────────────
     if target_name and target_pos is None:
         pos = get_object_pos(target_name)
         if pos:
             target_pos = pos
 
-    waypoints = load_waypoints()
-
     if target_pos is None:
+        # 位置查询失败，退而按名称匹配 serves 字段
+        if target_name:
+            serving = [wp for wp in waypoints
+                       if any(target_name in s or s in target_name
+                              for s in wp.get('serves', []))]
+            if serving:
+                wp = serving[0]
+                print(f"[waypoint] 位置未知，按名称匹配工作点: {wp['name']} (serves={wp['serves']})",
+                      file=sys.stderr)
+                return {
+                    "name": wp['name'],
+                    "x": wp['pos'][0],
+                    "y": wp['pos'][1],
+                    "yaw_deg": wp.get('yaw_deg', 0.0),
+                }
         print(f"[waypoint] 无法确定目标位置，使用第一个工作点", file=sys.stderr)
         wp = waypoints[0]
         return {
@@ -188,7 +265,7 @@ def find_waypoint(target):
         serving_reachable = [wp for wp in serving if within_reach(wp)]
         free_reachable = [wp for wp in free_points if within_reach(wp)]
         all_reachable = [wp for wp in waypoints if within_reach(wp)]
-        candidates = serving_reachable or free_reachable or all_reachable or serving or waypoints
+        candidates = serving_reachable or serving or free_reachable or all_reachable or waypoints
     else:
         # 记忆模式：物体位置动态变化，serves 不可靠，直接用全部按距离选
         candidates = waypoints
@@ -206,12 +283,15 @@ def find_waypoint(target):
 
     # 动态计算朝向：工作点指向目标，snap 到 90°
     # yaw=0→+X, 90→+Y (CCW)，atan2(dy,dx) 直接给出正确朝向
-    dx = target_pos[0] - best_xy[0]
-    dy = target_pos[1] - best_xy[1]
-    raw_yaw = math.degrees(math.atan2(dy, dx))
-    angles = [0, 90, 180, 270]
-    yaw_raw = raw_yaw % 360
-    yaw_deg = float(min(angles, key=lambda a: min(abs(a - yaw_raw), 360 - abs(a - yaw_raw))))
+    # dx = target_pos[0] - best_xy[0]
+    # dy = target_pos[1] - best_xy[1]
+    # raw_yaw = math.degrees(math.atan2(dy, dx))
+    # angles = [0, 90, 180, 270]
+    # yaw_raw = raw_yaw % 360
+    # yaw_deg = float(min(angles, key=lambda a: min(abs(a - yaw_raw), 360 - abs(a - yaw_raw))))
+    
+    #使用预存的朝向，不动态计算
+    yaw_deg = best.get('yaw_deg', 0.0)
 
     print(
         f"[waypoint] 目标: '{target}' @ {tp.tolist()}, "

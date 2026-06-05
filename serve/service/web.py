@@ -7,7 +7,7 @@ web.py - 仿真器控制 Web UI
 from flask import Flask, send_file
 
 app = Flask(__name__)
-API_URL = "http://localhost:5001"
+API_URL = "http://localhost:5002"
 
 
 @app.route("/")

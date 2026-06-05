@@ -10,6 +10,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 from serve.sim import grasp_object as _grasp_object
 
+_SERVE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'serve'))
+if _SERVE_PATH not in sys.path:
+    sys.path.insert(0, _SERVE_PATH)
+from scene.scene_memory import move_object as _move_object
+
 
 def register_tools(mcp):
 
@@ -34,6 +39,10 @@ def register_tools(mcp):
         if result.get("success"):
             response = result.get("result", f"成功抓取 {target}")
             print(f"[grasp] ✓ {response}", file=sys.stderr)
+            try:
+                _move_object(target, 'robot_hand')
+            except Exception as e:
+                print(f"[grasp] 记忆更新失败: {e}", file=sys.stderr)
             return json.dumps([response, {"_status": "success"}])
         else:
             msg = result.get("result", f"抓取 {target} 失败，请重试。")

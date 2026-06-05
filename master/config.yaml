@@ -29,14 +29,14 @@ tts:
 # Cloud Server Infos
 model:
   # Model name for the cloud server
-  model_select: "mimo-v2.5"
+  model_select: "deepseek-chat"
   # model_select: "robobrain"
 
   # Number of retries for planning
   model_retry_planning: 5
   model_dict:
     # Model name for the cloud server
-    cloud_model: "mimo-v2.5"
+    cloud_model: "deepseek-chat"
     # cloud_model: "robobrain"
 
     # Deploy for the cloud server
@@ -46,7 +46,7 @@ model:
     # cloud_api_key: "EMPTY"
 
     # URL of the cloud server
-    cloud_server: "https://api.xiaomimimo.com/v1"
+    cloud_server: "https://api.deepseek.com/"
     # cloud_server: "http://localhost:4567/v1/"
 
     # Maximum number of chat messages to keep in memory
@@ -81,3 +81,11 @@ profiling: true
 # scene profile
 profile:
   path: ./scene/profile.yaml
+
+#经验
+experience:
+  exploration_rate: 0.8  # 0=完全依赖经验, 1=完全自由探索
+  auto_save_on_success: true  # 成功后自动保存经验
+
+camera:
+  enabled: false
