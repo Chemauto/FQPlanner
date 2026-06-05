@@ -1,6 +1,6 @@
 # 场景地图与工作点
 
-生成 RoboCasa 仿真场景的占据地图，提取可通行点，选出最优导航工作点。
+生成 XLeRobot MuJoCo 厨房场景的占据地图，提取可通行点，选出最优导航工作点。
 
 所有参数统一配置在 `config.yaml` 中，三个脚本共享。
 
@@ -11,7 +11,7 @@
 
 ```bash
 conda activate robocasa
-cd FQPlanner
+cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python nav2/map_generator.py --from-sim
 ```
 

@@ -60,32 +60,29 @@ objects:
       size: [0.50, 0.30]
       pos: ["ref", -1.0]
 
-  # 在岛台上放一个杯子
+  # 在台面随机区域放一个杯子
   - name: cup
     obj_groups: glass_cup
     graspable: true
     placement:
-      fixture: island
-      size: [0.40, 0.30]
-      pos: [null, 1.0]
+      fixture: counter
+      size: [0.40, 1.30]
 
-  # 在岛台上放一个碗
+  # 在台面随机区域放一个碗
   - name: bowl
     obj_groups: bowl
     graspable: true
     placement:
-      fixture: island
-      size: [0.30, 0.30]
+      fixture: counter
+      size: [0.30, 1.30]
 
-  # 在水槽旁边的台面上放一个苹果
+  # 在台面随机区域放一个苹果
   - name: apple
     obj_groups: apple
     graspable: true
     placement:
       fixture: counter
-      sample_region_kwargs:
-        ref: sink
-      size: [0.30, 0.30]
+      size: [0.30, 1.30]
 
   # 在台面上放一个马克杯
   - name: mug

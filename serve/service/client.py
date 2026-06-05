@@ -1,5 +1,5 @@
 """
-sim.py - RoboCasa 仿真接口
+sim.py - XLeRobot MuJoCo 仿真接口
 
 提供统一的仿真 API 接口，供 MCP 工具调用。
 使用 urllib 标准库，无需额外安装依赖。
@@ -26,7 +26,7 @@ def set_server_url(url):
 
 def call_sim(endpoint, data=None):
     """
-    调用 RoboCasa 仿真服务器 API
+    调用本地 MuJoCo 仿真服务器 API
 
     Args:
         endpoint: API 路径 (如 "/grasp", "/place", "/nav")
@@ -111,7 +111,7 @@ def place_object(obj_name, target_pos, snap_threshold=0.15):
     Args:
         obj_name: 物体名称
         target_pos: 目标位置 [x, y, z]
-        snap_threshold: 瞬移触发距离（米）
+        snap_threshold: 吸附触发距离（米，服务端会分步移动用于可视化）
 
     Returns:
         dict: {"success": bool, ...}
@@ -156,6 +156,25 @@ def close_gripper():
 # 底盘导航
 # ============================================================
 
+def move_for_duration(vx=0.0, vw=0.0, duration=1.0):
+    """
+    以指定速度持续移动底盘一段时间
+
+    Args:
+        vx:       前进速度 [-1, 1]，正值前进，负值后退
+        vw:       旋转速度 [-1, 1]，正值左转，负值右转
+        duration: 持续时间（秒）
+
+    Returns:
+        dict: {"success": bool, "pos": [x,y,z], "yaw": float}
+    """
+    return call_sim("/move_duration", {
+        "vx": vx,
+        "vw": vw,
+        "duration": duration,
+    })
+
+
 def navigate(x, y, target_yaw=None):
     """
     底盘导航到目标位置
@@ -195,22 +214,25 @@ def navigate_path_by_points(path, target_yaw=None):
 # 截图
 # ============================================================
 
-def capture_screenshot(camera_name="overhead_cam", width=640, height=480):
+def capture_screenshot(camera_name=None, width=None, height=None):
     """从指定相机捕获截图
 
     Args:
-        camera_name: 相机名称 (overhead_cam, side_cam, robot0_frontview, robot0_eye_in_hand)
-        width: 图像宽度
-        height: 图像高度
+        camera_name: 相机名称；None 时使用 serve/scene/config/camera.yaml 默认相机
+        width: 图像宽度；None 时使用 camera.yaml 默认宽度
+        height: 图像高度；None 时使用 camera.yaml 默认高度
 
     Returns:
         dict: {"success": bool, "image": "base64_string"} 或 {"success": False, "result": "错误信息"}
     """
-    return call_sim("/screenshot", {
-        "camera_name": camera_name,
-        "width": width,
-        "height": height,
-    })
+    payload = {}
+    if camera_name is not None:
+        payload["camera_name"] = camera_name
+    if width is not None:
+        payload["width"] = width
+    if height is not None:
+        payload["height"] = height
+    return call_sim("/screenshot", payload)
 
 
 # ============================================================

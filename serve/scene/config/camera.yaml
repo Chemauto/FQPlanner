@@ -1,0 +1,28 @@
+# Camera rendering configuration for the MuJoCo service.
+# Images are rendered on request by /camera/latest, not by a background loop.
+# http://localhost:5001/camera/latest查看图片
+screenshot:
+  default_camera: overhead_cam
+  width: 640
+  height: 480
+  jpeg_quality: 80
+
+preview:
+  cameras:
+    - overhead_cam
+    - head_cam
+    - right_arm_cam
+    - left_arm_cam
+  width: 160
+  height: 120
+  jpeg_quality: 80
+
+cameras:
+  overhead_cam:
+    label: Top
+  right_arm_cam:
+    label: Right wrist
+  left_arm_cam:
+    label: Left wrist
+  head_cam:
+    label: Head

@@ -1,5 +1,5 @@
 """
-放置/释放控制模块 - RoboCasa 仿真
+放置/释放控制模块 - XLeRobot MuJoCo 仿真
 """
 
 import json
@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-from serve.sim import (
+from serve.service.client import (
     place_object as _place_object,
     open_gripper as _open_gripper,
     get_scene,
@@ -18,6 +18,19 @@ _SERVE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..
 if _SERVE_PATH not in sys.path:
     sys.path.insert(0, _SERVE_PATH)
 from scene.scene_memory import move_object as _move_object, coords_to_waypoint as _coords_to_waypoint
+
+
+def _place_position_for_fixture(target_name, fixture):
+    fpos = fixture["pos"]
+    fsize = fixture["size"]
+    fixture_type = str(fixture.get("type", "")).lower()
+    target_lower = target_name.lower()
+
+    if "sink" in target_lower or "sink" in fixture_type:
+        return [fpos[0] + 0.20, fpos[1], fpos[2] - 0.04]
+
+    surface_z = fpos[2] + fsize[2] / 2
+    return [fpos[0], fpos[1], surface_z + 0.05]
 
 
 def register_tools(mcp):
@@ -54,11 +67,7 @@ def register_tools(mcp):
                     break
             if not matched:
                 return json.dumps([f"未找到目标 '{target_name}'（不在物体或家具列表中）", {"_status": "failure"}])
-            fpos = fixtures[matched]["pos"]
-            fsize = fixtures[matched]["size"]
-            # 放在家具表面：x, y 取家具中心，z 取表面高度
-            surface_z = fpos[2] + fsize[2] / 2
-            place_pos = [fpos[0], fpos[1], surface_z + 0.05]
+            place_pos = _place_position_for_fixture(target_name, fixtures[matched])
 
         result = _place_object(obj_name, place_pos)
 
@@ -127,4 +136,4 @@ def register_tools(mcp):
     #         print(f"[place] ✗ {msg}", file=sys.stderr)
     #         return msg
 
-    # print("[place.py] 放置/释放控制模块已注册 (RoboCasa)", file=sys.stderr)
+    # print("[place.py] 放置/释放控制模块已注册 (XLeRobot MuJoCo)", file=sys.stderr)

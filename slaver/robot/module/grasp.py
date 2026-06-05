@@ -1,5 +1,5 @@
 """
-抓取控制模块 - RoboCasa 仿真
+抓取控制模块 - XLeRobot MuJoCo 仿真
 """
 
 import json
@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-from serve.sim import grasp_object as _grasp_object
+from serve.service.client import grasp_object as _grasp_object
 
 _SERVE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'serve'))
 if _SERVE_PATH not in sys.path:
@@ -49,4 +49,4 @@ def register_tools(mcp):
             print(f"[grasp] ✗ {msg}", file=sys.stderr)
             return json.dumps([msg, {"_status": "failure"}])
 
-    print("[grasp.py] 抓取控制模块已注册 (RoboCasa)", file=sys.stderr)
+    print("[grasp.py] 抓取控制模块已注册 (XLeRobot MuJoCo)", file=sys.stderr)

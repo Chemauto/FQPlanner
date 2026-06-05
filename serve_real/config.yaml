@@ -1,0 +1,7 @@
+real_base:
+  # 0: only run MuJoCo simulation
+  # 1: also mirror supported base commands to the real robot
+  enabled: 0
+  port: /dev/ttyACM0
+  speed_scale: 0.1
+  max_speed: 0.2
