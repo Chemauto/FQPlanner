@@ -52,7 +52,10 @@ def _load_map():
 
     with open(_FREE_POINTS_PATH) as f:
         fp = json.load(f)
-    map_yaml = fp.get('map', 'maps/kitchen_map.yaml')
+    map_yaml = fp.get('map', 'kitchen_map.yaml')
+    if os.path.isabs(map_yaml) and not os.path.exists(map_yaml):
+        # 旧机器的绝对路径失效时，退回相对于 free_points.json 的路径
+        map_yaml = os.path.basename(map_yaml)
     if not os.path.isabs(map_yaml):
         map_yaml = os.path.normpath(os.path.join(os.path.dirname(_FREE_POINTS_PATH), map_yaml))
 

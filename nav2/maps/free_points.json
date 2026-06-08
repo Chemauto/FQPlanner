@@ -1,5 +1,5 @@
 {
-  "map": "/home/fangqi/WorkXCJ/FQPlanner_Mujoco/nav2/maps/kitchen_map.yaml",
+  "map": "kitchen_map.yaml",
   "spacing": 0.2,
   "clearance": 0.35,
   "points": [
