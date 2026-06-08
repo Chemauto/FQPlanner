@@ -60,8 +60,11 @@ assets/xlerobot/*.stl
 
 ```text
 body: chassis
-initial pos: [0, 0, 0.035]
-base actuators: slider_actuator_x, slider_actuator_y, hinge_actuator_z
+initial pos: [0, 0, 0.38]
+base actuators: forward (ctrl[0], wheel tendon), turn (ctrl[1], wheel tendon)
+  — 差速驱动，无侧移能力；左右轮通过 tendon 联动
+arm actuators (右臂 ctrl[8-13]): Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R, Jaw_R
+arm actuators (左臂 ctrl[2-7]):  Rotation_L, Pitch_L, Elbow_L, Wrist_Pitch_L, Wrist_Roll_L, Jaw_L
 right gripper bodies: Fixed_Jaw_2, Moving_Jaw_2
 ```
 

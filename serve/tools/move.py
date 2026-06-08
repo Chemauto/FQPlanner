@@ -1,15 +1,17 @@
 """
 move.py - 机器人底座移动控制
 
-XLeRobot 差速驱动模型：2 个 motor actuator 通过 tendon 控制轮子。
-ctrl[0] = forward (前进/后退), ctrl[1] = turn (左转/右转)
-与 MuJoCo-GS-Web 实物接口一致。
+运动学控制：直接向 chassis freejoint 注入速度，不依赖轮子物理。
+Vx=1 → MAX_SPEED m/s 前进；Vw=1 → MAX_TURN rad/s 逆时针旋转。
 """
 
 import sys
 
 import numpy as np
 import mujoco
+
+MAX_SPEED = 1.0   # m/s  (Vx=1 对应的前进速度)
+MAX_TURN  = 1.5   # rad/s (Vw=1 对应的偏航角速度)
 
 
 def _normalize_angle(angle):
@@ -37,7 +39,7 @@ def get_base_info(env):
             yaw_rad:   朝向（弧度）
             qpos:      关节值 [x, y, yaw]
             qvel:      关节速度 [vx, vy, vyaw]
-            ctrl:      控制信号 [forward, turn, ...]
+            ctrl:      控制信号
     """
     model = env.sim.model
     data = env.sim.data
@@ -68,47 +70,72 @@ def get_base_info(env):
 
 def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     """
-    底座速度控制（一步）
-
-    差速驱动：ctrl[0]=forward, ctrl[1]=turn
-    Vy 被忽略（差速驱动物理上不能侧移）
+    底座运动学速度控制（一步）。
+    直接向 chassis freejoint 注入速度，不依赖轮子马达物理。
 
     Args:
         env: 环境对象
-        Vx:  前进速度 [-1, 1]，body X 轴方向（前进为正）
-        Vy:  忽略（差速驱动不支持侧移）
-        Vw:  旋转速度 [-1, 1]，逆时针为正
+        Vx:  前进速度 [-1,1]，body X 轴正方向为前进
+        Vy:  侧移速度 [-1,1]，body Y 轴正方向（全向底盘可用，XLeRobot 通常为 0）
+        Vw:  偏航角速度 [-1,1]，正值逆时针（增大 yaw）
 
     Returns:
         dict: 执行后的底座状态
     """
-    forward = np.clip(Vx, -1.0, 1.0)
-    # MuJoCo tendon sign is opposite to the public Vw convention.
-    turn = -np.clip(Vw, -1.0, 1.0)
+    joint_id = getattr(env, "base_free_joint_id", -1)
+    if joint_id < 0:
+        env.step()
+        return get_base_info(env)
 
-    env.data.ctrl[0] = forward
-    env.data.ctrl[1] = turn
+    qadr = env.model.jnt_qposadr[joint_id]
+    dadr = env.model.jnt_dofadr[joint_id]
+
+    # 当前 yaw（从 freejoint quaternion 读取）
+    qw, qx, qy, qz = env.data.qpos[qadr+3:qadr+7]
+    yaw = float(np.arctan2(2.0*(qw*qz + qx*qy), 1.0 - 2.0*(qy*qy + qz*qz)))
+
+    # body 坐标系 → 世界坐标系速度
+    cos_y, sin_y = np.cos(yaw), np.sin(yaw)
+    vx_w = (Vx * cos_y - Vy * sin_y) * MAX_SPEED
+    vy_w = (Vx * sin_y + Vy * cos_y) * MAX_SPEED
+    vw   = Vw * MAX_TURN
+
+    # 注入速度到 freejoint DOF，mj_step 会积分到位置
+    env.data.qvel[dadr+0] = vx_w
+    env.data.qvel[dadr+1] = vy_w
+    env.data.qvel[dadr+2] = 0.0   # 不允许垂直运动
+    env.data.qvel[dadr+3] = 0.0   # 清除 roll 速度
+    env.data.qvel[dadr+4] = 0.0   # 清除 pitch 速度
+    env.data.qvel[dadr+5] = vw
+
+    # 关闭轮子马达（运动学模式下不需要）
+    env.data.ctrl[0] = 0.0
+    env.data.ctrl[1] = 0.0
+
     env.step()
+
+    # 物理步后：修正 pitch/roll 漂移，保持底座水平
+    w2, x2, y2, z2 = env.data.qpos[qadr+3:qadr+7]
+    yaw_new = float(np.arctan2(2.0*(w2*z2 + x2*y2), 1.0 - 2.0*(y2*y2 + z2*z2)))
+    env.data.qpos[qadr+3:qadr+7] = [np.cos(yaw_new/2), 0.0, 0.0, np.sin(yaw_new/2)]
+    env.data.qvel[dadr+3] = 0.0
+    env.data.qvel[dadr+4] = 0.0
+    mujoco.mj_forward(env.model, env.data)
 
     return get_base_info(env)
 
 
 def stop_base(env):
-    """Stop commanded base motion and clear residual chassis/wheel velocity."""
+    """停止底座并清除残余速度。"""
     env.data.ctrl[0] = 0.0
     env.data.ctrl[1] = 0.0
 
-    if getattr(env, "base_free_joint_id", -1) >= 0:
-        dadr = env.model.jnt_dofadr[env.base_free_joint_id]
-        env.data.qvel[dadr:dadr + 6] = 0.0
+    joint_id = getattr(env, "base_free_joint_id", -1)
+    if joint_id >= 0:
+        dadr = env.model.jnt_dofadr[joint_id]
+        env.data.qvel[dadr:dadr+6] = 0.0
 
-    for joint_name in ("left_wheel_joint", "right_wheel_joint"):
-        joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-        if joint_id >= 0:
-            dadr = env.model.jnt_dofadr[joint_id]
-            env.data.qvel[dadr] = 0.0
-
-    env.sim.forward()
+    mujoco.mj_forward(env.model, env.data)
     return get_base_info(env)
 
 
@@ -207,21 +234,20 @@ def follow_path(
     Kd_xy=0.15,
     Kp_yaw=1.0,
     max_speed=0.45,
-    max_turn=0.25,
+    max_turn=0.85,
 ):
     """
-    Follow a global path with an omnidirectional PD controller.
+    Follow a global path with a differential-drive PD controller.
 
-    Converts path waypoints in world coordinates into MuJoCo body-frame
-    velocity actions.
+    XLeRobot uses differential drive (forward/turn only, no lateral movement).
+    Strategy: compute heading error toward next waypoint, apply turn+forward.
     """
     if not path:
         return {"success": False, "result": "空路径"}
 
     points = [(float(p["x"]), float(p["y"])) for p in path]
     index = 0
-    prev_err_x = 0.0
-    prev_err_y = 0.0
+    prev_heading_err = 0.0
 
     for _ in range(max_steps):
         info = get_base_info(env)
@@ -236,25 +262,22 @@ def follow_path(
         target_x, target_y = points[index]
         err_x = target_x - x_now
         err_y = target_y - y_now
+        dist = float(np.hypot(err_x, err_y))
         goal_err = float(np.hypot(points[-1][0] - x_now, points[-1][1] - y_now))
 
         if index == len(points) - 1 and goal_err < goal_threshold:
             break
 
-        d_err_x = err_x - prev_err_x
-        d_err_y = err_y - prev_err_y
-        prev_err_x = err_x
-        prev_err_y = err_y
+        angle_to_next = np.arctan2(err_y, err_x)
+        heading_err = _normalize_angle(angle_to_next - info["yaw_rad"])
+        d_heading = heading_err - prev_heading_err
+        prev_heading_err = heading_err
 
-        Vx_world = Kp_xy * err_x + Kd_xy * d_err_x
-        Vy_world = Kp_xy * err_y + Kd_xy * d_err_y
-        speed = float(np.hypot(Vx_world, Vy_world))
-        if speed > max_speed:
-            Vx_world = Vx_world / speed * max_speed
-            Vy_world = Vy_world / speed * max_speed
+        turn = np.clip(Kp_yaw * heading_err + Kd_xy * d_heading, -max_turn, max_turn)
+        forward = np.clip(Kp_xy * dist, 0.0, max_speed)
+        forward *= max(0.0, np.cos(heading_err))
 
-        Vx_body, Vy_body = _world_to_body(Vx_world, Vy_world, info["yaw_rad"])
-        move(env, Vx=Vx_body, Vy=Vy_body, Vw=0.0)
+        move(env, Vx=forward, Vw=turn)
 
     # Final alignment: combined position+yaw using nav() so there is no
     # drift from a separate spin-then-correct sequence.

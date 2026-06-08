@@ -19,7 +19,7 @@ from tools.arm import (
     move_arm,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, stop_base
+from tools.move import get_base_info, nav, move, stop_base, follow_path
 from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -56,8 +56,14 @@ _base_cmd = {
 }
 _base_status_cache = {}
 
-NAV_SUBSTEPS = 1
+NAV_SUBSTEPS = 5  # 每主循环迭代执行 5 步，提高导航响应速度
 ARM_STEP = 0.025
+
+# 右臂预设姿态: [Rotation_R, Pitch_R, Elbow_R, Wrist_Pitch_R, Wrist_Roll_R, Jaw_R]
+_ARM_POSE_NEUTRAL = [0.0, 2.0, 0.5, -0.3, 0.0, 0.0]   # 待机
+_ARM_POSE_REACH   = [0.0, 2.5, 1.5, -0.8, 0.0, 0.0]   # 伸手抓取（夹爪张开）
+_ARM_POSE_HOLD    = [0.0, 2.0, 0.8, -0.4, 0.0, 1.2]   # 持物（夹爪闭合）
+_R_ARM_ACT_NAMES  = ["Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R", "Jaw_R"]
 
 # 录制状态
 _recording = {
@@ -323,18 +329,25 @@ def _step_active_command(env):
                     final = get_base_info(env)
                     _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
                     return True
-                # 差速驱动 PD 控制
+                # 差速驱动 PD 控制（含 Kd 阻尼，防止航向抖动）
                 if pos_err >= state["pos_threshold"]:
                     angle_to_target = np.arctan2(err_y, err_x)
-                    heading_err = np.arctan2(np.sin(angle_to_target - yaw_now), np.cos(angle_to_target - yaw_now))
+                    heading_err = float(np.arctan2(
+                        np.sin(angle_to_target - yaw_now),
+                        np.cos(angle_to_target - yaw_now),
+                    ))
                     Kp = state["kp"]
-                    turn = np.clip(Kp * heading_err, -1.0, 1.0)
-                    forward = np.clip(Kp * pos_err, -0.8, 0.8)
-                    forward *= max(0.0, np.cos(heading_err))
+                    Kd = state.get("kd", 0.25)
+                    d_h = heading_err - state["prev_heading_err"]
+                    state["prev_heading_err"] = heading_err
+                    turn = float(np.clip(Kp * heading_err + Kd * d_h, -1.0, 1.0))
+                    forward = float(np.clip(Kp * pos_err, -0.8, 0.8))
+                    forward *= max(0.0, float(np.cos(heading_err)))
                     move(env, Vx=forward, Vw=turn)
                 else:
-                    Vw = np.clip(2.0 * (yaw_err / 90.0), -1.0, 1.0)
+                    Vw = float(np.clip(1.5 * (yaw_err / 90.0), -1.0, 1.0))
                     move(env, Vx=0.0, Vw=Vw)
+                _sync_ee_to_base(env)
                 state["step"] += 1
             return True
 
@@ -361,12 +374,14 @@ def _step_active_command(env):
             if state["phase"] == "approach":
                 target = env.get_object_pos(obj_name).copy()
                 target[2] += 0.04
+                _apply_right_arm_pose(env, _ARM_POSE_REACH)
                 if _move_virtual_ee(env, target):
                     env.grasped_object = obj_name
                     state["phase"] = "lift"
                     state["lift_target"] = target + np.array([0.0, 0.0, 0.20])
                 return True
             if state["phase"] == "lift":
+                _apply_right_arm_pose(env, _ARM_POSE_HOLD)
                 if _move_virtual_ee(env, state["lift_target"]):
                     try:
                         move_object(obj_name, "robot_hand")
@@ -381,6 +396,7 @@ def _step_active_command(env):
                 _finish_command(cmd, {"success": False, "result": f"物体 {obj_name} 不存在"})
                 return True
             if state["phase"] == "move":
+                _apply_right_arm_pose(env, _ARM_POSE_HOLD)
                 if env.grasped_object != obj_name:
                     env.grasped_object = obj_name
                 if _move_virtual_ee(env, state["target_pos"]):
@@ -390,6 +406,7 @@ def _step_active_command(env):
                     state["retreat_target"] = state["target_pos"] + np.array([0.0, 0.0, 0.20])
                 return True
             if state["phase"] == "retreat":
+                _apply_right_arm_pose(env, _ARM_POSE_NEUTRAL)
                 if _move_virtual_ee(env, state["retreat_target"]):
                     try:
                         waypoint_name = coords_to_waypoint(state["target_pos"].tolist())
@@ -398,6 +415,89 @@ def _step_active_command(env):
                         print(f"[SceneMemory] 更新失败: {e}", flush=True)
                     _finish_command(cmd, {"success": True, "result": f"成功放置 {obj_name}"})
                 return True
+
+        if cmd_type == "nav_path":
+            points = state["points"]
+            if not points:
+                _finish_command(cmd, {"success": False, "result": "空路径"})
+                return True
+            target_yaw = state.get("target_yaw")
+            wpt_thresh  = 0.22
+            goal_thresh = 0.25
+            yaw_thresh  = 5.0
+
+            for _ in range(NAV_SUBSTEPS):
+                info  = get_base_info(env)
+                x_now = info["pos"][0]
+                y_now = info["pos"][1]
+                index = state["index"]
+
+                while index < len(points) - 1:
+                    if np.hypot(points[index][0]-x_now, points[index][1]-y_now) > wpt_thresh:
+                        break
+                    index += 1
+                state["index"] = index
+
+                goal_err = float(np.hypot(points[-1][0]-x_now, points[-1][1]-y_now))
+
+                if index == len(points) - 1 and goal_err < goal_thresh:
+                    if target_yaw is not None:
+                        yaw_err = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+                        if abs(yaw_err) > yaw_thresh:
+                            Vw = float(np.clip(1.0 * (yaw_err / 90.0), -1.0, 1.0))
+                            move(env, Vx=0.0, Vw=Vw)
+                            _sync_ee_to_base(env)
+                            state["step"] += 1
+                            continue
+                    stop_base(env)
+                    final = get_base_info(env)
+                    final_err = float(np.hypot(
+                        points[-1][0]-final["pos"][0], points[-1][1]-final["pos"][1]))
+                    _finish_command(cmd, {
+                        "success": True,
+                        "pos": final["pos"],
+                        "yaw": final["yaw_deg"],
+                        "goal_error": final_err,
+                        "waypoints": len(points),
+                    })
+                    return True
+
+                if state["step"] >= state["max_steps"]:
+                    stop_base(env)
+                    final = get_base_info(env)
+                    final_err = float(np.hypot(
+                        points[-1][0]-final["pos"][0], points[-1][1]-final["pos"][1]))
+                    _finish_command(cmd, {
+                        "success": final_err < 0.30,
+                        "pos": final["pos"],
+                        "yaw": final["yaw_deg"],
+                        "goal_error": final_err,
+                        "waypoints": len(points),
+                        "result": "路径跟踪超时",
+                    })
+                    return True
+
+                tx, ty = points[index]
+                ex, ey = tx - x_now, ty - y_now
+                dist    = float(np.hypot(ex, ey))
+                angle_to_next = np.arctan2(ey, ex)
+                heading_err   = float(np.arctan2(
+                    np.sin(angle_to_next - info["yaw_rad"]),
+                    np.cos(angle_to_next - info["yaw_rad"]),
+                ))
+                d_heading = heading_err - state["prev_heading_err"]
+                state["prev_heading_err"] = heading_err
+
+                turn    = float(np.clip(1.4 * heading_err + 0.15 * d_heading, -0.85, 0.85))
+                forward = float(np.clip(1.4 * dist, 0.0, 0.45))
+                forward *= max(0.0, float(np.cos(heading_err)))
+
+                move(env, Vx=forward, Vw=turn)
+                _sync_ee_to_base(env)
+                state["step"] += 1
+
+            return True
+
     except Exception as e:
         if cmd is not None and cmd.get("type") == "move_duration":
             stop_real_base()
@@ -419,6 +519,28 @@ def _move_virtual_ee(env, target):
     if env.grasped_object:
         env.set_object_pos(env.grasped_object, env.virtual_ee_pos)
     return False
+
+
+def _apply_right_arm_pose(env, pose):
+    """设置右臂目标角度，MuJoCo 位置控制器会平滑跟踪。"""
+    for name, val in zip(_R_ARM_ACT_NAMES, pose):
+        act_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
+        if act_id >= 0:
+            env.data.ctrl[act_id] = float(val)
+
+
+def _sync_ee_to_base(env):
+    """持物时让虚拟末端（及物体）随底盘一起移动。
+    Z 保持不变（由 lift 阶段决定高度），X/Y 跟随机器人前方 0.2m 位置。
+    """
+    if not env.grasped_object:
+        return
+    info = get_base_info(env)
+    base = np.array(info["pos"])
+    yaw = info["yaw_rad"]
+    env.virtual_ee_pos[0] = base[0] + 0.2 * float(np.cos(yaw))
+    env.virtual_ee_pos[1] = base[1] + 0.2 * float(np.sin(yaw))
+    env.set_object_pos(env.grasped_object, env.virtual_ee_pos)
 
 
 def process_commands(env):
@@ -469,10 +591,38 @@ def process_commands(env):
                     close_gripper(env, **params)
                     result = {"success": True}
                 elif cmd_type == "nav":
-                    info = nav(env, **params)
-                    result = {"success": info.get("reached", False), "pos": info["pos"], "yaw": info["yaw_deg"]}
+                    _active_command = {
+                        **cmd,
+                        "state": {
+                            "x": float(params["x"]),
+                            "y": float(params["y"]),
+                            "target_yaw": params.get("target_yaw"),
+                            "pos_threshold": float(params.get("pos_threshold", 0.25)),
+                            "yaw_threshold": float(params.get("yaw_threshold", 5.0)),
+                            "kp": float(params.get("kp", 1.5)),
+                            "kd": float(params.get("kd", 0.25)),
+                            "max_steps": int(params.get("max_steps", 3000)),
+                            "step": 0,
+                            "prev_heading_err": 0.0,
+                        },
+                    }
+                    return
                 elif cmd_type == "nav_path":
-                    result = follow_path(env, **params)
+                    path = params.get("path", [])
+                    points = [(float(p["x"]), float(p["y"])) for p in path]
+                    tw = params.get("w")
+                    _active_command = {
+                        **cmd,
+                        "state": {
+                            "points": points,
+                            "index": 0,
+                            "target_yaw": float(tw) if tw is not None else None,
+                            "step": 0,
+                            "max_steps": int(params.get("max_steps", 3000)),
+                            "prev_heading_err": 0.0,
+                        },
+                    }
+                    return
                 elif cmd_type == "cmd_vel":
                     info = move(env, **params)
                     result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}

@@ -37,8 +37,14 @@ if __name__ == "__main__":
     # 2. 初始化场景
     env.reset()
     import sys
+    import yaml as _yaml
     sys.path.insert(0, os.path.dirname(__file__))
-    from scene.scene_memory import reset_to_initial
+    from scene.scene_memory import reset_to_initial, build_initial_state, INITIAL_PATH
+    # 根据仿真物体的实际位置自动生成初始状态（保证与当前 waypoints.yaml 一致）
+    _initial = build_initial_state(env)
+    with open(INITIAL_PATH, 'w') as _f:
+        _yaml.dump(_initial, _f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    print("[SceneMemory] scene_state_initial.yaml 已从仿真位置自动生成")
     reset_to_initial()
 
     # 3. 调试信息
