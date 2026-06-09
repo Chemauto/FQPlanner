@@ -74,6 +74,15 @@
 - [x] 静态检查与旧路径搜索。
 - **状态：** complete
 
+### 阶段 10：ROS2 SLAM/Nav2 bridge
+- [x] 为 MuJoCo 后端新增 `GET /scan`。
+- [x] 新建 `ros2_ws/src/fqplanner_nav_bridge/` ROS2 Python 包。
+- [x] 新增 `mujoco_bridge.py` 发布 `/scan`、`/odom`、`/tf` 并转发 `/cmd_vel`。
+- [x] 新增 `nav2_goal_bridge.py` 将 HTTP `/nav` 转为 Nav2 action。
+- [x] 新增 SLAM 和 Nav2 launch 文件。
+- [x] 更新 nav2、robot_api contract 和 serve service 文档。
+- **状态：** complete
+
 ## 关键问题
 1. 统一接口应避免改变现有 HTTP API，优先复用 `/grasp`、`/place`、`/scene` 等端点。
 2. 真实硬件触发必须由配置控制，不能在纯仿真模式下误触发。
@@ -89,6 +98,7 @@
 | `robot_api.client` 只暴露语义参数 | `snap_threshold` 等后端实现参数不应进入 LLM/工具稳定接口 |
 | `serve/service/` 不再放 client | 上层客户端统一在 `robot_api.client`，service 只表达后端 HTTP 服务 |
 | `serve_real/bridge` 与 `serve_real/service` 分开 | 上层触发真实硬件和开发板监听服务是两个不同职责 |
+| ROS2 bridge 独立放在 `ros2_ws/src/fqplanner_nav_bridge` | 不把 ROS2 依赖塞进 MuJoCo 后端或 LLM 工具层 |
 
 ## 遇到的错误
 | 错误 | 尝试次数 | 解决方案 |

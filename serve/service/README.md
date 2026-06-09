@@ -22,6 +22,7 @@ Flask 应用，端口 5001。接收 HTTP 请求，调用 `serve/tools/` 和 `ser
 | `/scene` | GET | 完整场景（聚合 objects + fixtures + robot） |
 | `/scene_state` | GET | 场景状态记忆 |
 | `/map_data` | GET | 占据栅格地图（用于 nav2 导航） |
+| `/scan` | GET | 二维 LaserScan 数据（用于 ROS2 SLAM/Nav2 bridge） |
 
 **机器人控制：**
 

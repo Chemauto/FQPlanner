@@ -177,6 +177,30 @@
 | 真实后端目录检查 | `find serve_real -maxdepth 4 -type d` | 只保留 bridge/service/backend 等有意义目录 | 通过 | pass |
 | 路径检查 | 旧真实后端入口和项目绝对路径搜索 | 无旧入口；无项目绝对路径 | 通过 | pass |
 
+### 阶段 10：ROS2 SLAM/Nav2 bridge
+- **状态：** complete
+- 执行的操作：
+  - 在 MuJoCo Flask 后端新增 `GET /scan`，基于占据栅格和底座位姿生成 2D LaserScan 数据。
+  - 新建 ROS2 Python 包 `fqplanner_nav_bridge` 到 `ros2_ws/src/`。
+  - 新增 `mujoco_bridge.py`：发布 `/scan`、`/odom`、`/tf`，订阅 `/cmd_vel` 并转发到 MuJoCo `/cmd_vel`。
+  - 新增 `nav2_goal_bridge.py`：HTTP `/nav` 转 Nav2 `NavigateToPose` action，其它请求代理回 MuJoCo 后端。
+  - 新增 `mujoco_slam.launch.py` 和 `mujoco_navigation.launch.py`。
+  - 新增 Nav2 参数文件并更新 nav2/README、robot_api contract、serve service README。
+- 创建/修改的文件：
+  - `serve/service/server.py`
+  - `nav2/README.md`
+  - `robot_api/contract.md`
+  - `serve/service/README.md`
+  - `/home/fangqi/WorkXCJ/ros2_ws/src/fqplanner_nav_bridge/`
+
+## ROS2 bridge 验证
+| 测试 | 输入 | 预期结果 | 实际结果 | 状态 |
+|------|------|---------|---------|------|
+| Flask 后端静态编译 | `python3 -m py_compile serve/service/server.py` | 无语法错误 | 通过 | pass |
+| ROS2 bridge 静态编译 | `/tmp/fqplanner_nav_bridge/*.py` | 无语法错误 | 通过 | pass |
+| 复制一致性 | `diff -qr /tmp/fqplanner_nav_bridge ros2_ws/src/fqplanner_nav_bridge` | 无差异 | 通过 | pass |
+| ROS2 包结构 | `find ros2_ws/src/fqplanner_nav_bridge -maxdepth 3 -type f` | package/launch/config/node 文件齐全 | 通过 | pass |
+
 ## 错误日志
 | 时间戳 | 错误 | 尝试次数 | 解决方案 |
 |--------|------|---------|---------|
