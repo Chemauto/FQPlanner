@@ -29,7 +29,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 def register_all_modules():
     print("[skill.py] 开始注册机器人技能模块...", file=sys.stderr)
 
-    register_base_tools(mcp)
+    # register_base_tools(mcp)
     register_grasp_tools(mcp)
     register_place_tools(mcp)
     register_camera_tools(mcp)
