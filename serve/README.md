@@ -1,16 +1,18 @@
-# serve/ — 仿真后端
+# serve/ — MuJoCo 后端
 
-MuJoCo 仿真后端，提供 HTTP API 给 slaver 调用。
+`serve/` 是当前 MuJoCo 仿真后端。上层规划、工具、网页和导航代码不直接依赖这里，而是统一通过 `robot_api.client` 调用。
 
 ## 目录结构
 
 ```
 serve/
 ├── main.py               # 启动入口：创建场景 + 启动 API + 主循环
-├── mujoco_backend.py     # MuJoCo 运行时环境（MujocoKitchenEnv）
-├── scene/                # 场景生成和状态管理
-├── tools/                # 机器人控制工具（底盘、机械臂）
-└── service/              # HTTP API 服务端 + 客户端
+├── backend/
+│   └── mujoco_backend.py # MuJoCo 运行时环境（MujocoKitchenEnv）
+├── scene/                # MuJoCo/RoboCasa 场景生成和状态管理
+├── tools/                # MuJoCo 动作实现（底盘、机械臂）
+└── service/
+    └── server.py         # HTTP API 服务端
 ```
 
 ## 启动
@@ -25,17 +27,27 @@ python main.py --no-viewer  # 无 viewer 模式
 ## 调用链路
 
 ```
-slaver → service/client.py → HTTP → service/server.py → tools/ → mujoco_backend.py
+master/slaver/deploy/nav2
+  -> robot_api.client
+  -> robot_api.runtime
+  -> HTTP
+  -> serve/service/server.py
+  -> serve/tools/
+  -> serve/backend/mujoco_backend.py
 ```
 
-- `client.py` 是 HTTP 客户端，slaver 通过它调 serve 的 API
-- `server.py` 是 Flask 服务端，接收请求后调 tools 和 env
-- `mujoco_backend.py` 是 MuJoCo 运行时，直接操作仿真模型
+- `robot_api` 是上层唯一机器人接口。
+- `service/server.py` 是 MuJoCo HTTP 服务端，负责实现 `robot_api` 的后端契约。
+- `tools/` 是 MuJoCo 的动作实现，不是上层通用工具接口。
+- `backend/mujoco_backend.py` 是 MuJoCo 运行时，直接操作模型和仿真数据。
 
 ## sim2real 迁移
 
-只需替换 `mujoco_backend.py`，实现同名的 `MujocoKitchenEnv` 类方法。
-`client.py`、`server.py`、slaver 不需要改。
+真实机器人放在 `serve_real/`，由 `robot_api.runtime` 按配置触发。`serve/` 不直接 import `serve_real`。
+
+## sim2sim 迁移
+
+Isaac Sim、Gazebo 等后端应在同层目录实现自己的服务，例如 `serve_isaac/` 或 `serve_gazebo/`，并提供与 [`robot_api/contract.md`](../robot_api/contract.md) 对齐的 HTTP endpoint。上层仍然只调用 `robot_api.client`。
 
 ## 文件说明
 
@@ -48,6 +60,6 @@ slaver → service/client.py → HTTP → service/server.py → tools/ → mujoc
 `GET /camera/latest?camera=right_arm_cam` 读取单路相机，通过
 `GET /camera/status` 查看状态。
 
-### mujoco_backend.py
+### backend/mujoco_backend.py
 MuJoCo 运行时环境。`MujocoKitchenEnv` 类封装模型加载、仿真步进、
 物体/底盘控制。是整个 serve 的仿真核心。

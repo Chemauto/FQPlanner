@@ -7,7 +7,7 @@
 ## 目录结构
 
 ```
-RealBase/
+serve_real/backend/base/RealBase/
 ├── motor_controller.py      # 底盘控制器主模块
 ├── test_motor.py            # 统一的测试程序
 ├── requirements.txt         # Python依赖包列表
@@ -31,7 +31,7 @@ RealBase/
 ### 1. 安装依赖
 
 ```bash
-cd /home/dora/RoboOs/LekiwiTest/RealBase
+cd serve_real/backend/base/RealBase
 pip install -r requirements.txt
 ```
 
@@ -367,5 +367,5 @@ pip install -r requirements.txt
 
 ## 参考资料
 
-- [lerobot lekiwi 实现](/home/dora/lerobot/src/lerobot/robots/lekiwi/lekiwi.py)
+- lerobot lekiwi 实现
 - [Feetech STS3215 手册](https://www.feetechrc.com/)

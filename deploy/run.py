@@ -9,6 +9,7 @@ import ast
 import io
 import json
 import os
+import sys
 from pathlib import Path
 
 import redis
@@ -16,10 +17,16 @@ import requests
 import yaml
 from flask import Flask, jsonify, render_template, request, send_file
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from robot_api.config import load_robot_api_config
+
 app = Flask(__name__)
 
-MASTER_URL = "http://127.0.0.1:5000"
-SIM_URL = "http://127.0.0.1:5001"
+MASTER_URL = os.getenv("MASTER_URL", "http://127.0.0.1:5000")
+SIM_URL = os.getenv("ROBOT_API_URL", load_robot_api_config().server_url)
 REDIS_CFG = {"host": "127.0.0.1", "port": 6379, "db": 0, "password": None}
 
 

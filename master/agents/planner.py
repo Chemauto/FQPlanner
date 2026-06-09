@@ -4,6 +4,7 @@ import yaml
 from agents.prompts import MASTER_PLANNING_PLANNING
 from agent.collaboration import Collaborator
 from openai import AzureOpenAI, OpenAI
+from robot_api.client import get_objects
 
 
 class GlobalTaskPlanner:
@@ -73,21 +74,20 @@ class GlobalTaskPlanner:
 
         # ===== 注入真实物体坐标 =====
         try:
-            import requests
-            resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
-            if resp.status_code == 200:
-                sim_objects = resp.json()
-                if isinstance(all_environments_info, dict):
-                    for obj_name, obj_data in sim_objects.items():
-                        if obj_name in all_environments_info:
-                            import json as _json
-                            info = _json.loads(all_environments_info[obj_name]) if isinstance(all_environments_info[obj_name], str) else all_environments_info[obj_name]
-                            pos = obj_data.get("pos", [])
-                            info["position"] = f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" if pos else "unknown"
-                            info["grasped"] = obj_data.get("grasped", False)
-                            all_environments_info[obj_name] = info
+            sim_objects = get_objects()
+            if isinstance(sim_objects, dict) and sim_objects.get("success") is False:
+                sim_objects = {}
+            if isinstance(sim_objects, dict) and isinstance(all_environments_info, dict):
+                for obj_name, obj_data in sim_objects.items():
+                    if obj_name in all_environments_info and isinstance(obj_data, dict):
+                        import json as _json
+                        info = _json.loads(all_environments_info[obj_name]) if isinstance(all_environments_info[obj_name], str) else all_environments_info[obj_name]
+                        pos = obj_data.get("pos", [])
+                        info["position"] = f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" if pos else "unknown"
+                        info["grasped"] = obj_data.get("grasped", False)
+                        all_environments_info[obj_name] = info
         except Exception as e:
-            print(f"[Planner] Warning: could not fetch sim object positions: {e}")
+            print(f"[Planner] Warning: could not fetch object positions: {e}")
 
         # ===== 注入工作点信息 =====
         try:

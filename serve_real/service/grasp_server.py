@@ -5,23 +5,32 @@
 监听 Socket 连接，接收 0xAA 指令，执行当前项目内的抓取脚本并返回结果。
 
 使用方法：
-    python3 serve_real/Arm/grasp_server.py
+    python3 serve_real/service/grasp_server.py
 
     或在后台运行：
-    nohup python3 serve_real/Arm/grasp_server.py > grasp_server.log 2>&1 &
+    nohup python3 serve_real/service/grasp_server.py > grasp_server.log 2>&1 &
 """
 
 import socket
 import subprocess
 import os
+from pathlib import Path
 
 
 # 配置
 HOST = "0.0.0.0"  # 监听所有网络接口
 PORT = 9999       # 端口号
-SCRIPT_PATH = "/home/fangqi/camera_10s.sh"  # 抓取脚本绝对路径
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = "../../camera_10s.sh"  # 相对项目根目录
 GRASP_COMMAND = 0xAA  # 抓取指令字节
 TIMEOUT = 60          # 抓取脚本超时时间（秒）
+
+
+def _script_path():
+    path = Path(os.environ.get("GRASP_SCRIPT_PATH", SCRIPT_PATH))
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return str(path.resolve())
 
 
 def run_grasp_script():
@@ -34,13 +43,14 @@ def run_grasp_script():
     try:
         print("[服务器] 开始执行抓取脚本")
 
-        if not os.path.exists(SCRIPT_PATH):
-            error_msg = f"抓取脚本不存在: {SCRIPT_PATH}"
+        script_path = _script_path()
+        if not os.path.exists(script_path):
+            error_msg = f"抓取脚本不存在: {script_path}"
             print(f"[服务器] {error_msg}")
             return f"FAILED:03:{error_msg}"
 
         result = subprocess.run(
-            ["bash", SCRIPT_PATH],
+            ["bash", script_path],
             capture_output=True,
             text=True,
             timeout=TIMEOUT,
@@ -124,7 +134,7 @@ def main():
         print("抓取服务器启动成功")
         print(f"监听地址: {HOST}:{PORT}")
         print(f"抓取指令: 0x{GRASP_COMMAND:02X}")
-        print(f"抓取脚本: {SCRIPT_PATH}")
+        print(f"抓取脚本: {_script_path()}")
         print("=" * 60)
         print("等待客户端连接...")
         print("按 Ctrl+C 停止服务器")

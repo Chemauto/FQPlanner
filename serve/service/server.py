@@ -4,13 +4,11 @@ server.py - Flask API 服务
 """
 
 import os
-import sys
 import time
 import threading
 import numpy as np
 import mujoco
 import yaml
-from pathlib import Path
 from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 
@@ -21,21 +19,6 @@ from tools.arm import (
 )
 from tools.move import get_base_info, nav, move, stop_base
 from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-try:
-    from serve_real.base_bridge import start_move_duration, stop_real_base
-except Exception as e:
-    print(f"[real_base] bridge 未启用: {e}", flush=True)
-
-    def start_move_duration(vx, duration, vw=0.0):
-        return None
-
-    def stop_real_base():
-        return None
 
 app = Flask(__name__)
 CORS(app)
@@ -346,7 +329,6 @@ def _step_active_command(env):
                 # 然后返回 [0,0] 停止信号；过期后自动变 None 不再干预
                 set_base_velocity(Vx=0.0, Vw=0.0, timeout=1.0)
                 stop_base(env)
-                stop_real_base()
                 final = get_base_info(env)
                 _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
                 return True
@@ -399,8 +381,6 @@ def _step_active_command(env):
                     _finish_command(cmd, {"success": True, "result": f"成功放置 {obj_name}"})
                 return True
     except Exception as e:
-        if cmd is not None and cmd.get("type") == "move_duration":
-            stop_real_base()
         _finish_command(cmd, {"success": False, "error": str(e)})
         return True
     return False
@@ -484,18 +464,12 @@ def process_commands(env):
                     }
                     return
                 elif cmd_type == "move_duration":
-                    real_thread = start_move_duration(
-                        float(params.get("vx", 0.0)),
-                        float(params["duration"]),
-                        float(params.get("vw", 0.0)),
-                    )
                     _active_command = {
                         **cmd,
                         "state": {
                             "vx": float(params.get("vx", 0.0)),
                             "vw": float(params.get("vw", 0.0)),
                             "end_time": time.time() + float(params["duration"]),
-                            "real_thread": real_thread,
                         },
                     }
                     return

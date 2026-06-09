@@ -1,5 +1,5 @@
 """
-放置/释放控制模块 - XLeRobot MuJoCo 仿真
+放置/释放控制模块。
 """
 
 import json
@@ -8,9 +8,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-from serve.service.client import (
+from robot_api.client import (
     place_object as _place_object,
-    open_gripper as _open_gripper,
     get_scene,
 )
 
@@ -102,23 +101,4 @@ def register_tools(mcp):
             print(f"[place] ✗ {msg}", file=sys.stderr)
             return json.dumps([msg, {"_status": "failure"}])
 
-    # @mcp.tool()
-    # async def release_object() -> str:
-    #     """释放当前抓取的物体（打开夹爪）。
-
-    #     Returns:
-    #         操作结果。
-    #     """
-    #     print("[place] 释放物体...", file=sys.stderr)
-    #     result = _open_gripper()
-
-    #     if result.get("success"):
-    #         response = "成功释放物体"
-    #         print(f"[place] ✓ {response}", file=sys.stderr)
-    #         return response
-    #     else:
-    #         msg = result.get("result", "释放物体失败，请重试。")
-    #         print(f"[place] ✗ {msg}", file=sys.stderr)
-    #         return msg
-
-    # print("[place.py] 放置/释放控制模块已注册 (XLeRobot MuJoCo)", file=sys.stderr)
+    print("[place.py] 放置模块已注册 (robot_api)", file=sys.stderr)

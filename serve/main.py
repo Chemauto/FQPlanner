@@ -4,14 +4,14 @@ main.py - 纯 MuJoCo 固定场景仿真主程序
 
 使用方式:
     python main.py
-    然后打开 service/web.py 或浏览器访问 http://localhost:5001
+    API 地址: http://localhost:5001
 """
 
 import argparse
 import os
 import time
 from termcolor import colored
-from mujoco_backend import MujocoKitchenEnv
+from backend.mujoco_backend import MujocoKitchenEnv
 from service.server import (
     start_server,
     process_commands,

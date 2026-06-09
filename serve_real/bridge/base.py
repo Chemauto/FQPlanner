@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bridge MuJoCo base commands to the real differential base.
+Bridge unified robot base commands to the real differential base.
 
 The bridge is disabled by default. Enable it in serve_real/config.yaml:
     real_base:
@@ -14,10 +14,10 @@ import time
 from pathlib import Path
 
 
-_HERE = Path(__file__).resolve().parent
+_SERVE_REAL_DIR = Path(__file__).resolve().parents[1]
+_CONFIG_PATH = _SERVE_REAL_DIR / "config.yaml"
 _CANDIDATE_REALBASE_DIRS = [
-    _HERE / "RealBase",
-    _HERE / "Base" / "RealBase",
+    _SERVE_REAL_DIR / "backend" / "base" / "RealBase",
 ]
 for _path in _CANDIDATE_REALBASE_DIRS:
     if (_path / "motor_controller.py").exists():
@@ -44,16 +44,12 @@ def _as_bool(value, default: bool = False) -> bool:
 
 
 def _load_config() -> dict:
-    config_path = _HERE / "config.yaml"
-    if not config_path.exists():
-        return {}
     try:
-        import yaml
+        from robot_api.config import _read_yaml
 
-        with config_path.open("r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+        return _read_yaml(_CONFIG_PATH)
     except Exception as exc:
-        print(f"[real_base] 读取配置失败 {config_path}: {exc}", flush=True)
+        print(f"[real_base] 读取配置失败 {_CONFIG_PATH}: {exc}", flush=True)
         return {}
 
 

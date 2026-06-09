@@ -1,5 +1,5 @@
 """
-底盘导航模块 - PID 直线导航
+底盘导航模块。
 """
 
 import json
@@ -7,7 +7,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-from serve.service.client import navigate, get_base_status, move_for_duration
+from robot_api.client import move_forward as _move_forward
+from robot_api.client import navigate_to as _navigate_to
+from robot_api.client import rotate as _rotate
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from waypoint_manager import find_waypoint
@@ -60,7 +62,7 @@ def register_tools(mcp):
         return await _do_navigate(wp['x'], wp['y'], wp['yaw_deg'])
 
     async def _do_navigate(x, y, yaw_deg):
-        result = navigate(x, y, target_yaw=yaw_deg)
+        result = _navigate_to([x, y], yaw=yaw_deg)
 
         if result.get("success"):
             pos = result.get("pos", [0, 0, 0])
@@ -93,7 +95,7 @@ def register_tools(mcp):
             move_forward(duration=1.0, speed=-0.3)  # 后退1秒
         """
         print(f"[base] 持续移动请求: speed={speed}, duration={duration}s", file=sys.stderr)
-        result = move_for_duration(vx=speed, vw=0.0, duration=duration)
+        result = _move_forward(duration=duration, speed=speed)
 
         if result.get("success"):
             pos = result.get("pos", [0, 0, 0])
@@ -126,7 +128,8 @@ def register_tools(mcp):
             rotate(duration=1.0, speed=-0.5)  # 右转1秒
         """
         print(f"[base] 旋转请求: speed={speed}, duration={duration}s", file=sys.stderr)
-        result = move_for_duration(vx=0.0, vw=speed, duration=duration)
+        direction = "left" if speed >= 0 else "right"
+        result = _rotate(direction=direction, duration=duration, speed=abs(speed))
 
         if result.get("success"):
             pos = result.get("pos", [0, 0, 0])
@@ -140,4 +143,4 @@ def register_tools(mcp):
             msg = result.get("result", "旋转失败，请重试。")
             return json.dumps([msg, {"_status": "failure"}])
 
-    print("[base.py] 底盘控制模块已注册 (PID 直线导航 + 持续运动)", file=sys.stderr)
+    print("[base.py] 底盘控制模块已注册 (robot_api)", file=sys.stderr)

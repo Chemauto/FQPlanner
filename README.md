@@ -1,6 +1,6 @@
 # FQPlanner_Mujoco
 
-FQPlanner_Mujoco 是面向具身智能任务规划与机器人控制验证的 MuJoCo 仿真项目。本项目基于 [FlagScale](https://github.com/FlagOpen/FlagScale) 和 [RoboOS](https://github.com/FlagOpen/RoboOS) 的智能体与具身系统开发思路，结合 [RoboCasa](https://github.com/robocasa/robocasa)、MuJoCo 和 XLeRobot 资源，将 FQPlanner 的 Master / Slaver / Web 控制链路迁移到本地仿真与可选实机桥接环境中。
+本项目基于 [FlagScale](https://github.com/FlagOpen/FlagScale) 和 [RoboOS](https://github.com/FlagOpen/RoboOS) 的智能体与具身系统开发思路，结合 [RoboCasa](https://github.com/robocasa/robocasa)、MuJoCo 和 XLeRobot 资源，将 FQPlanner 的 Master / Slaver / Web 控制链路迁移到本地仿真与可选实机桥接环境中。
 
 项目重点支持：
 
@@ -16,7 +16,8 @@ User / Web UI
   -> master/              任务规划
   -> Redis                消息通信
   -> slaver/              MCP 工具执行
-  -> serve/               MuJoCo + Flask API
+  -> robot_api/           统一机器人接口
+  -> serve/               MuJoCo HTTP 后端
   -> serve_real/          可选真实机器人桥接
 ```
 
@@ -25,10 +26,14 @@ User / Web UI
 ```text
 自然语言指令
   -> slaver/robot/module/grasp.py::grasp_object
-  -> serve/service/server.py POST /grasp
-  -> serve_real/config.yaml real_arm.enabled = 1 时发送 0xAA
-  -> serve_real/Arm/grasp_server.py
-  -> /home/fangqi/camera_10s.sh
+  -> robot_api.client
+  -> robot_api/config.yaml 中启用的动作后端
+  -> 默认 MuJoCo: serve/service/server.py POST /grasp
+  -> serve/backend/mujoco_backend.py
+  -> real.accept_action = 1 时发送 0xAA
+  -> serve_real/bridge/arm.py
+  -> serve_real/service/grasp_server.py
+  -> camera_10s.sh
 ```
 
 ## Repository
@@ -36,9 +41,11 @@ User / Web UI
 ```text
 assets/xlerobot/             XLeRobot MJCF 与 mesh 资源
 assets/scene/                生成后的 MuJoCo 场景
-serve/                       仿真后端、Flask API、场景生成
+serve/                       MuJoCo HTTP 后端、场景生成、动作实现
+serve/backend/               MuJoCo 运行时环境
 serve/scene/config/          layout / style / objects / waypoints 配置
-serve_real/                  真实机器人桥接
+robot_api/                   上层复用的统一机器人接口
+serve_real/                  真实机器人 bridge / service / backend
 master/                      任务规划服务
 slaver/                      MCP 工具执行服务
 deploy/                      Web 控制台
@@ -66,7 +73,7 @@ redis-server
 
 ```bash
 conda activate robocasa
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
+cd serve
 python main.py
 ```
 
@@ -80,7 +87,6 @@ python main.py --no-viewer
 
 ```bash
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python master/run.py
 python slaver/run.py
 python deploy/run.py
@@ -89,8 +95,8 @@ python deploy/run.py
 默认服务地址：
 
 ```text
-MuJoCo API: http://127.0.0.1:5001
-Web UI:     http://127.0.0.1:8888
+Robot API: http://127.0.0.1:5001
+Web UI:    http://127.0.0.1:8888
 ```
 
 基础检查：
@@ -103,46 +109,45 @@ curl http://127.0.0.1:5001/scene
 
 ## Real Robot Bridge
 
-真实抓取由 [`serve_real/config.yaml`](serve_real/config.yaml) 控制：
+动作是否传递给真实机器人由 [`robot_api/config.yaml`](robot_api/config.yaml) 控制：
 
 ```yaml
-real_arm:
-  enabled: 1
-  host: <board-ip>
-  port: 9999
-  timeout: 60
-  command_byte: 0xAA
-  fail_on_error: 1
+backends:
+  real:
+    enabled: 1
+    accept_action: 1
+    required: 1
 ```
 
-`host` 只填写开发板 IP，例如 `10.11.32.9`，不要写成 `user@ip`。
+真实硬件连接参数放在 [`serve_real/config.yaml`](serve_real/config.yaml)。`host` 只填写开发板 IP，不要写成 `user@ip`。
 
 开发板侧启动：
 
 ```bash
-python3 serve_real/Arm/grasp_server.py
+python3 serve_real/service/grasp_server.py
 ```
 
 当前抓取服务器收到 `0xAA` 后会执行：
 
 ```bash
-/home/fangqi/camera_10s.sh
+camera_10s.sh
 ```
 
-修改 `serve_real/config.yaml` 后，需要重启 Slaver 或 `slaver/robot/skill.py`，让工具进程重新加载配置。
+修改 `robot_api/config.yaml` 后，需要重启 Slaver 或 `slaver/robot/skill.py`，让工具进程重新加载配置。
 
 ## Safety
 
-- 纯仿真测试时建议保持 `real_arm.enabled: 0`。
+- 纯仿真测试时建议保持 `real.enabled: 0` 或 `real.accept_action: 0`。
 - 实机运行前确认工作空间安全，并准备独立急停或停止脚本。
 - 停止 `grasp_server.py` 只能阻止新指令；已经下发到硬件或脚本中的动作是否停止，取决于真实控制脚本和硬件控制器。
-- `/home/fangqi/camera_10s.sh` 是当前实机动作边界，脚本应在失败时返回非零退出码。
+- `camera_10s.sh` 是当前实机动作边界，脚本应在失败时返回非零退出码。
 
 ## Documentation
 
 - [`usage.md`](usage.md)：启动流程和 API 示例。
 - [`CLAUDE.md`](CLAUDE.md)：当前迁移状态和开发注意事项。
-- [`serve_real/Arm/README.md`](serve_real/Arm/README.md)：真实抓取桥接说明。
+- [`serve_real/README.md`](serve_real/README.md)：真实机器人桥接说明。
+- [`robot_api/contract.md`](robot_api/contract.md)：统一机器人接口契约。
 
 ## References
 

@@ -8,8 +8,18 @@ import sys
 import math
 import json
 import numpy as np
-import requests
 import yaml
+
+from robot_api.client import get_fixtures, get_objects
+
+try:
+    from serve.scene.scene_memory import get_object_coords, get_object_location
+except Exception:
+    def get_object_coords(obj_name):
+        return None
+
+    def get_object_location(obj_name):
+        return None
 
 _WAYPOINTS_PATH = os.path.join(
     os.path.dirname(__file__), '..', '..', 'serve', 'scene', 'config', 'waypoints.yaml'
@@ -80,10 +90,6 @@ def get_object_pos(obj_name):
     if not use_realtime:
         # 记忆模式：直接跳到记忆查询，不调任何 API
         try:
-            _serve_path = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'serve'))
-            if _serve_path not in sys.path:
-                sys.path.insert(0, _serve_path)
-            from scene.scene_memory import get_object_coords, get_object_location
             waypoints = load_waypoints()
             FIXTURE_KEYWORDS = ['counter', 'island', 'sink', 'stove', 'floor', 'fridge', 'microwave', 'oven']
             simple_name = None
@@ -109,21 +115,24 @@ def get_object_pos(obj_name):
     
     # 实时模式：调 API
     try:
-        resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
-        if resp.status_code == 200:
-            objects = resp.json()
-            if isinstance(objects, dict) and "objects" in objects:
-                objects = objects["objects"]
+        objects = get_objects()
+        if isinstance(objects, dict) and objects.get("success") is False:
+            objects = {}
+        if isinstance(objects, dict) and "objects" in objects:
+            objects = objects["objects"]
+        if isinstance(objects, dict):
             if obj_name in objects:
                 return objects[obj_name]['pos']
             candidates = [k for k in objects if obj_name in k or k in obj_name]
             if candidates:
                 return objects[candidates[0]]['pos']
-        resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
-        if resp.status_code == 200:
-            fixtures = resp.json()
-            if isinstance(fixtures, dict) and "fixtures" in fixtures:
-                fixtures = fixtures["fixtures"]
+
+        fixtures = get_fixtures()
+        if isinstance(fixtures, dict) and fixtures.get("success") is False:
+            fixtures = {}
+        if isinstance(fixtures, dict) and "fixtures" in fixtures:
+            fixtures = fixtures["fixtures"]
+        if isinstance(fixtures, dict):
             if obj_name in fixtures:
                 return fixtures[obj_name]['pos']
             candidates = [k for k in fixtures if obj_name in k and 'main' in k]

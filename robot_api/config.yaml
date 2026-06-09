@@ -1,0 +1,31 @@
+backends:
+  mujoco:
+    enabled: 1
+    provide_state: 1
+    accept_action: 1
+    required: 1
+    url: "http://127.0.0.1:5001"
+    timeout: 120
+    launch_hint: "serve/main.py"
+
+  isaacsim:
+    enabled: 0
+    provide_state: 0
+    accept_action: 0
+    required: 0
+    url: "http://127.0.0.1:5101"
+    timeout: 120
+
+  gazebo:
+    enabled: 0
+    provide_state: 0
+    accept_action: 0
+    required: 0
+    url: "http://127.0.0.1:5201"
+    timeout: 120
+
+  real:
+    enabled: 0
+    provide_state: 0
+    accept_action: 0
+    required: 0

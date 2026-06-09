@@ -13,12 +13,18 @@ import json
 import math
 import os
 import re
+import sys
 
 import numpy as np
-import requests
 import yaml
 from pathlib import Path
 from PIL import Image, ImageDraw
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from robot_api.client import get_fixtures, get_objects
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 CONFIG_DIR = os.path.dirname(__file__)
@@ -57,14 +63,22 @@ def get_scene_objects(fixtures_map):
     """拉取所有可操作物体和主要家具坐标"""
     targets = {}
 
-    resp = requests.get("http://127.0.0.1:5001/objects", timeout=3)
-    if resp.status_code == 200:
-        for name, data in resp.json().items():
-            targets[name] = data['pos'][:2]
+    objects = get_objects()
+    if isinstance(objects, dict) and objects.get("success") is False:
+        objects = {}
+    if isinstance(objects, dict) and "objects" in objects:
+        objects = objects["objects"]
+    if isinstance(objects, dict):
+        for name, data in objects.items():
+            if isinstance(data, dict) and "pos" in data:
+                targets[name] = data['pos'][:2]
 
-    resp = requests.get("http://127.0.0.1:5001/fixtures", timeout=3)
-    if resp.status_code == 200:
-        fixture_data = resp.json()
+    fixture_data = get_fixtures()
+    if isinstance(fixture_data, dict) and fixture_data.get("success") is False:
+        fixture_data = {}
+    if isinstance(fixture_data, dict) and "fixtures" in fixture_data:
+        fixture_data = fixture_data["fixtures"]
+    if isinstance(fixture_data, dict):
         for simple_name, fixture_key in fixtures_map.items():
             if fixture_key in fixture_data:
                 targets[simple_name] = fixture_data[fixture_key]['pos'][:2]
