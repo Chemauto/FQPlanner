@@ -1,18 +1,68 @@
 # FQPlanner_Mujoco
 
-FQPlanner_Mujoco 是 FQPlanner 的 MuJoCo / XLeRobot 迁移版本。当前目标是保留原来的 Master / Slaver / Web / 场景配置和规划调用方式，同时把仿真后端换成本地 XLeRobot 机器人模型。
+FQPlanner_Mujoco 是面向具身智能任务规划与机器人控制验证的 MuJoCo 仿真项目。本项目基于 [FlagScale](https://github.com/FlagOpen/FlagScale) 和 [RoboOS](https://github.com/FlagOpen/RoboOS) 的智能体与具身系统开发思路，结合 [RoboCasa](https://github.com/robocasa/robocasa)、MuJoCo 和 XLeRobot 资源，将 FQPlanner 的 Master / Slaver / Web 控制链路迁移到本地仿真与可选实机桥接环境中。
 
-## 当前状态
+项目重点支持：
 
-- 机器人模型：使用本项目内的 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/*.stl`。
-- 厨房场景：通过 RoboCasa 的 `KitchenArena + ManipulationTask` 导出真实厨房 fixtures / object MJCF，再合并到 XLeRobot MuJoCo XML。
-- 运行后端：`serve/main.py` 启动 MuJoCo viewer 和 Flask API，端口 `5001`。
-- 项目自包含 XLeRobot 文件，不会启动时从 `/home/fangqi/WorkXCJ/XLeRobot` 同步。
-- `serve/scene/config/objects.yaml` 控制有哪些物体和 placement；cup、bowl、apple、mug 当前都在 counter 上随机采样，并带最小距离避让。
+- LLM 任务规划到 MCP 工具调用的闭环执行。
+- XLeRobot 在 RoboCasa 风格厨房场景中的 MuJoCo 仿真。
+- 抓取、放置、导航、场景状态查询等基础机器人接口。
+- 仿真抓取后向真实开发板发送抓取信号的可选桥接。
 
-## 快速启动
+## Architecture
 
-### 1. 启动仿真后端
+```text
+User / Web UI
+  -> master/              任务规划
+  -> Redis                消息通信
+  -> slaver/              MCP 工具执行
+  -> serve/               MuJoCo + Flask API
+  -> serve_real/          可选真实机器人桥接
+```
+
+抓取链路：
+
+```text
+自然语言指令
+  -> slaver/robot/module/grasp.py::grasp_object
+  -> serve/service/server.py POST /grasp
+  -> serve_real/config.yaml real_arm.enabled = 1 时发送 0xAA
+  -> serve_real/Arm/grasp_server.py
+  -> /home/fangqi/camera_10s.sh
+```
+
+## Repository
+
+```text
+assets/xlerobot/             XLeRobot MJCF 与 mesh 资源
+assets/scene/                生成后的 MuJoCo 场景
+serve/                       仿真后端、Flask API、场景生成
+serve/scene/config/          layout / style / objects / waypoints 配置
+serve_real/                  真实机器人桥接
+master/                      任务规划服务
+slaver/                      MCP 工具执行服务
+deploy/                      Web 控制台
+nav2/                        导航与地图辅助文件
+```
+
+## Requirements
+
+建议使用两个 Conda 环境：
+
+- `robocasa`：运行 MuJoCo、RoboCasa 场景生成和仿真后端。
+- `FQPlanner`：运行 Master、Slaver、Web、MCP 工具和模型客户端。
+
+Python 依赖见 [`requirements.txt`](requirements.txt)。敏感信息请放入 `.env` 或本地配置文件，不要提交 API key、开发板密码或私有 token。
+
+## Quick Start
+
+启动 Redis：
+
+```bash
+redis-server
+```
+
+启动 MuJoCo 后端：
 
 ```bash
 conda activate robocasa
@@ -20,23 +70,15 @@ cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
 python main.py
 ```
 
-启动后会打开 MuJoCo viewer，并启动 API：
-
-```text
-http://127.0.0.1:5001
-```
-
-只启动 API、不打开 viewer：
+无窗口模式：
 
 ```bash
 python main.py --no-viewer
 ```
 
-### 2. 启动规划系统
+启动规划链路：
 
 ```bash
-redis-server
-
 conda activate FQPlanner
 cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python master/run.py
@@ -44,80 +86,74 @@ python slaver/run.py
 python deploy/run.py
 ```
 
-Web 控制台：
+默认服务地址：
 
 ```text
-http://127.0.0.1:8888
+MuJoCo API: http://127.0.0.1:5001
+Web UI:     http://127.0.0.1:8888
 ```
 
-## 关键路径
+基础检查：
 
-```text
-assets/xlerobot/xlerobot.xml              # 当前使用的 XLeRobot 模型
-assets/xlerobot/*.stl                     # 当前使用的 XLeRobot STL 网格
-assets/scene/scene.xml                    # 生成后的厨房 + XLeRobot 场景
-assets/scene/scene_meta.json              # 生成后的 fixtures / objects 元信息
-serve/mujoco_backend.py                   # 场景导出、XML 合并、MuJoCo Env 适配器
-serve/main.py                             # MuJoCo viewer + Flask API 入口
-serve/scene/config/objects.yaml           # 可操作物体和 placement 配置
-serve/scene/config/layout.yaml            # 厨房布局
-serve/scene/config/style.yaml             # RoboCasa 风格 / 材质配置
+```bash
+curl http://127.0.0.1:5001/status
+curl http://127.0.0.1:5001/objects
+curl http://127.0.0.1:5001/scene
 ```
 
-## 可用物体
+## Real Robot Bridge
 
-当前 `objects.yaml` 中的可操作物体：
+真实抓取由 [`serve_real/config.yaml`](serve_real/config.yaml) 控制：
 
-```text
-pot
-cup
-bowl
-apple
-mug
-sponge
+```yaml
+real_arm:
+  enabled: 1
+  host: <board-ip>
+  port: 9999
+  timeout: 60
+  command_byte: 0xAA
+  fail_on_error: 1
 ```
 
-当前放置逻辑：
+`host` 只填写开发板 IP，例如 `10.11.32.9`，不要写成 `user@ip`。
 
-- `pot`：counter，靠近 stove 参照区域。
-- `cup`、`bowl`、`apple`、`mug`：counter 随机区域，带位置避让。
-- `sponge`：island 随机区域。
+开发板侧启动：
 
-## API 兼容性
-
-仿真后端保留了原 Slaver 调用需要的主要 API：
-
-```text
-GET  /status
-GET  /base_status
-GET  /objects
-GET  /fixtures
-GET  /scene
-GET  /scene_state
-GET  /map_data
-POST /grasp
-POST /place
-POST /move_to
-POST /nav
-POST /cmd_vel
-POST /open_gripper
-POST /close_gripper
-POST /screenshot
+```bash
+python3 serve_real/Arm/grasp_server.py
 ```
 
-因此原来的规划链路可以继续通过 Slaver 的工具调用访问仿真后端。
+当前抓取服务器收到 `0xAA` 后会执行：
 
-## 注意事项
+```bash
+/home/fangqi/camera_10s.sh
+```
 
-- 当前不是 RoboCasa 原生环境 reset；RoboCasa 用于导出真实厨房和物体 MJCF。
-- 当前抓取 / 放置是高层测试实现：服务端会分步移动虚拟末端和物体用于可视化，但不是完整接触抓取和 IK。
-- XLeRobot 使用 `/home/fangqi/WorkXCJ/MuJoCo-GS-Web` 的真实外观模型；底盘 body 是 `chassis`，为 `freejoint`，当前生成场景把初始位置放在岛台和台面之间：`[3.2, -1.5, 0.38]`。
-- 如果要完全复现 RoboCasa 原始物体采样，需要继续接入 RoboCasa 原生 placement sampler；当前实现是基于 fixture `pos/size` 的轻量 placement。
+修改 `serve_real/config.yaml` 后，需要重启 Slaver 或 `slaver/robot/skill.py`，让工具进程重新加载配置。
 
-## 文档
+## Safety
 
-- [usage.md](usage.md) — 启动和 API 使用说明
-- [CLAUDE.md](CLAUDE.md) — 当前技术状态和开发注意事项
-- [task_plan.md](task_plan.md) — 迁移计划
-- [findings.md](findings.md) — 迁移发现
-- [progress.md](progress.md) — 进度记录
+- 纯仿真测试时建议保持 `real_arm.enabled: 0`。
+- 实机运行前确认工作空间安全，并准备独立急停或停止脚本。
+- 停止 `grasp_server.py` 只能阻止新指令；已经下发到硬件或脚本中的动作是否停止，取决于真实控制脚本和硬件控制器。
+- `/home/fangqi/camera_10s.sh` 是当前实机动作边界，脚本应在失败时返回非零退出码。
+
+## Documentation
+
+- [`usage.md`](usage.md)：启动流程和 API 示例。
+- [`CLAUDE.md`](CLAUDE.md)：当前迁移状态和开发注意事项。
+- [`serve_real/Arm/README.md`](serve_real/Arm/README.md)：真实抓取桥接说明。
+
+## References
+
+- [FlagScale](https://github.com/FlagOpen/FlagScale)
+- [RoboOS](https://github.com/FlagOpen/RoboOS)
+- [RoboCasa](https://github.com/robocasa/robocasa)
+- [MuJoCo](https://mujoco.org/) and [MuJoCo Documentation](https://mujoco.readthedocs.io/)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [Flask Documentation](https://flask.palletsprojects.com/)
+- [Redis Documentation](https://redis.io/docs/latest/)
+
+## License
+
+This project is released under the Apache License 2.0. See [`LICENSE`](LICENSE) for details.
