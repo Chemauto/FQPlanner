@@ -20,7 +20,7 @@ redis-server
 
 ```bash
 conda activate robocasa
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
+cd serve
 python main.py
 ```
 
@@ -43,7 +43,6 @@ curl http://127.0.0.1:5001/scene
 
 ```bash
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python master/run.py
 ```
 
@@ -51,7 +50,6 @@ python master/run.py
 
 ```bash
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python slaver/run.py
 ```
 
@@ -65,7 +63,6 @@ http://127.0.0.1:5001
 
 ```bash
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python deploy/run.py
 ```
 

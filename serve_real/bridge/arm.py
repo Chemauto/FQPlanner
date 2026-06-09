@@ -39,13 +39,10 @@ def _as_bool(value, default: bool = False) -> bool:
 
 
 def _load_config() -> dict:
-    if not _CONFIG_PATH.exists():
-        return {}
     try:
-        import yaml
+        from robot_api.config import _read_yaml
 
-        with _CONFIG_PATH.open("r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+        return _read_yaml(_CONFIG_PATH)
     except Exception as exc:
         print(f"[real_arm] 读取配置失败 {_CONFIG_PATH}: {exc}", flush=True)
         return {}

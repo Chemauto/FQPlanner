@@ -1,16 +1,15 @@
-# service/ — HTTP API 服务
+# service/ — MuJoCo HTTP 服务层
 
-提供 HTTP API 接口，是 slaver 和仿真后端之间的桥梁。
+`service/` 只保留 MuJoCo 后端的 HTTP 服务端。上层客户端入口在 `robot_api.client`，不要再从这里提供或引用 client 封装。
 
 ```
 service/
-├── server.py    # Flask 服务端（定义所有 API 接口）
-└── client.py    # HTTP 客户端（slaver 调用的封装层）
+└── server.py    # Flask 服务端（定义 MuJoCo 后端 API）
 ```
 
 ## server.py — API 服务端
 
-Flask 应用，端口 5001。接收 HTTP 请求，调用 `tools/` 和 `mujoco_backend.py`，返回 JSON。
+Flask 应用，端口 5001。接收 HTTP 请求，调用 `serve/tools/` 和 `serve/backend/mujoco_backend.py`，返回 JSON。
 
 **状态查询：**
 
@@ -44,25 +43,9 @@ Flask 应用，端口 5001。接收 HTTP 请求，调用 `tools/` 和 `mujoco_ba
 | `/record/start` | POST | 开始录制 |
 | `/record/stop` | POST | 停止录制并保存视频 |
 
-## client.py — HTTP 客户端
+## 边界
 
-用 urllib 封装的 API 客户端，slaver 通过它调 server.py 的接口。
-
-**主要函数：**
-
-| 函数 | 对应接口 |
-|------|---------|
-| `navigate(x, y, yaw)` | POST `/nav` |
-| `get_base_status()` | GET `/base_status` |
-| `grasp_object(name)` | POST `/grasp` |
-| `place_object(name, pos)` | POST `/place` |
-| `capture_screenshot(cam)` | POST `/screenshot` |
-| `get_scene()` | GET `/scene` |
-| `get_objects()` | GET `/objects` |
-
-**slaver 引用：**
-- `slaver/robot/module/base.py` → `navigate`, `get_base_status`
-- `slaver/robot/module/grasp.py` → `grasp_object`
-- `slaver/robot/module/place.py` → `place_object`, `get_object_pos`
-- `slaver/robot/module/camera.py` → `capture_screenshot`
-- `slaver/agents/slaver_agent.py` → `get_scene`
+- `service/server.py` 负责 HTTP endpoint 和命令队列。
+- `serve/tools/` 负责 MuJoCo 中的动作实现。
+- `serve/backend/` 负责 MuJoCo 模型、数据和仿真步进。
+- `robot_api/` 负责上层统一接口、后端选择和 sim/real 编排。

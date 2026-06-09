@@ -10,6 +10,7 @@
   -> Master (5000)
   -> Redis
   -> Slaver / MCP 工具
+  -> robot_api
   -> serve Flask API (5001)
   -> MuJoCo: XLeRobot + RoboCasa kitchen MJCF
 ```
@@ -24,7 +25,7 @@
 - 默认打开 MuJoCo viewer
 - 每帧处理命令队列并 step MuJoCo
 
-`serve/mujoco_backend.py`：
+`serve/backend/mujoco_backend.py`：
 
 - 读取 `serve/scene/config/layout.yaml`
 - 读取 `serve/scene/config/style.yaml`
@@ -54,7 +55,7 @@ assets/xlerobot/*.stl
 - `assets/xlerobot/` 是有效 mesh 目录，`xlerobot.xml` 和 mesh 文件放在同一级。
 - 不再使用旧的 `assets/xlerobot/meshes/`。
 - 不再使用旧的 `robots/` robosuite 注册目录。
-- 不会启动时从 `/home/fangqi/WorkXCJ/XLeRobot` 同步。
+- 不会启动时从项目外部 XLeRobot 目录同步。
 
 关键 body / actuator：
 
@@ -159,7 +160,7 @@ placement 规则：
 
 ```bash
 conda activate robocasa
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco/serve
+cd serve
 python main.py
 ```
 
@@ -175,7 +176,6 @@ python main.py --no-viewer
 redis-server
 
 conda activate FQPlanner
-cd /home/fangqi/WorkXCJ/FQPlanner_Mujoco
 python master/run.py
 python slaver/run.py
 python deploy/run.py

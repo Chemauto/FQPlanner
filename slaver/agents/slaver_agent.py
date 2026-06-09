@@ -389,7 +389,7 @@ class ToolCallingAgent(MultiStepAgent):
     def _build_scene_context(self) -> str:
         """查询仿真后端，构建场景上下文文字"""
         try:
-            from serve.service.client import get_scene
+            from robot_api.client import get_scene
             scene = get_scene()
             if not scene or "error" in scene:
                 return None

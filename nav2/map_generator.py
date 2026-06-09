@@ -1,12 +1,12 @@
 """
-map_generator.py - 从 XLeRobot MuJoCo 仿真生成 Nav2 占据地图
+map_generator.py - 从统一机器人后端生成 Nav2 占据地图
 
 两种模式:
-  1. 运行时模式（推荐）: 调用 Flask /map_data 端点，从 MuJoCo 仿真读取实际障碍物
+  1. 运行时模式（推荐）: 调用 robot_api /map_data，从当前后端读取实际障碍物
   2. 静态模式: 从 layout.yaml 解析（不够准确，仅作 fallback）
 
 使用:
-    # 运行时模式（仿真必须已启动）
+    # 运行时模式（机器人后端必须已启动）
     python map_generator.py --from-sim
 
     # 静态模式
@@ -16,10 +16,15 @@ map_generator.py - 从 XLeRobot MuJoCo 仿真生成 Nav2 占据地图
 import os
 import sys
 import argparse
-import urllib.parse
 import yaml
 import numpy as np
 from PIL import Image, ImageDraw
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from robot_api.client import get_base_status, get_map_data
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 CONFIG_DIR = os.path.dirname(__file__)
@@ -132,34 +137,32 @@ def inflate(img_array, radius_m):
 
 
 # ============================================================
-# 模式 1: 从 MuJoCo 仿真读取（推荐）
+# 模式 1: 从机器人后端读取（推荐）
 # ============================================================
 
 def fetch_obstacles_from_sim():
-    """从运行中的仿真获取障碍物列表"""
-    import json
-    import urllib.request
+    """从运行中的机器人后端获取障碍物列表"""
+    result = get_map_data(timeout=5)
+    if result and not (result.get("success") is False and "grid" not in result):
+        return result
+    if result:
+        print(f"[map_generator] 无法连接机器人后端: {result.get('result')}", file=sys.stderr)
+    else:
+        print("[map_generator] 无法连接机器人后端", file=sys.stderr)
+    return None
 
-    url = "http://127.0.0.1:5001/map_data"
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        print(f"[map_generator] 无法连接仿真: {e}", file=sys.stderr)
-        return None
+
+def _fetch_base_status():
+    result = get_base_status()
+    if result and not result.get("success") is False:
+        return result
+    return None
 
 
 def fetch_base_status():
-    """从运行中的仿真获取机器人底座位置，用于自动扩展地图边界"""
-    import json
-    import urllib.request
-
-    url = "http://127.0.0.1:5001/base_status"
+    """从运行中的后端获取机器人底座位置，用于自动扩展地图边界"""
     try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return _fetch_base_status()
     except Exception:
         return None
 
@@ -268,10 +271,7 @@ def generate_from_sim(
     layout_path=None,
     shrink_footprints=0.2,
 ):
-    """从 MuJoCo 仿真射线投射生成地图"""
-    import json
-    import urllib.request
-
+    """从机器人后端射线投射生成地图"""
     # 先从 layout.yaml 算正确的地图范围
     lb = bounds_from_layout(layout_path)
     if lb is not None:
@@ -288,18 +288,15 @@ def generate_from_sim(
         x_min, x_max, y_min, y_max = -1.0, 8.0, -6.0, 1.0
 
     # 请求射线投射栅格
-    params = urllib.parse.urlencode({
+    params = {
         "resolution": RESOLUTION,
         "x_min": x_min, "x_max": x_max,
         "y_min": y_min, "y_max": y_max,
-    })
-    url = f"http://127.0.0.1:5001/map_data?{params}"
-    try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        print(f"[map_generator] 无法连接仿真: {e}", file=sys.stderr)
+    }
+    result = get_map_data(params=params, timeout=60)
+    if not result or (result.get("success") is False and "grid" not in result):
+        msg = result.get("result", "未知错误") if isinstance(result, dict) else "未知错误"
+        print(f"[map_generator] 无法连接机器人后端: {msg}", file=sys.stderr)
         sys.exit(1)
 
     w = result["width"]
@@ -406,7 +403,7 @@ if __name__ == "__main__":
     map_cfg = cfg.get("map", {})
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--from-sim", action="store_true", help="从运行中的仿真读取障碍物")
+    parser.add_argument("--from-sim", action="store_true", help="从运行中的机器人后端读取障碍物")
     parser.add_argument("--layout", default=None, help="layout.yaml 路径")
     parser.add_argument("--output-dir", default=os.path.join(CONFIG_DIR, map_cfg.get("output_dir", "maps")))
     parser.add_argument(

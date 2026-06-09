@@ -1,5 +1,5 @@
 real_base:
-  # 0: only run MuJoCo simulation
+  # 0: only run configured robot backend
   # 1: also mirror supported base commands to the real robot
   enabled: 0
   port: /dev/ttyACM0
@@ -7,7 +7,7 @@ real_base:
   max_speed: 0.2
 
 real_arm:
-  # 0: only run MuJoCo simulation grasp
+  # 0: only run configured robot backend grasp
   # 1: after a successful simulated grasp, send 0xAA to the real grasp server
   enabled: 1
   host: 10.11.32.17

@@ -1,1 +1,0 @@
-"""Real arm bridge package."""

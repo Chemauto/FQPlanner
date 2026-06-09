@@ -1,5 +1,8 @@
 """
-抓取控制模块 - XLeRobot MuJoCo 仿真
+抓取控制模块。
+
+工具层只调用统一 robot_api，不关心当前后端是 MuJoCo、Isaac Sim、Gazebo
+还是真实机器人桥接。
 """
 
 import json
@@ -8,33 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-from serve.service.client import grasp_object as _grasp_object
-
-try:
-    from serve_real.Arm.arm_bridge import trigger_real_grasp, real_arm_fail_on_error
-except Exception as e:
-    print(f"[grasp] real_arm bridge 未启用: {e}", file=sys.stderr)
-
-    def trigger_real_grasp(obj_name=None):
-        return {"enabled": False, "sent": False, "success": None}
-
-    def real_arm_fail_on_error():
-        return False
-
-
-def _append_real_grasp_result(response: str, state: dict, target: str):
-    real_result = trigger_real_grasp(target)
-    if not real_result.get("enabled"):
-        print("[grasp] real_arm 未启用，跳过真实抓取信号", file=sys.stderr)
-        return response, state
-
-    state["real_arm"] = real_result
-    if real_result.get("success"):
-        return f"{response}；真实抓取成功", state
-
-    error = real_result.get("error") or real_result.get("response") or "真实抓取失败"
-    state["_status"] = "failure" if real_arm_fail_on_error() else "success"
-    return f"{response}；真实抓取失败: {error}", state
+from robot_api.client import grasp_object as _grasp_object
 
 
 def register_tools(mcp):
@@ -60,7 +37,8 @@ def register_tools(mcp):
         if result.get("success"):
             response = result.get("result", f"成功抓取 {target}")
             state = {"_status": "success"}
-            response, state = _append_real_grasp_result(response, state, target)
+            if "real_arm" in result:
+                state["real_arm"] = result["real_arm"]
             if state.get("_status") == "success":
                 print(f"[grasp] ✓ {response}", file=sys.stderr)
             else:
@@ -68,7 +46,10 @@ def register_tools(mcp):
             return json.dumps([response, state], ensure_ascii=False)
         else:
             msg = result.get("result", f"抓取 {target} 失败，请重试。")
+            state = {"_status": "failure"}
+            if "real_arm" in result:
+                state["real_arm"] = result["real_arm"]
             print(f"[grasp] ✗ {msg}", file=sys.stderr)
-            return json.dumps([msg, {"_status": "failure"}], ensure_ascii=False)
+            return json.dumps([msg, state], ensure_ascii=False)
 
-    print("[grasp.py] 抓取控制模块已注册 (XLeRobot MuJoCo)", file=sys.stderr)
+    print("[grasp.py] 抓取控制模块已注册 (robot_api)", file=sys.stderr)
