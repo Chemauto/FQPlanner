@@ -4,6 +4,7 @@ server.py - Flask API 服务
 """
 
 import os
+import math
 import time
 import threading
 import numpy as np
@@ -845,19 +846,16 @@ def api_close_gripper():
 # 地图生成数据（供 map_generator.py --from-sim 使用）
 # ============================================================
 
-@app.route("/map_data", methods=["GET"])
-def api_map_data():
-    """从上往下投射：读取所有 MuJoCo geom 的世界坐标 2D 投影，生成占据栅格"""
-    env = _get_env()
-    if env is None:
-        return jsonify({"error": "仿真器未初始化"}), 503
-
+def _map_request_params():
     resolution = float(request.args.get("resolution", 0.05))
     x_min = float(request.args.get("x_min", -1.0))
     x_max = float(request.args.get("x_max", 8.0))
     y_min = float(request.args.get("y_min", -6.0))
     y_max = float(request.args.get("y_max", 1.0))
+    return resolution, x_min, x_max, y_min, y_max
 
+
+def _build_occupancy_grid(env, resolution, x_min, x_max, y_min, y_max):
     width = int((x_max - x_min) / resolution)
     height = int((y_max - y_min) / resolution)
 
@@ -881,7 +879,6 @@ def api_map_data():
             )):
                 robot_bodies.add(i)
 
-        # 收集障碍物的 2D 矩形 (col_min, row_min, col_max, row_max)
         rects = []
         for i in range(model.ngeom):
             body_id = model.geom_bodyid[i]
@@ -892,16 +889,14 @@ def api_map_data():
             if any(k in name for k in ("floor", "ground", "ceiling", "skybox", "visual", "light")):
                 continue
 
-            pos = data.geom_xpos[i]       # 世界坐标 [x, y, z]
-            size = model.geom_size[i]      # 半尺寸 [hx, hy, hz]
-            mat = data.geom_xmat[i].reshape(3, 3)  # 旋转矩阵
+            pos = data.geom_xpos[i]
+            size = model.geom_size[i]
+            mat = data.geom_xmat[i].reshape(3, 3)
 
-            # 太高的跳过（天花板灯具等）
             top_z = pos[2] + abs(size[2]) * 2
             if pos[2] - abs(size[2]) > 2.0 or top_z < 0.05:
                 continue
 
-            # 投影 8 个角点到 x-y 平面，取 2D AABB
             xs, ys = [], []
             for sx in (-size[0], size[0]):
                 for sy in (-size[1], size[1]):
@@ -919,19 +914,97 @@ def api_map_data():
             if col_min <= col_max and row_min <= row_max:
                 rects.append((col_min, row_min, col_max, row_max))
 
-        # 画栅格
         grid = bytearray([255] * (width * height))
         for c1, r1, c2, r2 in rects:
             for r in range(r1, r2 + 1):
                 for c in range(c1, c2 + 1):
                     grid[r * width + c] = 0
 
-    return jsonify({
+    return {
         "grid": list(grid),
         "width": width,
         "height": height,
         "resolution": resolution,
         "origin": [x_min, y_min],
+    }
+
+
+@app.route("/map_data", methods=["GET"])
+def api_map_data():
+    """从上往下投射：读取所有 MuJoCo geom 的世界坐标 2D 投影，生成占据栅格"""
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+
+    return jsonify(_build_occupancy_grid(env, *_map_request_params()))
+
+
+@app.route("/scan", methods=["GET"])
+def api_scan():
+    """基于当前占据栅格和机器人位姿生成 2D LaserScan 数据。"""
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+
+    angle_min = float(request.args.get("angle_min", -math.pi))
+    angle_max = float(request.args.get("angle_max", math.pi))
+    angle_increment = float(request.args.get("angle_increment", math.radians(1.0)))
+    range_min = float(request.args.get("range_min", 0.05))
+    range_max = float(request.args.get("range_max", 5.0))
+
+    grid_data = _build_occupancy_grid(env, *_map_request_params())
+    with _env_lock:
+        base = _read_base_info(env)
+
+    grid = grid_data["grid"]
+    width = int(grid_data["width"])
+    height = int(grid_data["height"])
+    resolution = float(grid_data["resolution"])
+    x_min, y_min = grid_data["origin"]
+    y_max = y_min + height * resolution
+
+    x0, y0 = float(base["pos"][0]), float(base["pos"][1])
+    yaw = float(base.get("yaw_rad", math.radians(float(base.get("yaw_deg", 0.0)))))
+
+    def is_occupied(x, y):
+        col = int((x - x_min) / resolution)
+        row = int((y_max - y) / resolution)
+        if col < 0 or col >= width or row < 0 or row >= height:
+            return False
+        return grid[row * width + col] < 128
+
+    count = max(1, int(math.floor((angle_max - angle_min) / angle_increment)) + 1)
+    step = max(0.02, resolution * 0.5)
+    ranges = []
+    for i in range(count):
+        rel_angle = angle_min + i * angle_increment
+        world_angle = yaw + rel_angle
+        hit = None
+        dist = range_min
+        while dist <= range_max:
+            x = x0 + dist * math.cos(world_angle)
+            y = y0 + dist * math.sin(world_angle)
+            if is_occupied(x, y):
+                hit = round(dist, 3)
+                break
+            dist += step
+        ranges.append(hit)
+
+    return jsonify({
+        "success": True,
+        "frame_id": "laser",
+        "base_frame_id": "base_link",
+        "angle_min": angle_min,
+        "angle_max": angle_max,
+        "angle_increment": angle_increment,
+        "range_min": range_min,
+        "range_max": range_max,
+        "ranges": ranges,
+        "pose": {
+            "x": x0,
+            "y": y0,
+            "yaw": yaw,
+        },
     })
 
 

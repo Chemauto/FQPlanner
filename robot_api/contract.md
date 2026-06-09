@@ -60,6 +60,15 @@ POST /move_duration
 POST /screenshot
 ```
 
+导航内部桥接还可以实现：
+
+```text
+GET  /scan
+POST /cmd_vel
+```
+
+这两个接口主要给 ROS2 SLAM/Nav2 bridge 使用，不建议作为 LLM 公开工具接口。
+
 真实机器人后端可以只实现当前硬件支持的动作。未支持的动作应被跳过或返回清晰错误。
 
 真实硬件连接参数不放在 `robot_api/config.yaml`，而放在：
