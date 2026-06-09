@@ -5,3 +5,14 @@ real_base:
   port: /dev/ttyACM0
   speed_scale: 0.1
   max_speed: 0.2
+
+real_arm:
+  # 0: only run MuJoCo simulation grasp
+  # 1: after a successful simulated grasp, send 0xAA to the real grasp server
+  enabled: 1
+  host: 10.11.32.17
+  port: 9999
+  timeout: 60
+  command_byte: 0xAA
+  # 1: if the real server returns FAILED or cannot be reached, /grasp returns success=false
+  fail_on_error: 1
