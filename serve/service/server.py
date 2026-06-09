@@ -189,6 +189,9 @@ def get_base_action():
 
     cmd_vel 过期后返回 None，主循环不写 ctrl，保留 viewer 手动控制值。
     过期瞬间返回一次 [0, 0] 以确保机器人停止。
+
+    直接设置底盘 freejoint 速度（bypass 轮子物理），确保 cmd_vel 响应速度
+    匹配 Nav2 期望（而非通过弱电机慢慢加速）。
     """
     with _queue_lock:
         if time.time() > _base_cmd["expires_at"]:
@@ -202,6 +205,53 @@ def get_base_action():
         action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)   # forward
         action[1] = -np.clip(_base_cmd["Vw"], -1.0, 1.0)   # turn
         return action
+
+
+def apply_base_velocity(env):
+    """cmd_vel 模式下直接设置底盘 freejoint 速度，bypass 轮子物理。
+
+    Nav2 发送的速度命令是期望速度，不是电机力。
+    直接写 freejoint 的 qvel 使底盘立即响应。
+    """
+    base = get_base_action()
+    if base is None:
+        return False
+
+    if env.base_free_joint_id < 0:
+        return False
+
+    dadr = env.model.jnt_dofadr[env.base_free_joint_id]
+    # freejoint qvel layout: [vx, vy, vz, wx, wy, wz]
+    # dadr+0 = vx, dadr+1 = vy, dadr+2 = vz (up!)
+    # dadr+3 = wx (roll), dadr+4 = wy (pitch), dadr+5 = wz (yaw)
+
+    vx, vw = float(base[0]), float(base[1])
+
+    # qpos layout: [x, y, z, qw, qx, qy, qz]
+    # yaw is encoded in quaternion; get it from the helper
+    yaw = float(np.arctan2(
+        2 * (env.data.qpos[dadr+3] * env.data.qpos[dadr+6] + env.data.qpos[dadr+4] * env.data.qpos[dadr+5]),
+        1 - 2 * (env.data.qpos[dadr+5] ** 2 + env.data.qpos[dadr+6] ** 2),
+    ))
+
+    cos_y = math.cos(yaw)
+    sin_y = math.sin(yaw)
+    world_vx = vx * cos_y
+    world_vy = vx * sin_y
+
+    max_linear = 0.5
+    max_angular = 1.0
+    env.data.qvel[dadr]     = world_vx * max_linear   # world x
+    env.data.qvel[dadr + 1] = world_vy * max_linear   # world y
+    env.data.qvel[dadr + 2] = 0.0                      # z: don't fly
+    env.data.qvel[dadr + 3] = 0.0                      # roll: don't tip
+    env.data.qvel[dadr + 4] = 0.0                      # pitch: don't tip
+    env.data.qvel[dadr + 5] = -vw * max_angular        # yaw angular velocity
+
+    # 同时写 wheel ctrl 让 viewer 视觉同步
+    env.data.ctrl[0] = vx
+    env.data.ctrl[1] = vw
+    return True
 
 
 def _get_env():
