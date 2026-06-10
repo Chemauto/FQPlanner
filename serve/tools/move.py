@@ -186,3 +186,83 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
             move(env, Vx=0.0, Vw=Vw)
 
     return get_base_info(env)
+
+
+def follow_path(
+    env,
+    path,
+    w=None,
+    waypoint_threshold=0.18,
+    goal_threshold=0.12,
+    yaw_threshold=5.0,
+    max_steps=3000,
+    Kp_xy=1.4,
+    Kd_xy=0.15,
+    Kp_yaw=1.0,
+    max_speed=0.45,
+    max_turn=0.85,
+):
+    """Follow a global path (list of {"x","y"} dicts) with a differential-drive PD controller."""
+    if not path:
+        return {"success": False, "result": "空路径"}
+
+    points = [(float(p["x"]), float(p["y"])) for p in path]
+    index = 0
+    prev_heading_err = 0.0
+
+    for _ in range(max_steps):
+        info = get_base_info(env)
+        x_now, y_now = info["pos"][0], info["pos"][1]
+
+        while index < len(points) - 1:
+            dist = float(np.hypot(points[index][0] - x_now, points[index][1] - y_now))
+            if dist > waypoint_threshold:
+                break
+            index += 1
+
+        target_x, target_y = points[index]
+        err_x = target_x - x_now
+        err_y = target_y - y_now
+        dist = float(np.hypot(err_x, err_y))
+        goal_err = float(np.hypot(points[-1][0] - x_now, points[-1][1] - y_now))
+
+        if index == len(points) - 1 and goal_err < goal_threshold:
+            break
+
+        angle_to_next = np.arctan2(err_y, err_x)
+        heading_err = _normalize_angle(angle_to_next - info["yaw_rad"])
+        d_heading = heading_err - prev_heading_err
+        prev_heading_err = heading_err
+
+        turn = np.clip(Kp_yaw * heading_err + Kd_xy * d_heading, -max_turn, max_turn)
+        forward = np.clip(Kp_xy * dist, 0.0, max_speed)
+        forward *= max(0.0, np.cos(heading_err))
+
+        move(env, Vx=forward, Vw=turn)
+
+    target_yaw = float(w) if w is not None else None
+    final_info = nav(
+        env,
+        points[-1][0], points[-1][1],
+        target_yaw=target_yaw,
+        Kp=2.0, Kd=0.2,
+        pos_threshold=goal_threshold,
+        yaw_threshold=yaw_threshold,
+        max_steps=600,
+    )
+    final_err = float(np.hypot(
+        points[-1][0] - final_info["pos"][0],
+        points[-1][1] - final_info["pos"][1],
+    ))
+    if target_yaw is not None:
+        yaw_err = abs(_normalize_angle_deg(target_yaw - final_info["yaw_deg"]))
+        success = final_err < 0.30 and yaw_err < 15.0
+    else:
+        success = final_err < 0.30
+    return {
+        "success": success,
+        "pos": final_info["pos"],
+        "yaw": final_info["yaw_deg"],
+        "goal_error": final_err,
+        "waypoints": len(points),
+    }

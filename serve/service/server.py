@@ -18,8 +18,17 @@ from tools.arm import (
     move_arm,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, stop_base
+from tools.move import get_base_info, nav, move, stop_base, follow_path
 from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
+
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'slaver', 'robot')))
+try:
+    from path_planner import is_line_clear as _astar_line_clear, plan_path as _astar_plan
+    _ASTAR_AVAILABLE = True
+except Exception as _e:
+    _ASTAR_AVAILABLE = False
+    print(f"[server] A* 路径规划不可用: {_e}", file=_sys.stderr)
 
 app = Flask(__name__)
 CORS(app)
@@ -337,6 +346,48 @@ def _step_active_command(env):
         cmd_type = cmd["type"]
         state = cmd["state"]
         if cmd_type == "nav":
+            path = state.get("path")
+
+            # --- A* 路径跟踪阶段 ---
+            if path and state["path_index"] < len(path) - 1:
+                for _ in range(NAV_SUBSTEPS):
+                    info = get_base_info(env)
+                    x_now, y_now = info["pos"][0], info["pos"][1]
+
+                    # 跳过已到达的航点
+                    while state["path_index"] < len(path) - 1:
+                        p = path[state["path_index"]]
+                        if np.hypot(p["x"] - x_now, p["y"] - y_now) <= state["waypoint_threshold"]:
+                            state["path_index"] += 1
+                        else:
+                            break
+
+                    if state["path_index"] >= len(path) - 1:
+                        break  # 路径跟踪完成，转入直线 PD 精确对准
+
+                    p = path[state["path_index"]]
+                    err_x = p["x"] - x_now
+                    err_y = p["y"] - y_now
+                    dist = float(np.hypot(err_x, err_y))
+                    yaw_now = info["yaw_rad"]
+                    angle_to_next = np.arctan2(err_y, err_x)
+                    heading_err = np.arctan2(np.sin(angle_to_next - yaw_now), np.cos(angle_to_next - yaw_now))
+                    Kp = state["kp"]
+                    turn = np.clip(Kp * heading_err, -1.0, 1.0)
+                    forward = np.clip(1.4 * dist, 0.0, 0.45)
+                    forward *= max(0.0, np.cos(heading_err))
+                    move(env, Vx=forward, Vw=turn)
+                    state["step"] += 1
+
+                    if state["step"] >= state["max_steps"]:
+                        final = get_base_info(env)
+                        _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
+                        return True
+
+                if state["path_index"] < len(path) - 1:
+                    return True  # 仍在跟踪 A* 路径
+
+            # --- 直线 PD 精确对准阶段（原有逻辑）---
             for _ in range(NAV_SUBSTEPS):
                 info = get_base_info(env)
                 x_now, y_now = info["pos"][0], info["pos"][1]
@@ -357,7 +408,6 @@ def _step_active_command(env):
                     final = get_base_info(env)
                     _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
                     return True
-                # 差速驱动 PD 控制
                 if pos_err >= state["pos_threshold"]:
                     angle_to_target = np.arctan2(err_y, err_x)
                     heading_err = np.arctan2(np.sin(angle_to_target - yaw_now), np.cos(angle_to_target - yaw_now))
@@ -500,17 +550,33 @@ def process_commands(env):
                     close_gripper(env, **params)
                     result = {"success": True}
                 elif cmd_type == "nav":
+                    gx = float(params["x"])
+                    gy = float(params["y"])
+                    astar_path = None
+                    if _ASTAR_AVAILABLE:
+                        try:
+                            cur = get_base_info(env)
+                            sx, sy = cur["pos"][0], cur["pos"][1]
+                            if np.hypot(gx - sx, gy - sy) > 0.5 and not _astar_line_clear(sx, sy, gx, gy):
+                                astar_path = _astar_plan(sx, sy, gx, gy)
+                                if astar_path:
+                                    print(f"[nav] A* 路径: {len(astar_path)} 节点", file=_sys.stderr)
+                        except Exception as _ae:
+                            print(f"[nav] A* 检查失败，回落直线导航: {_ae}", file=_sys.stderr)
                     _active_command = {
                         **cmd,
                         "state": {
-                            "x": float(params["x"]),
-                            "y": float(params["y"]),
+                            "x": gx,
+                            "y": gy,
                             "target_yaw": params.get("target_yaw"),
                             "kp": float(params.get("Kp", 1.5)),
                             "pos_threshold": float(params.get("pos_threshold", 0.20)),
                             "yaw_threshold": float(params.get("yaw_threshold", 10.0)),
                             "max_steps": int(params.get("max_steps", 6000)),
                             "step": 0,
+                            "path": astar_path,
+                            "path_index": 0,
+                            "waypoint_threshold": 0.18,
                         },
                     }
                     return
