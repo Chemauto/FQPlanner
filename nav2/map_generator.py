@@ -46,7 +46,7 @@ RESOLUTION = _map_cfg.get("resolution", 0.05)
 MAP_W = int((MAP_X_MAX - MAP_X_MIN) / RESOLUTION)
 MAP_H = int((MAP_Y_MAX - MAP_Y_MIN) / RESOLUTION)
 
-FREE = 255
+FREE = 254
 OCCUPIED = 0
 
 
