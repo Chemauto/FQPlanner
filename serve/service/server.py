@@ -412,16 +412,12 @@ def _step_active_command(env):
                     angle_to_target = np.arctan2(err_y, err_x)
                     heading_err = np.arctan2(np.sin(angle_to_target - yaw_now), np.cos(angle_to_target - yaw_now))
                     Kp = state["kp"]
-                    Kd = state["kd"]
-                    d_heading = heading_err - state["prev_heading_err"]
-                    state["prev_heading_err"] = heading_err
-                    turn = np.clip(Kp * heading_err + Kd * d_heading, -1.0, 1.0)
+                    turn = np.clip(Kp * heading_err, -1.0, 1.0)
                     forward = np.clip(Kp * pos_err, -0.8, 0.8)
                     forward *= max(0.0, np.cos(heading_err))
                     move(env, Vx=forward, Vw=turn)
                 else:
-                    Kp = state["kp"]
-                    Vw = np.clip(Kp * (yaw_err / 90.0), -1.0, 1.0)
+                    Vw = np.clip(2.0 * (yaw_err / 90.0), -1.0, 1.0)
                     move(env, Vx=0.0, Vw=Vw)
                 state["step"] += 1
             return True
@@ -573,13 +569,11 @@ def process_commands(env):
                             "x": gx,
                             "y": gy,
                             "target_yaw": params.get("target_yaw"),
-                            "kp": float(params.get("Kp", 2.5)),
-                            "kd": float(params.get("Kd", 0.3)),
-                            "pos_threshold": float(params.get("pos_threshold", 0.08)),
-                            "yaw_threshold": float(params.get("yaw_threshold", 5.0)),
+                            "kp": float(params.get("Kp", 1.5)),
+                            "pos_threshold": float(params.get("pos_threshold", 0.20)),
+                            "yaw_threshold": float(params.get("yaw_threshold", 10.0)),
                             "max_steps": int(params.get("max_steps", 6000)),
                             "step": 0,
-                            "prev_heading_err": 0.0,
                             "path": astar_path,
                             "path_index": 0,
                             "waypoint_threshold": 0.18,
