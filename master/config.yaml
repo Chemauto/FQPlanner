@@ -81,3 +81,12 @@ profiling: true
 # scene profile
 profile:
   path: ./scene/profile.yaml
+
+# Experience memory settings. These do not change the LLM provider.
+experience:
+  exploration_rate: 0.8  # 0=完全依赖经验, 1=完全自由探索
+  auto_save_on_success: true
+
+# Master-side camera diagnosis switch. VLM provider remains configured in slaver/config.yaml.
+camera:
+  enabled: false
