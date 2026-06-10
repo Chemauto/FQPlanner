@@ -50,14 +50,17 @@
         .task-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .task-progress-header span { font-size: 13px; color: #94a3b8; }
         .task-bar { height: 6px; background: #334155; border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
-        .task-bar-fill { height: 100%; background: #22c55e; border-radius: 3px; transition: width 0.3s; }
+        .task-bar-fill { height: 100%; background: #22c55e; border-radius: 3px; transition: width 0.3s, background 0.3s; }
+        .task-bar-fill.fail { background: #ef4444; }
+        .task-progress-header .status-ok  { color: #4ade80; }
+        .task-progress-header .status-fail { color: #f87171; }
+        .task-progress-header .status-run  { color: #94a3b8; }
         .subtask-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #0f172a; border-radius: 6px; margin-bottom: 6px; font-size: 13px; }
-        .subtask-item.done { opacity: 0.6; }
-        .subtask-item .check { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #475569; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .subtask-item.done .check { background: #22c55e; border-color: #22c55e; }
-        .subtask-item.done .check::after { content: '✓'; color: #fff; font-size: 11px; }
+        .subtask-item.done { opacity: 0.7; }
+        .subtask-item .check { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #475569; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; font-weight: bold; line-height: 1; }
         .subtask-item .subtask-text { flex: 1; color: #e2e8f0; }
-        .subtask-item.done .subtask-text { text-decoration: line-through; color: #64748b; }
+        .subtask-item.done.ok .subtask-text { text-decoration: line-through; color: #64748b; }
+        .subtask-item.done.fail .subtask-text { color: #f87171; font-weight: 500; }
         .subtask-item .subtask-robot { color: #64748b; font-size: 12px; }
         .no-task { color: #64748b; font-size: 13px; margin-top: 10px; }
         .exp-card { display: none; margin-top: 16px; padding: 16px; background: #1a2744; border: 1px solid #38bdf8; border-radius: 10px; }
@@ -120,20 +123,24 @@
             <div class="btn-row" style="margin-top:10px">
                 <button class="btn btn-outline btn-sm" onclick="refreshTaskStatus()">刷新任务进度</button>
             </div>
-            <div class="exp-card" id="exp-card">
-                <h3>任务执行完成，是否将本次经验注入经验库？</h3>
-                <p id="exp-task-info"></p>
-                <div class="exp-btns" id="exp-btns-main">
-                    <button class="btn btn-sm btn-success" onclick="showExpNote('positive')">是，注入经验</button>
-                    <button class="btn btn-sm btn-danger" onclick="showExpNote('negative')">否，写避免规则</button>
-                    <button class="btn btn-sm btn-outline" onclick="dismissExp()">跳过</button>
+            <!-- 失败经验弹窗 -->
+            <div class="exp-card" id="exp-card-fail" style="border-color:#ef4444">
+                <h3 style="color:#f87171">⚠ 任务失败 — 请描述失败原因或经验教训</h3>
+                <p id="exp-fail-info" style="color:#64748b;margin-bottom:10px"></p>
+                <textarea id="exp-fail-note" placeholder="例如：移动时若手上有物体，应将手臂举高，避免撞到其他物体。&#10;LLM 会自动判断归入哪个技能文件（navigate / grasp / place / multi_step）。"></textarea>
+                <div class="exp-btns">
+                    <button class="btn btn-sm btn-danger" id="btn-fail-submit" onclick="submitFailureExp()">提交经验</button>
+                    <button class="btn btn-sm btn-outline" onclick="dismissFailExp()">跳过</button>
                 </div>
-                <div id="exp-note-area" style="display:none">
-                    <textarea id="exp-note" placeholder="可选：补充你的备注（如具体哪里好/哪里有问题），LLM 会结合任务数据生成精炼的经验总结"></textarea>
-                    <div class="exp-btns" id="exp-btns-submit">
-                        <button class="btn btn-sm btn-primary" onclick="submitExp()">提交</button>
-                        <button class="btn btn-sm btn-outline" onclick="dismissExp()">取消</button>
-                    </div>
+            </div>
+            <!-- 成功经验弹窗 -->
+            <div class="exp-card" id="exp-card-ok" style="border-color:#22c55e">
+                <h3 style="color:#4ade80">✓ 任务完成 — 是否总结一条经验？（可选）</h3>
+                <p id="exp-ok-info" style="color:#64748b;margin-bottom:10px"></p>
+                <textarea id="exp-ok-note" placeholder="可选：描述这次任务中有效的操作策略，LLM 会自动归入相应技能文件。&#10;直接点「跳过」也可以。"></textarea>
+                <div class="exp-btns">
+                    <button class="btn btn-sm btn-success" id="btn-ok-submit" onclick="submitSuccessExp()">提交经验</button>
+                    <button class="btn btn-sm btn-outline" onclick="dismissOkExp()">跳过</button>
                 </div>
             </div>
         </div>
@@ -212,8 +219,9 @@
                 result.textContent = JSON.stringify(data, null, 2);
                 // 发送成功后立即开始轮询任务进度
                 if (data.status === 'success') {
-                    expDismissed = false;
-                    document.getElementById('exp-card').style.display = 'none';
+                    failDismissed = false; okDismissed = false;
+                    document.getElementById('exp-card-fail').style.display = 'none';
+                    document.getElementById('exp-card-ok').style.display = 'none';
                     startTaskPolling();
                 }
             } catch (e) {
@@ -235,21 +243,52 @@
                 return;
             }
             const pct = data.total > 0 ? Math.round(data.completed / data.total * 100) : 0;
+            const taskName = Array.isArray(data.task) ? data.task[0] : (data.task || '');
+            const anyFailed = data.failed || data.subtask_list.some(
+                t => t.done && t.status && t.status !== 'success'
+            );
+            let statusLabel, statusCls;
+            if (data.all_done) {
+                if (anyFailed) {
+                    statusLabel = '✕ 任务失败未完成';
+                    statusCls = 'status-fail';
+                } else {
+                    statusLabel = '✓ 全部完成';
+                    statusCls = 'status-ok';
+                }
+            } else {
+                statusLabel = '执行中...';
+                statusCls = 'status-run';
+            }
+            const barCls = anyFailed ? 'task-bar-fill fail' : 'task-bar-fill';
             let html = `<div class="task-progress-header">
-                <span>${data.task || ''} (${data.completed}/${data.total})</span>
-                <span>${data.all_done ? '✓ 全部完成' : '执行中...'}</span>
+                <span>${taskName} (${data.completed}/${data.total})</span>
+                <span class="${statusCls}">${statusLabel}</span>
             </div>
-            <div class="task-bar"><div class="task-bar-fill" style="width:${pct}%"></div></div>`;
+            <div class="task-bar"><div class="${barCls}" style="width:${pct}%"></div></div>`;
 
             for (const t of data.subtask_list) {
-                html += `<div class="subtask-item ${t.done ? 'done' : ''}">
-                    <div class="check"></div>
+                const failed = t.done && t.status && t.status !== 'success';
+                const cls = t.done ? (failed ? 'done fail' : 'done ok') : '';
+                let checkStyle = 'border-color:#475569;';
+                let checkIcon = '';
+                if (t.done) {
+                    if (failed) {
+                        checkStyle = 'background:#ef4444;border-color:#ef4444;color:#fff;';
+                        checkIcon = '✕';
+                    } else {
+                        checkStyle = 'background:#22c55e;border-color:#22c55e;color:#fff;';
+                        checkIcon = '✓';
+                    }
+                }
+                html += `<div class="subtask-item ${cls}">
+                    <div class="check" style="${checkStyle}">${checkIcon}</div>
                     <span class="subtask-text">${t.subtask}</span>
                     <span class="subtask-robot">${t.robot_name}</span>
                 </div>`;
             }
             el.innerHTML = html;
-            if (data.all_done) showExpCard(data);
+            if (data.all_done) { failDismissed = false; okDismissed = false; }
         }
 
         async function refreshTaskStatus() {
@@ -281,50 +320,92 @@
             }
         }
 
-        // 经验卡片
-        let expDismissed = false;
-        let currentTaskId = null;
-        let currentExpType = null;
+        // ── 经验弹窗 ──────────────────────────────────────────────────────
+        let failDismissed = false, okDismissed = false;
 
-        function showExpCard(data) {
-            if (expDismissed || !data.active || !data.all_done) return;
-            currentTaskId = data.task_id;
-            document.getElementById('exp-task-info').textContent =
-                `任务：${data.task}（${data.completed}/${data.total} 完成）`;
-            document.getElementById('exp-card').style.display = 'block';
-            document.getElementById('exp-btns-main').style.display = 'flex';
-            document.getElementById('exp-note-area').style.display = 'none';
-        }
-
-        function dismissExp() {
-            expDismissed = true;
-            document.getElementById('exp-card').style.display = 'none';
-            document.getElementById('exp-note').value = '';
-        }
-
-        function showExpNote(type) {
-            currentExpType = type;
-            document.getElementById('exp-btns-main').style.display = 'none';
-            document.getElementById('exp-note-area').style.display = 'block';
-            const textarea = document.getElementById('exp-note');
-            if (type === 'positive') {
-                textarea.placeholder = '可选：补充你觉得哪里做得好，LLM 会结合任务数据生成精炼的经验总结';
-            } else {
-                textarea.placeholder = '可选：描述问题所在，LLM 会结合任务数据生成避免规则';
-            }
-        }
-
-        async function submitExp() {
-            const note = document.getElementById('exp-note').value.trim();
+        // 失败弹窗
+        async function pollFailurePending() {
             try {
-                await fetch('/api/save_experience', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({task_id: currentTaskId, type: currentExpType, note: note})
-                });
+                const resp = await fetch('/api/failure_pending');
+                const data = await resp.json();
+                if (data.pending && !failDismissed) showFailureCard(data);
             } catch (e) {}
-            dismissExp();
         }
+        function showFailureCard(data) {
+            if (document.getElementById('exp-card-fail').style.display === 'block') return;
+            document.getElementById('exp-fail-info').textContent =
+                `任务：${data.task_desc || ''}（${data.completed}/${data.total} 步完成后终止）`;
+            document.getElementById('exp-fail-note').value = '';
+            document.getElementById('exp-card-fail').style.display = 'block';
+        }
+        function dismissFailExp() {
+            failDismissed = true;
+            document.getElementById('exp-card-fail').style.display = 'none';
+            fetch('/api/save_failure_experience', {method:'POST',
+                headers:{'Content-Type':'application/json'},body:JSON.stringify({note:''})}).catch(()=>{});
+        }
+        async function submitFailureExp() {
+            const note = document.getElementById('exp-fail-note').value.trim();
+            const btn = document.getElementById('btn-fail-submit');
+            btn.disabled = true; btn.textContent = '提交中…';
+            try {
+                const r = await fetch('/api/save_failure_experience', {method:'POST',
+                    headers:{'Content-Type':'application/json'},body:JSON.stringify({note})});
+                const res = await r.json();
+                if (res.success && res.skill) {
+                    btn.textContent = `已存入 ${res.skill}.md`;
+                    setTimeout(() => { document.getElementById('exp-card-fail').style.display='none';
+                        failDismissed=false; btn.disabled=false; btn.textContent='提交经验'; }, 1500);
+                    return;
+                }
+            } catch(e) {}
+            document.getElementById('exp-card-fail').style.display = 'none';
+            failDismissed = false; btn.disabled = false; btn.textContent = '提交经验';
+        }
+
+        // 成功弹窗
+        async function pollSuccessPending() {
+            try {
+                const resp = await fetch('/api/success_pending');
+                const data = await resp.json();
+                if (data.pending && !okDismissed) showSuccessCard(data);
+            } catch (e) {}
+        }
+        function showSuccessCard(data) {
+            if (document.getElementById('exp-card-ok').style.display === 'block') return;
+            document.getElementById('exp-ok-info').textContent =
+                `任务：${data.task_desc || ''}（${data.completed}/${data.total} 步全部完成）`;
+            document.getElementById('exp-ok-note').value = '';
+            document.getElementById('exp-card-ok').style.display = 'block';
+        }
+        function dismissOkExp() {
+            okDismissed = true;
+            document.getElementById('exp-card-ok').style.display = 'none';
+            fetch('/api/save_success_experience', {method:'POST',
+                headers:{'Content-Type':'application/json'},body:JSON.stringify({note:''})}).catch(()=>{});
+        }
+        async function submitSuccessExp() {
+            const note = document.getElementById('exp-ok-note').value.trim();
+            const btn = document.getElementById('btn-ok-submit');
+            btn.disabled = true; btn.textContent = '提交中…';
+            try {
+                const r = await fetch('/api/save_success_experience', {method:'POST',
+                    headers:{'Content-Type':'application/json'},body:JSON.stringify({note})});
+                const res = await r.json();
+                if (res.success && res.skill) {
+                    btn.textContent = `已存入 ${res.skill}.md`;
+                    setTimeout(() => { document.getElementById('exp-card-ok').style.display='none';
+                        okDismissed=false; btn.disabled=false; btn.textContent='提交经验'; }, 1500);
+                    return;
+                }
+            } catch(e) {}
+            document.getElementById('exp-card-ok').style.display = 'none';
+            okDismissed = false; btn.disabled = false; btn.textContent = '提交经验';
+        }
+
+        // 每 3 秒轮询
+        setInterval(pollFailurePending, 3000);
+        setInterval(pollSuccessPending, 3000);
 
         // 配置校验 - 自动检测
         async function validateConfig() {

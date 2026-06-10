@@ -97,6 +97,57 @@ def get_all_locations() -> dict:
             for loc, info in state['locations'].items()}
 
 
+def build_initial_state(env) -> dict:
+    """
+    根据仿真中物体的实际位置自动生成初始场景状态。
+
+    每次 env.reset() 后调用，可确保工作点名称与当前 waypoints.yaml 完全一致。
+    """
+    objects_path = os.path.join(_DIR, 'objects.yaml')
+    with open(WAYPOINTS_PATH) as f:
+        wps_data = yaml.safe_load(f)
+    with open(objects_path) as f:
+        objs_data = yaml.safe_load(f)
+
+    waypoints = wps_data['waypoints']
+    # 物体名 → 所在家具（来自 objects.yaml placement.fixture）
+    obj_fixtures = {
+        o['name']: o.get('placement', {}).get('fixture')
+        for o in objs_data.get('objects', [])
+    }
+
+    # 家具关键词（用于从 serves 字段推断 fixture 类型）
+    _FIXTURE_KW = {'counter', 'island', 'sink', 'stove', 'fridge', 'microwave', 'oven', 'cabinet'}
+
+    # 初始化每个工作点
+    locations = {}
+    for wp in waypoints:
+        fixture = None
+        for s in wp.get('serves', []):
+            if s.lower() in _FIXTURE_KW:
+                fixture = s
+                break
+        locations[wp['name']] = {'fixture': fixture, 'objects': []}
+    locations['robot_hand'] = {'fixture': None, 'objects': []}
+
+    # 按最近距离把物体分配到工作点
+    coords = {wp['name']: wp['pos'][:2] for wp in waypoints}
+    for obj_name in list(env.obj_body_id.keys()):
+        try:
+            pos = env.get_object_pos(obj_name)
+            p = np.array(pos[:2])
+            best_wp = min(coords, key=lambda n: np.linalg.norm(p - np.array(coords[n])))
+            entry = locations[best_wp]
+            entry['objects'].append(obj_name)
+            # serves 中没有家具关键词时，用物体自身 placement fixture 补充
+            if entry['fixture'] is None:
+                entry['fixture'] = obj_fixtures.get(obj_name)
+        except Exception as e:
+            print(f"[SceneMemory] 无法获取 {obj_name} 位置，跳过: {e}")
+
+    return {'last_updated': '初始状态', 'locations': locations}
+
+
 def coords_to_waypoint(pos: list) -> str:
     """根据放置坐标找最近的工作点名，总是返回最近的"""
     if pos is None:

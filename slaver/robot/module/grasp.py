@@ -13,6 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 from robot_api.client import grasp_object as _grasp_object
 
+_SERVE_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'serve'))
+if _SERVE_PATH not in sys.path:
+    sys.path.insert(0, _SERVE_PATH)
+from scene.scene_memory import move_object as _move_object
+
 
 def register_tools(mcp):
 
@@ -39,10 +44,11 @@ def register_tools(mcp):
             state = {"_status": "success"}
             if "real_arm" in result:
                 state["real_arm"] = result["real_arm"]
-            if state.get("_status") == "success":
-                print(f"[grasp] ✓ {response}", file=sys.stderr)
-            else:
-                print(f"[grasp] ✗ {response}", file=sys.stderr)
+            print(f"[grasp] ✓ {response}", file=sys.stderr)
+            try:
+                _move_object(target, "robot_hand")
+            except Exception as e:
+                print(f"[grasp] 记忆更新失败: {e}", file=sys.stderr)
             return json.dumps([response, state], ensure_ascii=False)
         else:
             msg = result.get("result", f"抓取 {target} 失败，请重试。")

@@ -72,13 +72,61 @@ def task_status():
     return jsonify(master_agent.get_task_status()), 200
 
 
+@app.route("/api/success_pending", methods=["GET"])
+def success_pending():
+    """返回是否有等待人工决定的成功经验。"""
+    info = master_agent._pending_success
+    if info:
+        return jsonify({"pending": True, **info}), 200
+    return jsonify({"pending": False}), 200
+
+
+@app.route("/api/save_success_experience", methods=["POST"])
+def save_success_experience():
+    """接收人工输入的成功经验（可选），LLM 归类后写入 skill 文件。"""
+    try:
+        data = request.get_json() or {}
+        raw_input = (data.get("note") or "").strip()
+        if not raw_input:
+            master_agent._pending_success = None
+            return jsonify({"success": True, "message": "已跳过"}), 200
+        result = master_agent.classify_and_save_success_experience(raw_input)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/failure_pending", methods=["GET"])
+def failure_pending():
+    """返回是否有等待人工录入的失败经验。"""
+    info = master_agent._pending_failure
+    if info:
+        return jsonify({"pending": True, **info}), 200
+    return jsonify({"pending": False}), 200
+
+
+@app.route("/api/save_failure_experience", methods=["POST"])
+def save_failure_experience():
+    """接收人工录入的失败经验，LLM 自动归类后写入对应 skill 文件。"""
+    try:
+        data = request.get_json() or {}
+        raw_input = (data.get("note") or "").strip()
+        if not raw_input:
+            master_agent._pending_failure = None
+            return jsonify({"success": True, "message": "已跳过"}), 200
+        result = master_agent.classify_and_save_failure_experience(raw_input)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 @app.route("/api/save_experience", methods=["POST"])
 def save_experience():
-    """保存任务执行经验。"""
+    """兼容旧前端的经验保存接口。"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         task_id = data.get("task_id", "")
-        exp_type = data.get("type")  # "positive" or "negative"
+        exp_type = data.get("type")
         note = data.get("note", "")
 
         if exp_type not in ("positive", "negative"):
