@@ -4,7 +4,7 @@
 robot:
   name: "XLeRobot"             # XLeRobot 双臂移动机器人
   base_length: 0.40            # 底盘长度 (米)
-  base_width: 0.55             # 底盘宽度 (米)，包含左右轮外廓
+  base_width: 0.50             # 底盘宽度 (米)，包含左右轮外廓
   base_radius: 0.35            # 底盘外接圆半径 (米)，用于碰撞避障
   arm_max_reach: 1.0           # 当前仿真任务使用的有效工作距离 (米)
   arm_mount_height: 0.78       # 机械臂安装高度 (米)

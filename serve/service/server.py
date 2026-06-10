@@ -18,7 +18,14 @@ from tools.arm import (
     move_arm,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, stop_base
+from tools.move import (
+    base_link_yaw_deg_from_chassis_yaw_deg,
+    base_link_yaw_from_chassis_yaw,
+    get_base_info,
+    nav,
+    move,
+    stop_base,
+)
 from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
 
 app = Flask(__name__)
@@ -53,6 +60,23 @@ _recording = {
     "last_capture": 0,
     "interval": 1.0,
 }
+
+# Cached occupancy grid (static kitchen scene — doesn't change)
+_cached_grid = None
+_cached_grid_params = None
+
+
+def _get_occupancy_grid(env, resolution, x_min, x_max, y_min, y_max):
+    """Return occupancy grid, rebuilding only if parameters changed."""
+    global _cached_grid, _cached_grid_params
+    key = (resolution, x_min, x_max, y_min, y_max)
+    if _cached_grid is not None and _cached_grid_params == key:
+        return _cached_grid
+    grid = _build_occupancy_grid(env, resolution, x_min, x_max, y_min, y_max)
+    _cached_grid = grid
+    _cached_grid_params = key
+    return grid
+
 
 RECORD_CAMERAS = [
     ("overhead_cam",   "Top",         False),
@@ -226,6 +250,8 @@ def apply_base_velocity(env):
     # dadr+3 = wx (roll), dadr+4 = wy (pitch), dadr+5 = wz (yaw)
 
     vx, vw = float(base[0]), float(base[1])
+    # Body +X points backward; negate so positive vx → forward motion
+    vx = -vx
 
     # qpos layout: [x, y, z, qw, qx, qy, qz]
     # yaw is encoded in quaternion; get it from the helper
@@ -246,10 +272,10 @@ def apply_base_velocity(env):
     env.data.qvel[dadr + 2] = 0.0                      # z: don't fly
     env.data.qvel[dadr + 3] = 0.0                      # roll: don't tip
     env.data.qvel[dadr + 4] = 0.0                      # pitch: don't tip
-    env.data.qvel[dadr + 5] = -vw * max_angular        # yaw angular velocity
+    env.data.qvel[dadr + 5] = -vw * max_angular        # public angular.z positive = CCW
 
     # 同时写 wheel ctrl 让 viewer 视觉同步
-    env.data.ctrl[0] = vx
+    env.data.ctrl[0] = -vx   # undo negation: ctrl positive = forward per move() convention
     env.data.ctrl[1] = vw
     return True
 
@@ -329,6 +355,14 @@ def _normalize_angle_deg(angle):
     return (float(angle) + 180.0) % 360.0 - 180.0
 
 
+def _public_yaw_deg(info):
+    return info.get("base_link_yaw_deg", base_link_yaw_deg_from_chassis_yaw_deg(info["yaw_deg"]))
+
+
+def _public_yaw_rad(info):
+    return info.get("base_link_yaw_rad", base_link_yaw_from_chassis_yaw(info["yaw_rad"]))
+
+
 def _step_active_command(env):
     cmd = _active_command
     if cmd is None:
@@ -340,22 +374,22 @@ def _step_active_command(env):
             for _ in range(NAV_SUBSTEPS):
                 info = get_base_info(env)
                 x_now, y_now = info["pos"][0], info["pos"][1]
-                yaw_now = info["yaw_rad"]
+                yaw_now = _public_yaw_rad(info)
                 err_x = state["x"] - x_now
                 err_y = state["y"] - y_now
                 pos_err = float(np.hypot(err_x, err_y))
                 yaw_err = 0.0
                 yaw_done = state["target_yaw"] is None
                 if state["target_yaw"] is not None:
-                    yaw_err = _normalize_angle_deg(state["target_yaw"] - info["yaw_deg"])
+                    yaw_err = _normalize_angle_deg(state["target_yaw"] - _public_yaw_deg(info))
                     yaw_done = abs(yaw_err) < state["yaw_threshold"]
                 if pos_err < state["pos_threshold"] and yaw_done:
                     final = get_base_info(env)
-                    _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
+                    _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": _public_yaw_deg(final)})
                     return True
                 if state["step"] >= state["max_steps"]:
                     final = get_base_info(env)
-                    _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
+                    _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": _public_yaw_deg(final), "result": "导航超时"})
                     return True
                 # 差速驱动 PD 控制
                 if pos_err >= state["pos_threshold"]:
@@ -381,7 +415,7 @@ def _step_active_command(env):
                 set_base_velocity(Vx=0.0, Vw=0.0, timeout=1.0)
                 stop_base(env)
                 final = get_base_info(env)
-                _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
+                _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": _public_yaw_deg(final)})
                 return True
             move(env, Vx=state["vx"], Vw=state["vw"])
             return True
@@ -526,7 +560,7 @@ def process_commands(env):
                     return
                 elif cmd_type == "cmd_vel":
                     info = move(env, **params)
-                    result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
+                    result = {"success": True, "pos": info["pos"], "yaw": _public_yaw_deg(info)}
                 elif cmd_type == "screenshot":
                     from PIL import Image as PILImage
                     from io import BytesIO
@@ -679,7 +713,7 @@ def api_scene():
         robot = {
             "base_pos": base_info["pos"],
             "ee_pos": arm_info["ee_pos"],
-            "yaw": base_info.get("yaw_deg", 0),
+            "yaw": _public_yaw_deg(base_info),
         }
 
     return jsonify(_np_to_list({
@@ -879,7 +913,7 @@ def api_cmd_vel():
     )
     with _env_lock:
         info = get_base_info(env)
-    return jsonify({"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]})
+    return jsonify({"success": True, "pos": info["pos"], "yaw": _public_yaw_deg(info)})
 
 
 @app.route("/open_gripper", methods=["POST"])
@@ -964,7 +998,7 @@ def _build_occupancy_grid(env, resolution, x_min, x_max, y_min, y_max):
             if col_min <= col_max and row_min <= row_max:
                 rects.append((col_min, row_min, col_max, row_max))
 
-        grid = bytearray([255] * (width * height))
+        grid = bytearray([254] * (width * height))
         for c1, r1, c2, r2 in rects:
             for r in range(r1, r2 + 1):
                 for c in range(c1, c2 + 1):
@@ -986,7 +1020,7 @@ def api_map_data():
     if env is None:
         return jsonify({"error": "仿真器未初始化"}), 503
 
-    return jsonify(_build_occupancy_grid(env, *_map_request_params()))
+    return jsonify(_get_occupancy_grid(env, *_map_request_params()))
 
 
 @app.route("/scan", methods=["GET"])
@@ -1002,7 +1036,7 @@ def api_scan():
     range_min = float(request.args.get("range_min", 0.05))
     range_max = float(request.args.get("range_max", 5.0))
 
-    grid_data = _build_occupancy_grid(env, *_map_request_params())
+    grid_data = _get_occupancy_grid(env, *_map_request_params())
     with _env_lock:
         base = _read_base_info(env)
 
@@ -1028,7 +1062,8 @@ def api_scan():
     ranges = []
     for i in range(count):
         rel_angle = angle_min + i * angle_increment
-        world_angle = yaw + rel_angle
+        # Body +X = backward; add π so rel_angle=0 points forward (ROS convention)
+        world_angle = yaw + math.pi + rel_angle
         hit = None
         dist = range_min
         while dist <= range_max:

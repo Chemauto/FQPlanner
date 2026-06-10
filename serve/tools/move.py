@@ -6,6 +6,7 @@ ctrl[0] = forward (前进/后退), ctrl[1] = turn (左转/右转)
 与 MuJoCo-GS-Web 实物接口一致。
 """
 
+import math
 import numpy as np
 import mujoco
 
@@ -22,6 +23,16 @@ def _normalize_angle_deg(angle):
     while angle < -180:
         angle += 360
     return angle
+
+
+def base_link_yaw_from_chassis_yaw(yaw_rad):
+    """Convert MuJoCo chassis yaw to the public ROS/base_link heading."""
+    return _normalize_angle(float(yaw_rad) + math.pi)
+
+
+def base_link_yaw_deg_from_chassis_yaw_deg(yaw_deg):
+    """Convert MuJoCo chassis yaw degrees to the public ROS/base_link heading."""
+    return _normalize_angle_deg(float(yaw_deg) + 180.0)
 
 
 def get_base_info(env):
@@ -46,20 +57,37 @@ def get_base_info(env):
     w, x, y, z = quat
     yaw_rad = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     yaw_deg = np.rad2deg(yaw_rad)
+    base_link_yaw_rad = base_link_yaw_from_chassis_yaw(yaw_rad)
+    base_link_yaw_deg = base_link_yaw_deg_from_chassis_yaw_deg(yaw_deg)
 
     qpos = [float(pos[0]), float(pos[1]), float(yaw_rad)]
+    # Compute body-frame velocities for odom twist.
+    # freejoint qvel: [vx_world, vy_world, vz, wx, wy, wz_yaw]
     qvel = [0.0, 0.0, 0.0]
+    qvel_raw = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     if getattr(env, "base_free_joint_id", -1) >= 0:
         dadr = model.jnt_dofadr[env.base_free_joint_id]
-        qvel = data.qvel[dadr:dadr + 3].copy().tolist()
+        full = data.qvel[dadr:dadr + 6].tolist()
+        # Public body-frame velocity uses base_link, not raw chassis frame.
+        cos_y = math.cos(base_link_yaw_rad)
+        sin_y = math.sin(base_link_yaw_rad)
+        vx_world = full[0]
+        vy_world = full[1]
+        body_vx = vx_world * cos_y + vy_world * sin_y
+        body_vy = -vx_world * sin_y + vy_world * cos_y
+        qvel = [body_vx, body_vy, full[5]]  # [vx_body, vy_body, wz]
+        qvel_raw = full
     ctrl = data.ctrl[:min(env.model.nu, data.ctrl.size)].copy().tolist()
 
     return {
         "pos": pos.tolist(),
         "yaw_deg": round(float(yaw_deg), 2),
         "yaw_rad": round(float(yaw_rad), 4),
+        "base_link_yaw_deg": round(float(base_link_yaw_deg), 2),
+        "base_link_yaw_rad": round(float(base_link_yaw_rad), 4),
         "qpos": qpos,
         "qvel": qvel,
+        "qvel_raw": qvel_raw,
         "ctrl": ctrl,
     }
 
@@ -138,7 +166,7 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
     for _ in range(max_steps):
         info = get_base_info(env)
         x_now, y_now = info["pos"][0], info["pos"][1]
-        yaw_now = info["yaw_rad"]
+        yaw_now = info.get("base_link_yaw_rad", base_link_yaw_from_chassis_yaw(info["yaw_rad"]))
 
         err_x = x - x_now
         err_y = y - y_now
@@ -148,7 +176,11 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
         if pos_err < pos_threshold:
             if target_yaw is None:
                 break
-            yaw_err_deg = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+            current_yaw_deg = info.get(
+                "base_link_yaw_deg",
+                base_link_yaw_deg_from_chassis_yaw_deg(info["yaw_deg"]),
+            )
+            yaw_err_deg = _normalize_angle_deg(target_yaw - current_yaw_deg)
             if abs(yaw_err_deg) < yaw_threshold:
                 break
             # 原地转向到目标朝向
@@ -179,7 +211,11 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
     if target_yaw is not None:
         for _ in range(200):
             info = get_base_info(env)
-            yaw_err_deg = _normalize_angle_deg(target_yaw - info["yaw_deg"])
+            current_yaw_deg = info.get(
+                "base_link_yaw_deg",
+                base_link_yaw_deg_from_chassis_yaw_deg(info["yaw_deg"]),
+            )
+            yaw_err_deg = _normalize_angle_deg(target_yaw - current_yaw_deg)
             if abs(yaw_err_deg) < yaw_threshold:
                 break
             Vw = np.clip(Kp * (yaw_err_deg / 90.0), -1.0, 1.0)
