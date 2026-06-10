@@ -1,13 +1,17 @@
 """
 move.py - 机器人底座移动控制
 
-XLeRobot 差速驱动模型：2 个 motor actuator 通过 tendon 控制轮子。
-ctrl[0] = forward (前进/后退), ctrl[1] = turn (左转/右转)
-与 MuJoCo-GS-Web 实物接口一致。
+运动学控制：直接向 chassis freejoint 注入速度，不依赖轮子物理。
+Vx=1 → MAX_SPEED m/s 前进；Vw=1 → MAX_TURN rad/s 逆时针旋转。
 """
+
+import sys
 
 import numpy as np
 import mujoco
+
+MAX_SPEED = 1.0   # m/s  (Vx=1 对应的前进速度)
+MAX_TURN  = 1.5   # rad/s (Vw=1 对应的偏航角速度)
 
 
 def _normalize_angle(angle):
@@ -66,47 +70,72 @@ def get_base_info(env):
 
 def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
     """
-    底座速度控制（一步）
-
-    差速驱动：ctrl[0]=forward, ctrl[1]=turn
-    Vy 被忽略（差速驱动物理上不能侧移）
+    底座运动学速度控制（一步）。
+    直接向 chassis freejoint 注入速度，不依赖轮子马达物理。
 
     Args:
         env: 环境对象
-        Vx:  前进速度 [-1, 1]，body X 轴方向（前进为正）
-        Vy:  忽略（差速驱动不支持侧移）
-        Vw:  旋转速度 [-1, 1]，逆时针为正
+        Vx:  前进速度 [-1,1]，body X 轴正方向为前进
+        Vy:  侧移速度 [-1,1]，body Y 轴正方向（全向底盘可用，XLeRobot 通常为 0）
+        Vw:  偏航角速度 [-1,1]，正值逆时针（增大 yaw）
 
     Returns:
         dict: 执行后的底座状态
     """
-    forward = np.clip(Vx, -1.0, 1.0)
-    # MuJoCo tendon sign is opposite to the public Vw convention.
-    turn = -np.clip(Vw, -1.0, 1.0)
+    joint_id = getattr(env, "base_free_joint_id", -1)
+    if joint_id < 0:
+        env.step()
+        return get_base_info(env)
 
-    env.data.ctrl[0] = forward
-    env.data.ctrl[1] = turn
+    qadr = env.model.jnt_qposadr[joint_id]
+    dadr = env.model.jnt_dofadr[joint_id]
+
+    # 当前 yaw（从 freejoint quaternion 读取）
+    qw, qx, qy, qz = env.data.qpos[qadr+3:qadr+7]
+    yaw = float(np.arctan2(2.0*(qw*qz + qx*qy), 1.0 - 2.0*(qy*qy + qz*qz)))
+
+    # body 坐标系 → 世界坐标系速度
+    cos_y, sin_y = np.cos(yaw), np.sin(yaw)
+    vx_w = (Vx * cos_y - Vy * sin_y) * MAX_SPEED
+    vy_w = (Vx * sin_y + Vy * cos_y) * MAX_SPEED
+    vw   = Vw * MAX_TURN
+
+    # 注入速度到 freejoint DOF，mj_step 会积分到位置
+    env.data.qvel[dadr+0] = vx_w
+    env.data.qvel[dadr+1] = vy_w
+    env.data.qvel[dadr+2] = 0.0   # 不允许垂直运动
+    env.data.qvel[dadr+3] = 0.0   # 清除 roll 速度
+    env.data.qvel[dadr+4] = 0.0   # 清除 pitch 速度
+    env.data.qvel[dadr+5] = vw
+
+    # 关闭轮子马达（运动学模式下不需要）
+    env.data.ctrl[0] = 0.0
+    env.data.ctrl[1] = 0.0
+
     env.step()
+
+    # 物理步后：修正 pitch/roll 漂移，保持底座水平
+    w2, x2, y2, z2 = env.data.qpos[qadr+3:qadr+7]
+    yaw_new = float(np.arctan2(2.0*(w2*z2 + x2*y2), 1.0 - 2.0*(y2*y2 + z2*z2)))
+    env.data.qpos[qadr+3:qadr+7] = [np.cos(yaw_new/2), 0.0, 0.0, np.sin(yaw_new/2)]
+    env.data.qvel[dadr+3] = 0.0
+    env.data.qvel[dadr+4] = 0.0
+    mujoco.mj_forward(env.model, env.data)
 
     return get_base_info(env)
 
 
 def stop_base(env):
-    """Stop commanded base motion and clear residual chassis/wheel velocity."""
+    """停止底座并清除残余速度。"""
     env.data.ctrl[0] = 0.0
     env.data.ctrl[1] = 0.0
 
-    if getattr(env, "base_free_joint_id", -1) >= 0:
-        dadr = env.model.jnt_dofadr[env.base_free_joint_id]
-        env.data.qvel[dadr:dadr + 6] = 0.0
+    joint_id = getattr(env, "base_free_joint_id", -1)
+    if joint_id >= 0:
+        dadr = env.model.jnt_dofadr[joint_id]
+        env.data.qvel[dadr:dadr+6] = 0.0
 
-    for joint_name in ("left_wheel_joint", "right_wheel_joint"):
-        joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-        if joint_id >= 0:
-            dadr = env.model.jnt_dofadr[joint_id]
-            env.data.qvel[dadr] = 0.0
-
-    env.sim.forward()
+    mujoco.mj_forward(env.model, env.data)
     return get_base_info(env)
 
 
