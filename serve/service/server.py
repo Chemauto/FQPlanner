@@ -239,7 +239,7 @@ def apply_base_velocity(env):
     world_vx = vx * cos_y
     world_vy = vx * sin_y
 
-    max_linear = 0.5
+    max_linear = 1.0
     max_angular = 1.0
     env.data.qvel[dadr]     = world_vx * max_linear   # world x
     env.data.qvel[dadr + 1] = world_vy * max_linear   # world y
