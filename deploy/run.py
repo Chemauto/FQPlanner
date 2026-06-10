@@ -138,6 +138,44 @@ def task_status():
         return jsonify({"active": False, "error": str(e)}), 500
 
 
+@app.route("/api/failure_pending", methods=["GET"])
+def failure_pending():
+    try:
+        resp = requests.get(f"{MASTER_URL}/api/failure_pending", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"pending": False}), 200
+
+
+@app.route("/api/save_failure_experience", methods=["POST"])
+def save_failure_experience():
+    try:
+        resp = requests.post(f"{MASTER_URL}/api/save_failure_experience",
+                             json=request.get_json(), timeout=30)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/success_pending", methods=["GET"])
+def success_pending():
+    try:
+        resp = requests.get(f"{MASTER_URL}/api/success_pending", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({"pending": False}), 200
+
+
+@app.route("/api/save_success_experience", methods=["POST"])
+def save_success_experience():
+    try:
+        resp = requests.post(f"{MASTER_URL}/api/save_success_experience",
+                             json=request.get_json(), timeout=30)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 @app.route("/api/save_experience", methods=["POST"])
 def save_experience():
     """转发经验保存到 Master"""
