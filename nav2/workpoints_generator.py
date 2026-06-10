@@ -166,7 +166,7 @@ def compute_yaw(from_xy, to_xy):
     dy = to_xy[1] - from_xy[1]
     # 机器人模型的任务正面与 MuJoCo body +X 方向相差 180°。
     # 工作点朝向需要让任务正面对准目标，因此在目标方向上反转 180°。
-    return math.degrees(math.atan2(dy, dx)) + 180.0
+    return math.degrees(math.atan2(dy, dx)) 
 
 
 def add_fixture_waypoints(selected, free_points, targets, fixture_names, max_reach, min_dist):

@@ -49,6 +49,8 @@ _base_status_cache = {}
 
 NAV_SUBSTEPS = 1
 ARM_STEP = 0.025
+CMD_VEL_MAX_LINEAR = 1.0
+CMD_VEL_MAX_ANGULAR = 1.5
 
 # 录制状态
 _recording = {
@@ -226,8 +228,8 @@ def get_base_action():
             return None
         _base_cmd["was_active"] = True
         action = np.zeros(2)
-        action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)   # forward
-        action[1] = -np.clip(_base_cmd["Vw"], -1.0, 1.0)   # turn
+        action[0] = np.clip(_base_cmd["Vx"], -CMD_VEL_MAX_LINEAR, CMD_VEL_MAX_LINEAR)   # forward
+        action[1] = -np.clip(_base_cmd["Vw"], -CMD_VEL_MAX_ANGULAR, CMD_VEL_MAX_ANGULAR)   # turn
         return action
 
 
@@ -276,7 +278,7 @@ def apply_base_velocity(env):
 
     # 同时写 wheel ctrl 让 viewer 视觉同步
     env.data.ctrl[0] = -vx   # undo negation: ctrl positive = forward per move() convention
-    env.data.ctrl[1] = vw
+    env.data.ctrl[1] = np.clip(vw, -1.0, 1.0)
     return True
 
 

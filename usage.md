@@ -72,6 +72,49 @@ python deploy/run.py
 http://127.0.0.1:8888
 ```
 
+## 6. Docker 启动 Nav2 导航
+
+如果需要使用 Nav2 的全局规划、局部控制和 costmap，不要走 MuJoCo 后端自己的简单 `/nav`。
+先启动 MuJoCo 后端，再启动 Docker 内的 ROS2/Nav2。
+
+宿主机启动 MuJoCo：
+
+```bash
+conda activate robocasa
+cd serve
+python main.py 
+```
+
+构建并进入 Nav2 镜像：
+
+```bash
+cd ..
+./docker/build.sh 
+# 构建镜像
+./docker/run.sh
+# 构建完成后运行镜像
+```
+
+容器内启动 Nav2：
+
+```bash
+ros2 launch fqplanner_nav_bridge mujoco_navigation.launch.py \
+  backend_url:=http://host.docker.internal:5001 \
+  http_host:=0.0.0.0 \
+  http_port:=5102 \
+  launch_rviz:=false
+```
+
+让上层项目的 `navigate_to()` 走 Nav2：
+
+```bash
+ export ROBOT_API_URL=http://127.0.0.1:5102
+  python slaver/run.py
+
+```
+
+如果不设置 `ROBOT_API_URL`，项目仍会默认请求 `http://127.0.0.1:5001/nav`，也就是简单导航。
+
 ## 常用 API
 
 | 地址 | 方法 | 说明 |
