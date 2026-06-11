@@ -16,7 +16,7 @@ load_dotenv(os.path.join(_project_root, '.env'))
 
 import yaml
 
-from robot_api.client import capture_image
+from robot_api.client import capture_image as _api_capture_image
 
 # ============================================================
 # 从 config.yaml 加载配置
@@ -137,7 +137,7 @@ def register_tools(mcp):
 
         images = {}
         for cam in CAMERAS:
-            result = capture_image(camera_name=cam)
+            result = _api_capture_image(camera_name=cam)
             if result.get("success"):
                 images[cam] = result["image"]
             else:

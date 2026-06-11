@@ -89,4 +89,4 @@ experience:
 
 # Master-side camera diagnosis switch. VLM provider remains configured in slaver/config.yaml.
 camera:
-  enabled: false
+  enabled: true
