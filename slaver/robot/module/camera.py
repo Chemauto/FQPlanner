@@ -103,7 +103,7 @@ def _call_vlm(images, context=""):
         print(f"[camera] VLM 原始输出: {repr(raw_content)}", file=sys.stderr)
 
         if not result:
-            return "normal", "VLM 返回空内容，无法判断场景状态"
+            return "abnormal", "VLM 返回空内容，无法判断场景状态"
 
         lines = result.split("\n")
         status_line = lines[-1].strip().lower()
@@ -113,7 +113,7 @@ def _call_vlm(images, context=""):
         return status, description
     except Exception as e:
         print(f"[camera] VLM 调用失败: {e}", file=sys.stderr)
-        return "normal", f"VLM 调用失败: {e}"
+        return "abnormal", f"VLM 调用失败: {e}"
 
 
 # ============================================================

@@ -384,108 +384,142 @@ class GlobalAgent:
             """检查是否被新任务取代。"""
             return self._dispatch_token != dispatch_token
 
-        while not task_queue.all_done():
-            if _superseded():
-                self.logger.info(f"[Dispatch] Token 已过期，退出旧任务 dispatch")
-                return
-            if task_id in self.terminated_tasks:
-                self.logger.warning(f"[TERMINATE] Stopping task {task_id}")
-                self.terminated_tasks.discard(task_id)
-                break
+        max_verify_retries = 3
+        final_verify_abnormal = False
+        for _verify_round in range(max_verify_retries):
+            if _verify_round > 0:
+                self.logger.info(f"[Camera] 最终验证重规划第 {_verify_round} 轮，重新执行修正子任务...")
 
-            current = task_queue.get_next_undone()
-            if not current:
-                break
+            while not task_queue.all_done():
+                if _superseded():
+                    self.logger.info(f"[Dispatch] Token 已过期，退出旧任务 dispatch")
+                    return
+                if task_id in self.terminated_tasks:
+                    self.logger.warning(f"[TERMINATE] Stopping task {task_id}")
+                    self.terminated_tasks.discard(task_id)
+                    break
 
-            robot_name = current["robot_name"]
-            subtask_data = {
-                "task_id": task_id,
-                "task": current["subtask"],
-                "order": "true",
-            }
-            if refresh:
-                self.collaborator.clear_agent_status(robot_name)
+                current = task_queue.get_next_undone()
+                if not current:
+                    break
 
-            # 重置状态
-            self._last_subtask_status = None
-            self._last_subtask_result = None
+                robot_name = current["robot_name"]
+                subtask_data = {
+                    "task_id": task_id,
+                    "task": current["subtask"],
+                    "order": "true",
+                }
+                if refresh:
+                    self.collaborator.clear_agent_status(robot_name)
 
-            self.logger.info(f"Sending: {current['subtask']}")
-            # 先标 busy 再发消息，防止机器人响应过快导致 busy flag 竞争
-            self.collaborator.update_agent_busy(robot_name, True)
-            self.collaborator.send(
-                f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
-            )
-            self.collaborator.wait_agents_free([robot_name])
+                # 重置状态
+                self._last_subtask_status = None
+                self._last_subtask_result = None
 
-            if _superseded():
-                self.logger.info(f"[Dispatch] 等待期间被新任务取代，退出")
-                return
+                self.logger.info(f"Sending: {current['subtask']}")
+                # 先标 busy 再发消息，防止机器人响应过快导致 busy flag 竞争
+                self.collaborator.update_agent_busy(robot_name, True)
+                self.collaborator.send(
+                    f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
+                )
+                self.collaborator.wait_agents_free([robot_name])
 
-            subtask_status = self._last_subtask_status or "success"
-            task_queue.mark_done(current, status=subtask_status)
+                if _superseded():
+                    self.logger.info(f"[Dispatch] 等待期间被新任务取代，退出")
+                    return
 
-            # 子任务失败/异常时，拍照诊断（但拍照任务本身失败不再触发拍照，避免死循环）
-            is_camera_task = "拍照" in current["subtask"]
-            if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
-                task_had_failure = True
-                self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
+                subtask_status = self._last_subtask_status or "success"
+                task_queue.mark_done(current, status=subtask_status)
+
+                # 子任务失败/异常时，拍照诊断（但拍照任务本身失败不再触发拍照，避免死循环）
+                is_camera_task = "拍照" in current["subtask"]
+                if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
+                    task_had_failure = True
+                    self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
+                    if self.config.get('camera', {}).get('enabled', True):
+                        self._send_camera_task(
+                            robot_name, task_id,
+                            f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
+                        )
+
+                    # VLM 发现异常时，让 Master LLM 决定如何调整
+                    if self._last_subtask_result and "abnormal" in self._last_subtask_result:
+                        self.logger.info(f"[Camera] VLM 发现异常，触发重规划...")
+                        vlm_feedback = self._last_subtask_result
+                        new_tasks, remove_tasks = self._incremental_replan(
+                            task, task_queue, [], vlm_feedback=vlm_feedback
+                        )
+                        if remove_tasks:
+                            task_queue.remove_pending_tasks(remove_tasks)
+                            self.logger.info(f"[Camera] 移除任务: {remove_tasks}")
+                        if new_tasks:
+                            task_queue.append_tasks(new_tasks)
+                            self.logger.info(f"[Camera] 新增任务: {[t['subtask'] for t in new_tasks]}")
+
+                if task_id in self.terminated_tasks:
+                    self.logger.warning(f"[TERMINATE] Task {task_id} terminated, stopping")
+                    self.terminated_tasks.discard(task_id)
+                    break
+
+                # 每个子任务完成后，检查是否有场景变化需要增量规划
+                with self._scene_changes_lock:
+                    changes = self.pending_scene_changes[:]
+                    self.pending_scene_changes.clear()
+
+                if changes:
+                    new_tasks, remove_tasks = self._incremental_replan(task, task_queue, changes)
+                    if remove_tasks:
+                        task_queue.remove_pending_tasks(remove_tasks)
+                        self.logger.info(
+                            f"[IncrementalReplan] Removed tasks: {remove_tasks}"
+                        )
+                    if new_tasks:
+                        task_queue.append_tasks(new_tasks)
+                        self.logger.info(
+                            f"[IncrementalReplan] Added {len(new_tasks)} new tasks: "
+                            f"{[t['subtask'] for t in new_tasks]}"
+                        )
+
+            # 所有子任务完成后，拍照验证最终场景（仅当 dispatch 未被取代时）
+            if robot_name and task_queue.all_done() and not _superseded():
+                self.logger.info("[Camera] 所有子任务完成，拍照验证最终场景...")
+                camera_ok = False
                 if self.config.get('camera', {}).get('enabled', True):
                     self._send_camera_task(
                         robot_name, task_id,
-                        f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
+                        f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
                     )
+                    camera_ok = self._last_subtask_result is not None
 
-                # VLM 发现异常时，让 Master LLM 决定如何调整
-                if self._last_subtask_result and "abnormal" in self._last_subtask_result:
-                    self.logger.info(f"[Camera] VLM 发现异常，触发重规划...")
+                if not camera_ok:
+                    self.logger.warning("[Camera] 最终验证拍照失败，无法确认场景状态")
+                    task_had_failure = True
+                elif "abnormal" in self._last_subtask_result:
+                    self.logger.warning(f"[Camera] 最终验证发现异常: {self._last_subtask_result}")
                     vlm_feedback = self._last_subtask_result
                     new_tasks, remove_tasks = self._incremental_replan(
                         task, task_queue, [], vlm_feedback=vlm_feedback
                     )
                     if remove_tasks:
                         task_queue.remove_pending_tasks(remove_tasks)
-                        self.logger.info(f"[Camera] 移除任务: {remove_tasks}")
+                        self.logger.info(f"[Camera] 最终验证重规划-移除任务: {remove_tasks}")
                     if new_tasks:
                         task_queue.append_tasks(new_tasks)
-                        self.logger.info(f"[Camera] 新增任务: {[t['subtask'] for t in new_tasks]}")
-
-            if task_id in self.terminated_tasks:
-                self.logger.warning(f"[TERMINATE] Task {task_id} terminated, stopping")
-                self.terminated_tasks.discard(task_id)
-                break
-
-            # 每个子任务完成后，检查是否有场景变化需要增量规划
-            with self._scene_changes_lock:
-                changes = self.pending_scene_changes[:]
-                self.pending_scene_changes.clear()
-
-            if changes:
-                new_tasks, remove_tasks = self._incremental_replan(task, task_queue, changes)
-                if remove_tasks:
-                    task_queue.remove_pending_tasks(remove_tasks)
-                    self.logger.info(
-                        f"[IncrementalReplan] Removed tasks: {remove_tasks}"
-                    )
-                if new_tasks:
-                    task_queue.append_tasks(new_tasks)
-                    self.logger.info(
-                        f"[IncrementalReplan] Added {len(new_tasks)} new tasks: "
-                        f"{[t['subtask'] for t in new_tasks]}"
-                    )
-
-        # 所有子任务完成后，拍照验证最终场景（仅当 dispatch 未被取代时）
-        if robot_name and task_queue.all_done() and not _superseded():
-            self.logger.info("[Camera] 所有子任务完成，拍照验证最终场景...")
-            if self.config.get('camera', {}).get('enabled', True):
-                self._send_camera_task(
-                    robot_name, task_id,
-                    f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
-                )
-            if self._last_subtask_result and "abnormal" in self._last_subtask_result:
-                self.logger.warning(f"[Camera] 最终验证发现异常: {self._last_subtask_result}")
-            else:
-                self.logger.info("[Camera] 最终验证通过，场景正常")
+                        self.logger.info(f"[Camera] 最终验证重规划-新增任务: {[t['subtask'] for t in new_tasks]}")
+                        continue
+                    # abnormal 但 LLM 未生成修正任务，标记失败
+                    self.logger.warning("[Camera] 最终验证异常但未生成修正任务，标记整体失败")
+                    task_had_failure = True
+                    final_verify_abnormal = True
+                else:
+                    self.logger.info("[Camera] 最终验证通过，场景正常")
+            # 验证通过或无条件重试，退出外层循环
+            break
+        else:
+            # for 循环自然结束（达到最大重试次数）
+            self.logger.warning(f"[Camera] 最终验证重规划已达到最大重试次数({max_verify_retries})，场景仍异常")
+            task_had_failure = True
+            final_verify_abnormal = True
 
         self.logger.info(f"Task_id ({task_id}) [{task}] all done.")
 
