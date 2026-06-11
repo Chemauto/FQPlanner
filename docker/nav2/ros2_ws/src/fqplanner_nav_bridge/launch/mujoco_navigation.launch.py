@@ -94,6 +94,8 @@ def generate_launch_description():
                 "backend_url": backend_url,
                 "http_host": http_host,
                 "http_port": http_port,
+                "success_xy_tolerance": 0.10,
+                "success_yaw_tolerance_deg": 8.0,
             }],
         ),
         Node(

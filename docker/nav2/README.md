@@ -25,11 +25,9 @@ ros2 launch fqplanner_nav_bridge mujoco_navigation.launch.py \
   launch_rviz:=false
 ```
 
-On the host, point project navigation calls at the container bridge:
-
-```bash
-export ROBOT_API_URL=http://127.0.0.1:5102
-```
+The project routes navigation through `robot_api/config.yaml`: the MuJoCo
+backend stays on `http://127.0.0.1:5001`, and only `navigate_to()` uses the
+Nav2 bridge on `http://127.0.0.1:5102`.
 
 The MuJoCo backend should be running on the host before launching Nav2:
 

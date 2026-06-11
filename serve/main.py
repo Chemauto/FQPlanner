@@ -22,6 +22,8 @@ from service.server import (
     has_active_base_command,
 )
 
+LOOP_SLEEP_SEC = 0.01
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -47,6 +49,9 @@ if __name__ == "__main__":
     print(f"[debug] scene_xml = {env.scene_xml}")
     print(f"[debug] 底座位置 = {env.get_body_pos('chassis').round(3).tolist()}")
     print(f"[debug] 末端位置 = {env.virtual_ee_pos.round(3).tolist()}")
+    sim_dt = float(env.model.opt.timestep) if env.model.opt.timestep > 0 else LOOP_SLEEP_SEC
+    physics_steps_per_loop = max(1, int(round(LOOP_SLEEP_SEC / sim_dt)))
+    print(f"[debug] physics_steps_per_loop = {physics_steps_per_loop} (dt={sim_dt:.4f}s)")
 
     # 4. 启动 Flask API 服务
     start_server(env, port=5001)
@@ -78,21 +83,22 @@ if __name__ == "__main__":
             with get_lock():
                 process_commands(env)
                 try_record_frame()
-                # 没有活跃底盘命令时，才用 cmd_vel 驱动
-                # cmd_vel 过期时 get_base_action() 返回 None，不写 ctrl
-                # 这样 MuJoCo viewer 的手动滑块可以正常工作
-                if not has_active_base_command():
-                    if not apply_base_velocity(env):
-                        base = get_base_action()
-                        if base is not None:
-                            env.data.ctrl[0] = base[0]
-                            env.data.ctrl[1] = base[1]
-                env.step()
+                for _ in range(physics_steps_per_loop):
+                    # 没有活跃底盘命令时，才用 cmd_vel 驱动
+                    # cmd_vel 过期时 get_base_action() 返回 None，不写 ctrl
+                    # 这样 MuJoCo viewer 的手动滑块可以正常工作
+                    if not has_active_base_command():
+                        if not apply_base_velocity(env):
+                            base = get_base_action()
+                            if base is not None:
+                                env.data.ctrl[0] = base[0]
+                                env.data.ctrl[1] = base[1]
+                    env.step()
             if viewer is not None:
                 if not viewer.is_running():
                     break
                 viewer.sync()
-            time.sleep(0.01)
+            time.sleep(LOOP_SLEEP_SEC)
     except KeyboardInterrupt:
         pass
     finally:

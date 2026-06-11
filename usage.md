@@ -99,21 +99,20 @@ cd ..
 
 ```bash
 ros2 launch fqplanner_nav_bridge mujoco_navigation.launch.py \
-  backend_url:=http://host.docker.internal:5001 \
-  http_host:=0.0.0.0 \
-  http_port:=5102 \
-  launch_rviz:=false
+backend_url:=http://host.docker.internal:5001 \
+http_host:=0.0.0.0 \
+http_port:=5102 \
+launch_rviz:=false
 ```
 
-让上层项目的 `navigate_to()` 走 Nav2：
+上层项目会按 `robot_api/config.yaml` 自动路由：
 
 ```bash
- export ROBOT_API_URL=http://127.0.0.1:5102
-  python slaver/run.py
-
+python slaver/run.py
 ```
 
-如果不设置 `ROBOT_API_URL`，项目仍会默认请求 `http://127.0.0.1:5001/nav`，也就是简单导航。
+其中 MuJoCo 主后端是 `http://127.0.0.1:5001`，只有 `navigate_to()` 会单独走 Nav2 bridge `http://127.0.0.1:5102`。
+生成地图和工作点时不要设置 `ROBOT_API_URL=5102`。
 
 ## 常用 API
 

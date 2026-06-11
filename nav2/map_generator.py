@@ -264,9 +264,26 @@ def clear_robot_footprint(img, radius_m):
     return img
 
 
+def apply_occupied_border(img, margin_m):
+    """Mark the outer map margin as occupied so free points stay inside the room."""
+    if margin_m <= 0:
+        return img
+    margin_px = max(1, int(np.ceil(float(margin_m) / RESOLUTION)))
+    margin_px = min(margin_px, img.width // 2, img.height // 2)
+    if margin_px <= 0:
+        return img
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, img.width - 1, margin_px - 1], fill=OCCUPIED)
+    draw.rectangle([0, img.height - margin_px, img.width - 1, img.height - 1], fill=OCCUPIED)
+    draw.rectangle([0, 0, margin_px - 1, img.height - 1], fill=OCCUPIED)
+    draw.rectangle([img.width - margin_px, 0, img.width - 1, img.height - 1], fill=OCCUPIED)
+    return img
+
+
 def generate_from_sim(
     output_dir,
     inflate_radius=0.0,
+    border_occupied_margin=0.0,
     clear_robot_radius=0.0,
     layout_path=None,
     shrink_footprints=0.2,
@@ -313,6 +330,7 @@ def generate_from_sim(
 
     # 膨胀
     img = apply_inflation(img, inflate_radius)
+    img = apply_occupied_border(img, border_occupied_margin)
 
     # 更新全局 bounds
     res = result.get("resolution", RESOLUTION)
@@ -327,7 +345,7 @@ def generate_from_sim(
 # 模式 2: 静态解析 layout.yaml（fallback）
 # ============================================================
 
-def generate_from_layout(layout_path, output_dir, inflate_radius=0.0):
+def generate_from_layout(layout_path, output_dir, inflate_radius=0.0, border_occupied_margin=0.0):
     """从 layout.yaml 静态生成地图"""
     with open(layout_path, "r") as f:
         layout = yaml.safe_load(f)
@@ -368,6 +386,7 @@ def generate_from_layout(layout_path, output_dir, inflate_radius=0.0):
                 draw_rect(draw, cx, cy, size[0], size[1])
 
     img = apply_inflation(img, inflate_radius)
+    img = apply_occupied_border(img, border_occupied_margin)
 
     _save_map(img, output_dir)
     print(f"[map_generator] 从 layout.yaml 生成地图（静态模式，可能不完整）")
@@ -413,6 +432,12 @@ if __name__ == "__main__":
         help="生成地图时预膨胀障碍物的半径。",
     )
     parser.add_argument(
+        "--border-occupied-margin",
+        type=float,
+        default=map_cfg.get("border_occupied_margin", 0.0),
+        help="把地图四周指定宽度强制设为障碍，避免边缘被采样为可通行点。",
+    )
+    parser.add_argument(
         "--clear-robot-radius",
         type=float,
         default=map_cfg.get("clear_robot_radius", 0.0),
@@ -435,22 +460,24 @@ if __name__ == "__main__":
         generate_from_sim(
             args.output_dir,
             args.inflate_radius,
+            args.border_occupied_margin,
             args.clear_robot_radius,
             args.bounds_layout,
             args.shrink_footprints,
         )
     elif args.layout:
-        generate_from_layout(args.layout, args.output_dir, args.inflate_radius)
+        generate_from_layout(args.layout, args.output_dir, args.inflate_radius, args.border_occupied_margin)
     else:
         # 默认尝试仿真，失败则用 layout
         if fetch_obstacles_from_sim() is not None:
             generate_from_sim(
                 args.output_dir,
                 args.inflate_radius,
+                args.border_occupied_margin,
                 args.clear_robot_radius,
                 args.bounds_layout,
                 args.shrink_footprints,
             )
         else:
             layout = os.path.join(os.path.dirname(__file__), "..", "serve", "scene", "config", "layout.yaml")
-            generate_from_layout(layout, args.output_dir, args.inflate_radius)
+            generate_from_layout(layout, args.output_dir, args.inflate_radius, args.border_occupied_margin)

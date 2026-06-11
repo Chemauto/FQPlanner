@@ -22,6 +22,10 @@ def yaw_to_quat(yaw: float):
     return 0.0, 0.0, math.sin(half), math.cos(half)
 
 
+def normalize_angle_deg(angle: float) -> float:
+    return (float(angle) + 180.0) % 360.0 - 180.0
+
+
 class Nav2GoalBridge(Node):
     def __init__(self):
         super().__init__("fqplanner_nav2_goal_bridge")
@@ -31,6 +35,8 @@ class Nav2GoalBridge(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("nav_timeout", 120.0)
         self.declare_parameter("proxy_timeout", 5.0)
+        self.declare_parameter("success_xy_tolerance", 0.15)
+        self.declare_parameter("success_yaw_tolerance_deg", 10.0)
 
         self.backend_url = str(self.get_parameter("backend_url").value).rstrip("/")
         self.http_host = str(self.get_parameter("http_host").value)
@@ -38,6 +44,8 @@ class Nav2GoalBridge(Node):
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.nav_timeout = float(self.get_parameter("nav_timeout").value)
         self.proxy_timeout = float(self.get_parameter("proxy_timeout").value)
+        self.success_xy_tolerance = float(self.get_parameter("success_xy_tolerance").value)
+        self.success_yaw_tolerance_deg = float(self.get_parameter("success_yaw_tolerance_deg").value)
         self.action_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.server = None
         self.server_thread = None
@@ -81,6 +89,18 @@ class Nav2GoalBridge(Node):
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
+
+    def request_json(self, method: str, endpoint: str, payload=None, timeout=None):
+        endpoint = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+        url = self.backend_url + endpoint
+        data = None
+        headers = {}
+        if method == "POST":
+            data = json.dumps(payload or {}).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=timeout or self.proxy_timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
     def proxy(self, handler, method):
         body = None
@@ -153,8 +173,48 @@ class Nav2GoalBridge(Node):
             return {"success": False, "result": "Nav2 导航超时"}
         status = int(result.status)
         if status == 4:
-            return {"success": True, "result": "Nav2 导航成功", "pos": [x, y, 0.0], "yaw": math.degrees(yaw)}
+            return self.final_result_from_base_status(x, y, math.degrees(yaw))
         return {"success": False, "result": f"Nav2 导航失败，status={status}"}
+
+    def final_result_from_base_status(self, target_x: float, target_y: float, target_yaw_deg: float):
+        try:
+            status = self.request_json("GET", "/base_status")
+        except Exception as exc:
+            return {"success": False, "result": f"Nav2 成功但读取真实底盘坐标失败: {exc}"}
+
+        pos = status.get("pos") or [target_x, target_y, 0.0]
+        yaw_deg = float(status.get("base_link_yaw_deg", status.get("yaw", target_yaw_deg)))
+        dx = float(pos[0]) - target_x
+        dy = float(pos[1]) - target_y
+        xy_error = math.hypot(dx, dy)
+        yaw_error_deg = abs(normalize_angle_deg(yaw_deg - target_yaw_deg))
+
+        if xy_error > self.success_xy_tolerance or yaw_error_deg > self.success_yaw_tolerance_deg:
+            return {
+                "success": False,
+                "result": (
+                    "Nav2 导航结束但真实误差超限: "
+                    f"位置误差 {xy_error:.3f}m / {self.success_xy_tolerance:.2f}m, "
+                    f"角度误差 {yaw_error_deg:.1f}° / {self.success_yaw_tolerance_deg:.1f}°"
+                ),
+                "pos": pos,
+                "yaw": yaw_deg,
+                "target": [target_x, target_y, 0.0],
+                "target_yaw": target_yaw_deg,
+                "xy_error": xy_error,
+                "yaw_error_deg": yaw_error_deg,
+            }
+
+        return {
+            "success": True,
+            "result": "Nav2 导航成功",
+            "pos": pos,
+            "yaw": yaw_deg,
+            "target": [target_x, target_y, 0.0],
+            "target_yaw": target_yaw_deg,
+            "xy_error": xy_error,
+            "yaw_error_deg": yaw_error_deg,
+        }
 
     @staticmethod
     def wait_future(future, timeout_sec):

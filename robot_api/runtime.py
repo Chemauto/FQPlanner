@@ -73,6 +73,19 @@ class RobotRuntime:
     def execute(self, action: str, args: dict[str, Any]):
         if action not in ACTION_ENDPOINTS:
             return {"success": False, "result": f"未知动作接口: {action}"}
+        if action == "navigate_to":
+            nav_backend = self.config.navigation_backend()
+            if nav_backend is not None:
+                result = self._http(
+                    nav_backend,
+                    "POST",
+                    ACTION_ENDPOINTS[action],
+                    self._action_payload(action, args),
+                )
+                result["_backend"] = nav_backend.name
+                result["_required"] = nav_backend.required
+                return self._merge([result])
+
         results = []
         for backend in self.config.action_backends():
             result = (
@@ -236,8 +249,12 @@ class RobotRuntime:
                 "result": "；".join(r.get("result", "动作失败") for r in required_failed),
                 "backends": summary,
             }
-        return {
-            "success": True,
-            "result": first_success.get("result", "动作完成"),
-            "backends": summary,
+        response = {
+            key: value
+            for key, value in first_success.items()
+            if key not in {"_backend", "_required"}
         }
+        response["success"] = True
+        response.setdefault("result", "动作完成")
+        response["backends"] = summary
+        return response
