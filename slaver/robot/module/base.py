@@ -68,6 +68,11 @@ def register_tools(mcp):
             pos = result.get("pos", [0, 0, 0])
             yaw = result.get("yaw", 0)
             response = f"导航成功，当前位置: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}], 朝向: {yaw:.1f}°"
+            if result.get("xy_error") is not None or result.get("yaw_error_deg") is not None:
+                response += (
+                    f"，位置误差: {float(result.get('xy_error', 0.0)):.2f}m"
+                    f"，朝向误差: {float(result.get('yaw_error_deg', 0.0)):.1f}°"
+                )
             return json.dumps([response, {
                 "_status": "success",
                 "coordinates": pos,

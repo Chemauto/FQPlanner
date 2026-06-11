@@ -34,6 +34,7 @@ class BackendConfig:
 @dataclass(frozen=True)
 class RobotApiConfig:
     backends: list[BackendConfig]
+    navigation: BackendConfig | None = None
 
     @property
     def server_url(self) -> str:
@@ -61,6 +62,11 @@ class RobotApiConfig:
 
     def action_backends(self) -> list[BackendConfig]:
         return [b for b in self.backends if b.enabled and b.accept_action]
+
+    def navigation_backend(self) -> BackendConfig | None:
+        if self.navigation is not None and self.navigation.enabled:
+            return self.navigation
+        return None
 
 
 def _as_bool(value, default=False) -> bool:
@@ -144,6 +150,7 @@ def load_robot_api_config() -> RobotApiConfig:
     backends_cfg = data.get("backends") or _default_backends()
 
     env_url = os.getenv("ROBOT_API_URL")
+    env_nav_url = os.getenv("ROBOT_NAV_URL") or os.getenv("NAV2_API_URL")
     env_timeout = os.getenv("ROBOT_API_TIMEOUT")
     backends: list[BackendConfig] = []
 
@@ -179,6 +186,23 @@ def load_robot_api_config() -> RobotApiConfig:
                     timeout=DEFAULT_TIMEOUT,
                     raw={},
                 )
-            ]
+            ],
+            navigation=None,
         )
-    return RobotApiConfig(backends=backends)
+
+    nav_cfg = data.get("navigation") or {}
+    navigation = None
+    if nav_cfg:
+        nav_url = str(env_nav_url or nav_cfg.get("url") or "").rstrip("/")
+        navigation = BackendConfig(
+            name=str(nav_cfg.get("backend") or "nav2"),
+            enabled=_as_bool(nav_cfg.get("enabled"), default=False),
+            provide_state=False,
+            accept_action=True,
+            required=True,
+            url=nav_url,
+            timeout=float(env_timeout or nav_cfg.get("timeout") or DEFAULT_TIMEOUT),
+            raw=nav_cfg,
+        )
+
+    return RobotApiConfig(backends=backends, navigation=navigation)

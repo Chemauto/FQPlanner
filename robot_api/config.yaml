@@ -4,7 +4,7 @@ backends:
     provide_state: 1
     accept_action: 1
     required: 1
-    url: "http://127.0.0.1:5102"
+    url: "http://127.0.0.1:5001"
     timeout: 120
     launch_hint: "serve/main.py"
 
@@ -29,3 +29,9 @@ backends:
     provide_state: 0
     accept_action: 0
     required: 0
+
+navigation:
+  enabled: 1
+  backend: "nav2"
+  url: "http://127.0.0.1:5102"
+  timeout: 120

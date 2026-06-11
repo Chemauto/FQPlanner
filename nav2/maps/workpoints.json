@@ -1,45 +1,20 @@
 {
   "waypoints": [
     {
-      "name": "nav_016",
+      "name": "nav_017",
       "pos": [
-        4.125,
+        4.325,
         -1.125
       ],
       "yaw_deg": 90.0,
       "serves": [
-        "apple",
-        "cup",
-        "pot",
-        "stove"
+        "apple"
       ]
     },
     {
-      "name": "nav_001",
+      "name": "nav_022",
       "pos": [
-        1.125,
-        -1.125
-      ],
-      "yaw_deg": 90.0,
-      "serves": [
-        "counter"
-      ]
-    },
-    {
-      "name": "nav_009",
-      "pos": [
-        2.725,
-        -1.125
-      ],
-      "yaw_deg": 90.0,
-      "serves": [
-        "mug"
-      ]
-    },
-    {
-      "name": "nav_020",
-      "pos": [
-        4.925,
+        5.325,
         -1.125
       ],
       "yaw_deg": 90.0,
@@ -48,21 +23,43 @@
       ]
     },
     {
-      "name": "nav_033",
+      "name": "nav_019",
       "pos": [
-        3.125,
-        -1.325
+        4.725,
+        -1.125
       ],
-      "yaw_deg": -90.0,
+      "yaw_deg": 90.0,
       "serves": [
-        "sink"
+        "cup"
       ]
     },
     {
-      "name": "nav_089",
+      "name": "nav_011",
+      "pos": [
+        3.125,
+        -1.125
+      ],
+      "yaw_deg": 90.0,
+      "serves": [
+        "mug"
+      ]
+    },
+    {
+      "name": "nav_015",
+      "pos": [
+        3.925,
+        -1.125
+      ],
+      "yaw_deg": 90.0,
+      "serves": [
+        "pot"
+      ]
+    },
+    {
+      "name": "nav_105",
       "pos": [
         4.925,
-        -2.325
+        -2.925
       ],
       "yaw_deg": -180.0,
       "serves": [
@@ -70,10 +67,10 @@
       ]
     },
     {
-      "name": "nav_004",
+      "name": "nav_000",
       "pos": [
         1.725,
-        -1.125
+        -0.925
       ],
       "yaw_deg": 90.0,
       "serves": [

@@ -169,19 +169,19 @@ ros2 run tf2_ros tf2_echo map base_link
 http://127.0.0.1:5102
 ```
 
-如果希望 FQPlanner 的 `navigate_to()` 走 Nav2，而不是直接走 MuJoCo `/nav`，设置：
-
-```bash
-export ROBOT_API_URL=http://127.0.0.1:5102
-```
-
-也可以修改 `robot_api/config.yaml`：
+FQPlanner 通过 `robot_api/config.yaml` 区分 MuJoCo 主后端和 Nav2 导航入口：
 
 ```yaml
 backends:
   mujoco:
-    url: "http://127.0.0.1:5102"
+    url: "http://127.0.0.1:5001"
+navigation:
+  enabled: 1
+  backend: "nav2"
+  url: "http://127.0.0.1:5102"
 ```
+
+不要把 `ROBOT_API_URL` 设置成 `5102`。这个环境变量只用于临时覆盖 MuJoCo 主后端。
 
 ## 目录
 
