@@ -30,6 +30,31 @@ def _get_floating_base(env):
     return None
 
 
+def _find_actuator_idx(env, name: str) -> int:
+    for i in range(env.model.num_actuators):
+        act = env.model.get_actuator(i)
+        if act.name == name:
+            return i
+    return -1
+
+
+def _set_wheel_actuators(env, vx: float, wz: float):
+    """Set forward/turn actuator controls for visual feedback in viewer."""
+    fwd_idx = _find_actuator_idx(env, "forward")
+    turn_idx = _find_actuator_idx(env, "turn")
+    ctrl = env.data.actuator_ctrls
+    if fwd_idx >= 0:
+        if ctrl.ndim == 2:
+            ctrl[0, fwd_idx] = float(np.clip(vx, -1.0, 1.0))
+        else:
+            ctrl[fwd_idx] = float(np.clip(vx, -1.0, 1.0))
+    if turn_idx >= 0:
+        if ctrl.ndim == 2:
+            ctrl[0, turn_idx] = float(np.clip(-wz, -1.0, 1.0))
+        else:
+            ctrl[turn_idx] = float(np.clip(-wz, -1.0, 1.0))
+
+
 def get_base_info(env):
     fb = _get_floating_base(env)
     if fb is None:
@@ -85,6 +110,8 @@ def set_base_velocity(env, vx=0.0, vy=0.0, wz=0.0):
     ang_vel = np.array([[0.0, 0.0, wz]], dtype=np.float64)
     fb.set_global_linear_velocity(data, lin_vel)
     fb.set_global_angular_velocity(data, ang_vel)
+
+    _set_wheel_actuators(env, vx, wz)
 
 
 def move(env, Vx=0.0, Vy=0.0, Vw=0.0, steps=1):

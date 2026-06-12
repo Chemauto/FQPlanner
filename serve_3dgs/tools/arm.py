@@ -1,44 +1,65 @@
-"""arm.py - Franka Panda arm control tools (MotrixSim backend)."""
+"""arm.py - XLeRobot arm control tools (MotrixSim backend)."""
 
 import numpy as np
 
 
-EE_LINK = "link7"
-BASE_LINK = "link0"
-GRIPPER_ACTUATOR_KEYWORDS = ("finger", "gripper", "jaw")
+RIGHT_EE_LINK = "Fixed_Jaw_2"
+LEFT_EE_LINK = "Fixed_Jaw"
+RIGHT_ARM_ACTUATORS = ["Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"]
+LEFT_ARM_ACTUATORS = ["Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"]
+GRIPPER_ACTUATOR_R = "Jaw_R"
+GRIPPER_ACTUATOR_L = "Jaw_L"
+
+_graspable_links = set()
 
 
-def _find_gripper_actuator_idx(env):
+def _find_actuator_idx(env, name: str) -> int:
     for i in range(env.model.num_actuators):
-        name = env.model.get_actuator(i).name or ""
-        if any(kw in name.lower() for kw in GRIPPER_ACTUATOR_KEYWORDS):
+        act = env.model.get_actuator(i)
+        if act.name == name:
             return i
-    return env.model.num_actuators - 1
+    return -1
 
 
-def get_arm_info(env):
+def get_arm_info(env, side: str = "right"):
     env.forward_kinematic()
-    ee_pos = np.asarray(env.get_body_xpos(EE_LINK), dtype=float).reshape(-1)
-    ee_quat = np.asarray(env.get_body_xquat(EE_LINK), dtype=float).reshape(-1)
+    ee_link = RIGHT_EE_LINK if side == "right" else LEFT_EE_LINK
+    try:
+        ee_pos = np.asarray(env.get_body_xpos(ee_link), dtype=float).reshape(-1)
+        ee_quat = np.asarray(env.get_body_xquat(ee_link), dtype=float).reshape(-1)
+    except KeyError:
+        ee_pos = np.zeros(3)
+        ee_quat = np.array([0, 0, 0, 1.0])
 
+    gripper_act = GRIPPER_ACTUATOR_R if side == "right" else GRIPPER_ACTUATOR_L
+    gripper_idx = _find_actuator_idx(env, gripper_act)
     gripper_pos = [0.0]
-    act_idx = _find_gripper_actuator_idx(env)
-    if act_idx >= 0:
+    if gripper_idx >= 0:
         ctrl = env.data.actuator_ctrls
         if ctrl.ndim == 2:
-            gripper_pos = [float(ctrl[0, act_idx])]
+            gripper_pos = [float(ctrl[0, gripper_idx])]
         else:
-            gripper_pos = [float(ctrl[act_idx])]
+            gripper_pos = [float(ctrl[gripper_idx])]
 
-    gripper_closed = bool(env.grasped_object)
-    base_pos = np.asarray(env.get_body_xpos(BASE_LINK), dtype=float).reshape(-1)
+    arm_acts = RIGHT_ARM_ACTUATORS if side == "right" else LEFT_ARM_ACTUATORS
+    arm_qpos = []
+    for act_name in arm_acts:
+        idx = _find_actuator_idx(env, act_name)
+        if idx >= 0:
+            arm_qpos.append(float(env.data.actuator_ctrls[idx]) if env.data.actuator_ctrls.ndim == 1 else float(env.data.actuator_ctrls[0, idx]))
+
+    base_pos = np.zeros(3)
+    try:
+        base_pos = np.asarray(env.get_body_xpos("chassis"), dtype=float).reshape(-1)
+    except KeyError:
+        pass
 
     return {
         "ee_pos": ee_pos.tolist(),
         "ee_quat": ee_quat.tolist(),
         "gripper_pos": [round(float(p), 4) for p in gripper_pos],
-        "gripper_closed": gripper_closed,
-        "arm_qpos": env.data.dof_pos.reshape(-1).tolist(),
+        "gripper_closed": bool(env.grasped_object),
+        "arm_qpos": arm_qpos,
         "arm_qvel": [],
         "base_qpos": base_pos.tolist(),
         "torso_qpos": [],
@@ -51,30 +72,30 @@ def move_arm(env, target_pos, max_steps=200, pos_threshold=0.03, gain=1.5):
     return True
 
 
-def open_gripper(env, steps=10):
+def open_gripper(env, side: str = "right", steps=10):
     if env.grasped_object:
         env.grasped_object = None
-    act_idx = _find_gripper_actuator_idx(env)
-    if act_idx >= 0:
+    act_name = GRIPPER_ACTUATOR_R if side == "right" else GRIPPER_ACTUATOR_L
+    idx = _find_actuator_idx(env, act_name)
+    if idx >= 0:
         ctrl = env.data.actuator_ctrls
         if ctrl.ndim == 2:
-            ctrl[0, act_idx] = 0.0
+            ctrl[0, idx] = -1.0
         else:
-            ctrl[act_idx] = 0.0
-    for _ in range(steps):
-        env.step()
+            ctrl[idx] = -1.0
+    env.step(steps)
 
 
-def close_gripper(env, steps=10):
-    act_idx = _find_gripper_actuator_idx(env)
-    if act_idx >= 0:
+def close_gripper(env, side: str = "right", steps=10):
+    act_name = GRIPPER_ACTUATOR_R if side == "right" else GRIPPER_ACTUATOR_L
+    idx = _find_actuator_idx(env, act_name)
+    if idx >= 0:
         ctrl = env.data.actuator_ctrls
         if ctrl.ndim == 2:
-            ctrl[0, act_idx] = 1.0
+            ctrl[0, idx] = 1.0
         else:
-            ctrl[act_idx] = 1.0
-    for _ in range(steps):
-        env.step()
+            ctrl[idx] = 1.0
+    env.step(steps)
 
 
 def get_obj_pos(env, obj_name):
@@ -88,17 +109,29 @@ def is_grasped(env, obj_name, threshold=0.035):
 def grasp(env, obj_name, snap_threshold=0.15):
     if obj_name not in env._link_name_to_idx:
         print(f"[grasp] object '{obj_name}' not found in model")
-        print(f"[grasp] available: {[n for n in env.model.link_names if n]}")
+        available = [n for n in env.model.link_names if n and n not in (
+            "chassis", "left_wheel", "right_wheel", "Base", "Base_2",
+            "top_base_link", "head_pan_link", "head_tilt_link",
+            "head_camera_link", "head_camera_rgb_frame", "head_camera_depth_frame",
+        )]
+        print(f"[grasp] available: {available}")
         return False
 
     obj_pos = get_obj_pos(env, obj_name)
     env.forward_kinematic()
-    ee_pos = np.asarray(env.get_body_xpos(EE_LINK), dtype=float).reshape(-1)
+    ee_pos = np.asarray(env.get_body_xpos(RIGHT_EE_LINK), dtype=float).reshape(-1)
     dist = float(np.linalg.norm(obj_pos - ee_pos))
     print(f"[grasp] {obj_name} pos={obj_pos.round(3)} ee={ee_pos.round(3)} dist={dist:.3f}")
 
-    close_gripper(env, steps=5)
+    if dist > snap_threshold:
+        print(f"[grasp] object too far ({dist:.3f} > {snap_threshold}), attempting approach...")
+        move_arm(env, obj_pos, max_steps=50, pos_threshold=snap_threshold)
+
+    close_gripper(env, side="right", steps=5)
     env.grasped_object = obj_name
+    lift_pos = obj_pos.copy()
+    lift_pos[2] += 0.2
+    move_arm(env, lift_pos, max_steps=20, pos_threshold=0.05)
     return True
 
 
@@ -110,7 +143,12 @@ def place(env, obj_name, target_pos, snap_threshold=0.15):
     target_pos = np.asarray(target_pos, dtype=float)
     print(f"[place] {obj_name} target={target_pos.round(3)}")
 
+    move_arm(env, target_pos, max_steps=50, pos_threshold=snap_threshold)
     if env.grasped_object == obj_name:
         env.grasped_object = None
-    open_gripper(env, steps=5)
+    open_gripper(env, side="right", steps=5)
+
+    lift_pos = target_pos.copy()
+    lift_pos[2] += 0.2
+    move_arm(env, lift_pos, max_steps=20, pos_threshold=0.05)
     return True

@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--gs_w", type=int, default=640)
     parser.add_argument("--gs_h", type=int, default=480)
     parser.add_argument("--physics_steps_per_loop", type=int, default=10)
+    parser.add_argument("--scene", type=str, default="xlerobot",
+                        help="Scene: xlerobot (default), franka, or path to MJCF XML")
     args = parser.parse_args()
 
     from backend.gs_config import GSConfig
@@ -36,7 +38,7 @@ def main():
         start_server, process_commands, apply_base_velocity, get_lock,
     )
 
-    gs_cfg = GSConfig(args.gs_assets)
+    gs_cfg = GSConfig(assets_dir=args.gs_assets, scene=args.scene)
     print(f"Loading scene: {gs_cfg.scene_xml}")
     env = SimEnv(gs_cfg.scene_xml, gs_cfg)
     print(f"Model loaded: {env.model.num_links} links, {env.model.num_dof_pos} DOFs")

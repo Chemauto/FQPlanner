@@ -1,35 +1,50 @@
-"""3DGS asset path configuration for Franka Panda scene."""
+"""3DGS asset path configuration for XLeRobot scene."""
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 
 class GSConfig:
-    """Manages 3DGS asset paths. Defaults to gs_playground Franka Panda assets."""
+    """Manages 3DGS asset paths for XLeRobot MotrixSim backend."""
 
-    def __init__(self, assets_dir: str):
-        self.assets_dir = Path(assets_dir)
-        self.robot_dir = self.assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq"
-        self.task_dir = self.assets_dir / "models" / "tasks" / "table30" / "_04_hang_toothbrush_cup"
+    def __init__(self, assets_dir: Optional[str] = None, scene: str = "xlerobot"):
+        self.scene = scene
+        if scene == "xlerobot":
+            self.mjcf_path = "/home/fangqi/WorkXCJ/FQPlanner_Mujoco3DGSNew/assets/xlerobot/xlerobot.xml"
+            self._background_ply = None
+            if assets_dir:
+                bg = Path(assets_dir) / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs" / "background_085.ply"
+                if bg.exists():
+                    self._background_ply = str(bg)
+        elif scene == "franka":
+            self._assets_dir = Path(assets_dir) if assets_dir else None
+            self.mjcf_path = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "xmls" / "table30_04_hang_toothbrush_cup.xml") if self._assets_dir else None
+            self._background_ply = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs" / "background_085.ply") if self._assets_dir else None
+        else:
+            self.mjcf_path = scene
+            self._background_ply = None
 
     @property
     def scene_xml(self) -> str:
-        return (self.robot_dir / "xmls" / "table30_04_hang_toothbrush_cup.xml").as_posix()
+        return self.mjcf_path
 
     @property
     def body_gaussians(self) -> Dict[str, str]:
-        robot_3dgs = self.robot_dir / "3dgs"
-        task_3dgs = self.task_dir / "3dgs"
-        d: Dict[str, str] = {}
-        for i in range(1, 8):
-            d[f"link{i}"] = (robot_3dgs / "franka" / f"link{i}.ply").as_posix()
-        for name in ("robotiq_base", "left_driver", "left_coupler", "left_spring_link", "left_follower",
-                      "right_driver", "right_coupler", "right_spring_link", "right_follower"):
-            d[name] = (robot_3dgs / "robotiq" / f"{name}.ply").as_posix()
-        d["toothbrush_cup"] = (task_3dgs / "toothbrush_cup.ply").as_posix()
-        d["rack"] = (task_3dgs / "rack.ply").as_posix()
-        return d
+        if self.scene == "franka" and self._assets_dir:
+            task_dir = self._assets_dir / "models" / "tasks" / "table30" / "_04_hang_toothbrush_cup"
+            robot_3dgs = self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs"
+            d: Dict[str, str] = {}
+            for i in range(1, 8):
+                d[f"link{i}"] = (robot_3dgs / "franka" / f"link{i}.ply").as_posix()
+            for name in ("robotiq_base", "left_driver", "left_coupler", "left_spring_link", "left_follower",
+                          "right_driver", "right_coupler", "right_spring_link", "right_follower"):
+                d[name] = (robot_3dgs / "robotiq" / f"{name}.ply").as_posix()
+            task_3dgs = task_dir / "3dgs"
+            d["toothbrush_cup"] = (task_3dgs / "toothbrush_cup.ply").as_posix()
+            d["rack"] = (task_3dgs / "rack.ply").as_posix()
+            return d
+        return {}
 
     @property
-    def background_ply(self) -> str:
-        return (self.robot_dir / "3dgs" / "background_085.ply").as_posix()
+    def background_ply(self) -> Optional[str]:
+        return self._background_ply

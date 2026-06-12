@@ -52,17 +52,29 @@ class SimEnv:
         self._batch_size = batch_size
 
         scene = mx.msd.from_file(model_xml)
+
+        floor_xml = """<mujoco model="floor">
+  <worldbody>
+    <geom name="floor" type="plane" size="10 10 0.01" rgba="0.5 0.5 0.5 1" contype="1" conaffinity="1"/>
+  </worldbody>
+</mujoco>"""
+        scene.attach(mx.msd.from_str(floor_xml))
+
         self.model = scene.build()
         self.data = SceneData(self.model, batch=(batch_size,))
 
-        self._gs_renderer = MtxBatchSplatRenderer(
-            BatchSplatConfig(body_gaussians=gs_cfg.body_gaussians, background_ply=None, minibatch=batch_size),
-            self.model,
-        )
-        self._bg_renderer = MtxBatchSplatRenderer(
-            BatchSplatConfig(body_gaussians={}, background_ply=gs_cfg.background_ply, minibatch=batch_size),
-            self.model,
-        )
+        self._gs_renderer = None
+        self._bg_renderer = None
+        if gs_cfg.body_gaussians:
+            self._gs_renderer = MtxBatchSplatRenderer(
+                BatchSplatConfig(body_gaussians=gs_cfg.body_gaussians, background_ply=None, minibatch=batch_size),
+                self.model,
+            )
+        if gs_cfg.background_ply:
+            self._bg_renderer = MtxBatchSplatRenderer(
+                BatchSplatConfig(body_gaussians={}, background_ply=gs_cfg.background_ply, minibatch=batch_size),
+                self.model,
+            )
         self._bg_imgs = None
 
         self._link_name_to_idx: Dict[str, int] = {
@@ -112,6 +124,9 @@ class SimEnv:
         return pos, quat, float(getattr(cam, "fovy", 45.0))
 
     def render_frame(self, cam_id: int = 0, width: int = 640, height: int = 480) -> np.ndarray:
+        if self._gs_renderer is None and self._bg_renderer is None:
+            return np.zeros((height, width, 3), dtype=np.uint8)
+
         self.forward_kinematic()
         link_poses = self.model.get_link_poses(self.data)
         body_pos = link_poses[..., :3]
@@ -120,21 +135,27 @@ class SimEnv:
         cam_pos, cam_quat, fovy = self.get_camera_pose(cam_id)
         cam_xmat = np.stack([self._quat_to_xmat(q) for q in cam_quat], axis=0)
 
-        device = self._gs_renderer.device
+        active_renderer = self._gs_renderer or self._bg_renderer
+        device = active_renderer.device
         cam_pos_t = torch.from_numpy(cam_pos[:, None, :]).to(device=device, dtype=torch.float32)
         cam_xmat_t = torch.from_numpy(cam_xmat[:, None, :, :]).to(device=device, dtype=torch.float32)
         fovy_np = np.full((cam_pos.shape[0], 1), fovy, dtype=np.float32)
 
-        if self._bg_imgs is None:
+        if self._bg_renderer is not None and self._bg_imgs is None:
             bg_gsb = self._bg_renderer.batch_update_gaussians(body_pos, body_quat)
             self._bg_imgs, _ = self._bg_renderer.batch_env_render(
                 bg_gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np
             )
 
-        gsb = self._gs_renderer.batch_update_gaussians(body_pos, body_quat)
-        rgb_t, _ = self._gs_renderer.batch_env_render(
-            gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np, bg_imgs=self._bg_imgs
-        )
+        if self._gs_renderer is not None:
+            gsb = self._gs_renderer.batch_update_gaussians(body_pos, body_quat)
+            rgb_t, _ = self._gs_renderer.batch_env_render(
+                gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np, bg_imgs=self._bg_imgs
+            )
+        elif self._bg_imgs is not None:
+            rgb_t = self._bg_imgs
+        else:
+            return np.zeros((height, width, 3), dtype=np.uint8)
         rgb = rgb_t.detach().cpu().numpy() if isinstance(rgb_t, torch.Tensor) else np.asarray(rgb_t)
         # rgb shape: (Nenv, Ncam, H, W, 3)
         rgb = rgb[0, 0]  # (H, W, 3)
