@@ -15,7 +15,8 @@ class GSConfig:
 
         if scene == "tabletop":
             self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "scene_3dgs" / "scene.xml")
-            self._background_ply = None
+            ply = FQPLANNER_ROOT / "assets" / "scene_3dgs" / "scene.ply"
+            self._background_ply = str(ply) if ply.exists() else None
         elif scene == "kitchen":
             self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "scene" / "scene.xml")
             self._background_ply = None
