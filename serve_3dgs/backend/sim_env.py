@@ -88,6 +88,8 @@ class SimEnv:
 
         self.data.reset(self.model)
         forward_kinematic(self.model, self.data)
+        self._camera_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
+        self._setup_camera_overrides()
 
     def step(self, n: int = 1) -> None:
         for _ in range(n):
@@ -95,6 +97,61 @@ class SimEnv:
 
     def forward_kinematic(self) -> None:
         forward_kinematic(self.model, self.data)
+
+    def _setup_camera_overrides(self) -> None:
+        """Pre-compute corrected camera poses for cameras with wrong MJCF orientations."""
+        scene_center = np.array([0.0, 0.0, 0.5], dtype=np.float32)
+        camera_configs = {
+            "overhead_cam": {"pos": [0.0, 0.0, 4.0], "fovy": 60.0},
+            "head_cam": {"pos": [-0.5, -0.5, 2.0], "fovy": 70.0},
+            "right_arm_cam": {"pos": [0.5, -0.8, 1.5], "fovy": 60.0},
+            "left_arm_cam": {"pos": [-0.5, 0.8, 1.5], "fovy": 60.0},
+        }
+        for i, cam in enumerate(self.model.cameras.cameras):
+            name = getattr(cam, "name", "")
+            if name in camera_configs:
+                cfg = camera_configs[name]
+                pos = np.array(cfg["pos"], dtype=np.float32)
+                look = scene_center - pos
+                look = look / np.linalg.norm(look)
+                right = np.cross(look, np.array([0, 0, 1.0], dtype=np.float32))
+                right = right / (np.linalg.norm(right) + 1e-12)
+                up = np.cross(right, look)
+                rot_mat = np.column_stack([right, up, -look]).astype(np.float32)
+                quat_wxyz = self._matrix_to_quat_wxyz(rot_mat)
+                quat_xyzw = quat_wxyz[[1, 2, 3, 0]]
+                self._camera_overrides[i] = (pos[None], quat_xyzw[None], cfg["fovy"])
+
+    @staticmethod
+    def _matrix_to_quat_wxyz(mat: np.ndarray) -> np.ndarray:
+        m = np.asarray(mat, dtype=np.float64)
+        trace = float(np.trace(m))
+        if trace > 0.0:
+            s = np.sqrt(trace + 1.0) * 2.0
+            w = 0.25 * s
+            x = (m[2, 1] - m[1, 2]) / s
+            y = (m[0, 2] - m[2, 0]) / s
+            z = (m[1, 0] - m[0, 1]) / s
+        elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
+            s = np.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2.0
+            w = (m[2, 1] - m[1, 2]) / s
+            x = 0.25 * s
+            y = (m[0, 1] + m[1, 0]) / s
+            z = (m[0, 2] + m[2, 0]) / s
+        elif m[1, 1] > m[2, 2]:
+            s = np.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2.0
+            w = (m[0, 2] - m[2, 0]) / s
+            x = (m[0, 1] + m[1, 0]) / s
+            y = 0.25 * s
+            z = (m[1, 2] + m[2, 1]) / s
+        else:
+            s = np.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2.0
+            w = (m[1, 0] - m[0, 1]) / s
+            x = (m[0, 2] + m[2, 0]) / s
+            y = (m[1, 2] + m[2, 1]) / s
+            z = 0.25 * s
+        q = np.array([w, x, y, z], dtype=np.float64)
+        return q / (np.linalg.norm(q) + 1e-12)
 
     def get_link_poses(self) -> np.ndarray:
         poses = self.model.get_link_poses(self.data)
@@ -115,6 +172,8 @@ class SimEnv:
         return np.asarray(poses[idx, 3:7])
 
     def get_camera_pose(self, cam_id: int = 0) -> Tuple[np.ndarray, np.ndarray, float]:
+        if cam_id in self._camera_overrides:
+            return self._camera_overrides[cam_id]
         cam = self.model.cameras[int(cam_id)]
         pose = np.asarray(cam.get_pose(self.data), dtype=np.float32)
         if pose.ndim == 1:
