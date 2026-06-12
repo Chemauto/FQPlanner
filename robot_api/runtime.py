@@ -44,7 +44,7 @@ class RobotRuntime:
     def set_backend_url(self, url: str) -> None:
         updated = []
         for backend in self.config.backends:
-            if backend.name == "mujoco":
+            if backend.name in ("mujoco", "mujoco_3dgs"):
                 backend = BackendConfig(**{**backend.__dict__, "url": str(url).rstrip("/")})
             updated.append(backend)
         self.config = type(self.config)(backends=updated)

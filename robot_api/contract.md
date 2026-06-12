@@ -24,6 +24,24 @@ serve/service/server.py
 serve/backend/mujoco_backend.py
 ```
 
+切换到 MuJoCo + GS-Web 场景后端时，启用 `mujoco_3dgs`：
+
+```yaml
+backends:
+  mujoco:
+    enabled: 0       # 关闭原 MuJoCo 后端
+  mujoco_3dgs:
+    enabled: 1       # 启用 GS-Web 场景后端
+    ...
+```
+
+启动入口：
+
+```bash
+conda activate robocasa
+python serve_3dgs/main.py --scene tabletop
+```
+
 ## 公开接口
 
 上层只使用以下能力接口：

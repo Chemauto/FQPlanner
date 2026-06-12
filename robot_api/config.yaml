@@ -8,6 +8,15 @@ backends:
     timeout: 120
     launch_hint: "serve/main.py"
 
+  mujoco_3dgs:
+    enabled: 1
+    provide_state: 1
+    accept_action: 1
+    required: 1
+    url: "http://127.0.0.1:5002"
+    timeout: 120
+    launch_hint: "serve_3dgs/main.py"
+
   isaacsim:
     enabled: 0
     provide_state: 0
