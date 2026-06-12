@@ -1,25 +1,31 @@
-"""3DGS asset path configuration for XLeRobot scene."""
+"""3DGS asset path configuration."""
 
 from pathlib import Path
 from typing import Dict, Optional
 
+FQPLANNER_ROOT = Path("/home/fangqi/WorkXCJ/FQPlanner_Mujoco3DGSNew")
+
 
 class GSConfig:
-    """Manages 3DGS asset paths for XLeRobot MotrixSim backend."""
+    """Manages 3DGS asset paths for MotrixSim backend."""
 
-    def __init__(self, assets_dir: Optional[str] = None, scene: str = "xlerobot"):
+    def __init__(self, assets_dir: Optional[str] = None, scene: str = "tabletop"):
         self.scene = scene
-        if scene == "xlerobot":
-            self.mjcf_path = "/home/fangqi/WorkXCJ/FQPlanner_Mujoco3DGSNew/assets/xlerobot/xlerobot.xml"
+        self._assets_dir = Path(assets_dir) if assets_dir else None
+
+        if scene == "tabletop":
+            self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "scene_3dgs" / "scene.xml")
             self._background_ply = None
-            if assets_dir:
-                bg = Path(assets_dir) / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs" / "background_085.ply"
-                if bg.exists():
-                    self._background_ply = str(bg)
+        elif scene == "kitchen":
+            self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "scene" / "scene.xml")
+            self._background_ply = None
+        elif scene == "xlerobot":
+            self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml")
+            self._background_ply = None
         elif scene == "franka":
-            self._assets_dir = Path(assets_dir) if assets_dir else None
-            self.mjcf_path = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "xmls" / "table30_04_hang_toothbrush_cup.xml") if self._assets_dir else None
-            self._background_ply = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs" / "background_085.ply") if self._assets_dir else None
+            self._assets_dir = Path(assets_dir) if assets_dir else Path("/home/fangqi/WorkXCJ/gs_playground/demo/live_demo/assets")
+            self.mjcf_path = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "xmls" / "table30_04_hang_toothbrush_cup.xml")
+            self._background_ply = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs" / "background_085.ply")
         else:
             self.mjcf_path = scene
             self._background_ply = None

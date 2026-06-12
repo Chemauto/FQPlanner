@@ -28,8 +28,8 @@ def main():
     parser.add_argument("--gs_w", type=int, default=640)
     parser.add_argument("--gs_h", type=int, default=480)
     parser.add_argument("--physics_steps_per_loop", type=int, default=10)
-    parser.add_argument("--scene", type=str, default="xlerobot",
-                        help="Scene: xlerobot (default), franka, or path to MJCF XML")
+    parser.add_argument("--scene", type=str, default="tabletop",
+                        help="Scene: tabletop (default), kitchen, xlerobot, franka, or path to MJCF XML")
     args = parser.parse_args()
 
     from backend.gs_config import GSConfig

@@ -53,12 +53,15 @@ class SimEnv:
 
         scene = mx.msd.from_file(model_xml)
 
-        floor_xml = """<mujoco model="floor">
+        try:
+            floor_xml = """<mujoco model="floor">
   <worldbody>
     <geom name="floor" type="plane" size="10 10 0.01" rgba="0.5 0.5 0.5 1" contype="1" conaffinity="1"/>
   </worldbody>
 </mujoco>"""
-        scene.attach(mx.msd.from_str(floor_xml))
+            scene.attach(mx.msd.from_str(floor_xml))
+        except (RuntimeError, Exception):
+            pass
 
         self.model = scene.build()
         self.data = SceneData(self.model, batch=(batch_size,))
