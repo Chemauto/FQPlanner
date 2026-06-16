@@ -47,7 +47,12 @@ from .gs_config import GSConfig
 
 
 class SimEnv:
-    def __init__(self, model_xml: str, gs_cfg: GSConfig, batch_size: int = 1):
+    def __init__(
+        self,
+        model_xml: str,
+        gs_cfg: GSConfig,
+        batch_size: int = 1,
+    ):
         self._gs_cfg = gs_cfg
         self._batch_size = batch_size
 
@@ -78,7 +83,7 @@ class SimEnv:
                 BatchSplatConfig(body_gaussians={}, background_ply=gs_cfg.background_ply, minibatch=batch_size),
                 self.model,
             )
-        self._bg_imgs = None
+        self._bg_imgs: Dict[Tuple[int, int, int], object] = {}
 
         self._link_name_to_idx: Dict[str, int] = {
             name: idx for idx, name in enumerate(self.model.link_names)
@@ -88,7 +93,8 @@ class SimEnv:
 
         self.data.reset(self.model)
         forward_kinematic(self.model, self.data)
-        self._camera_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
+        self._camera_fixed_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
+        self._camera_look_at_overrides: Dict[int, Tuple[np.ndarray, float]] = {}
         self._setup_camera_overrides()
 
     def step(self, n: int = 1) -> None:
@@ -101,26 +107,41 @@ class SimEnv:
     def _setup_camera_overrides(self) -> None:
         """Pre-compute corrected camera poses for cameras with wrong MJCF orientations."""
         scene_center = np.array([0.0, 0.0, 0.5], dtype=np.float32)
-        camera_configs = {
+        fixed_camera_configs = {
             "overhead_cam": {"pos": [0.0, 0.0, 4.0], "fovy": 60.0},
-            "head_cam": {"pos": [-0.5, -0.5, 2.0], "fovy": 70.0},
-            "right_arm_cam": {"pos": [0.5, -0.8, 1.5], "fovy": 60.0},
-            "left_arm_cam": {"pos": [-0.5, 0.8, 1.5], "fovy": 60.0},
+        }
+        look_at_camera_configs = {
+            "head_cam": {"target": scene_center, "fovy": 70.0},
+            "right_arm_cam": {"target": scene_center, "fovy": 60.0},
+            "left_arm_cam": {"target": scene_center, "fovy": 60.0},
         }
         for i, cam in enumerate(self.model.cameras.cameras):
             name = getattr(cam, "name", "")
-            if name in camera_configs:
-                cfg = camera_configs[name]
+            if name in fixed_camera_configs:
+                cfg = fixed_camera_configs[name]
                 pos = np.array(cfg["pos"], dtype=np.float32)
-                look = scene_center - pos
-                look = look / np.linalg.norm(look)
-                right = np.cross(look, np.array([0, 0, 1.0], dtype=np.float32))
-                right = right / (np.linalg.norm(right) + 1e-12)
-                up = np.cross(right, look)
-                rot_mat = np.column_stack([right, up, -look]).astype(np.float32)
-                quat_wxyz = self._matrix_to_quat_wxyz(rot_mat)
-                quat_xyzw = quat_wxyz[[1, 2, 3, 0]]
-                self._camera_overrides[i] = (pos[None], quat_xyzw[None], cfg["fovy"])
+                quat_xyzw = self._look_at_quat_xyzw(pos, scene_center)
+                self._camera_fixed_overrides[i] = (pos[None], quat_xyzw[None], cfg["fovy"])
+            elif name in look_at_camera_configs:
+                cfg = look_at_camera_configs[name]
+                self._camera_look_at_overrides[i] = (
+                    np.array(cfg["target"], dtype=np.float32),
+                    float(cfg["fovy"]),
+                )
+
+    @classmethod
+    def _look_at_quat_xyzw(cls, pos: np.ndarray, target: np.ndarray) -> np.ndarray:
+        look = np.asarray(target, dtype=np.float32) - np.asarray(pos, dtype=np.float32)
+        look = look / (np.linalg.norm(look) + 1e-12)
+        world_up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        right = np.cross(look, world_up)
+        if np.linalg.norm(right) < 1e-6:
+            right = np.cross(look, np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        right = right / (np.linalg.norm(right) + 1e-12)
+        up = np.cross(right, look)
+        rot_mat = np.column_stack([right, up, -look]).astype(np.float32)
+        quat_wxyz = cls._matrix_to_quat_wxyz(rot_mat)
+        return quat_wxyz[[1, 2, 3, 0]]
 
     @staticmethod
     def _matrix_to_quat_wxyz(mat: np.ndarray) -> np.ndarray:
@@ -172,8 +193,8 @@ class SimEnv:
         return np.asarray(poses[idx, 3:7])
 
     def get_camera_pose(self, cam_id: int = 0) -> Tuple[np.ndarray, np.ndarray, float]:
-        if cam_id in self._camera_overrides:
-            return self._camera_overrides[cam_id]
+        if cam_id in self._camera_fixed_overrides:
+            return self._camera_fixed_overrides[cam_id]
         cam = self.model.cameras[int(cam_id)]
         pose = np.asarray(cam.get_pose(self.data), dtype=np.float32)
         if pose.ndim == 1:
@@ -182,10 +203,20 @@ class SimEnv:
             pose = pose.reshape(pose.shape[0], -1, pose.shape[-1])[:, 0, :]
         pos = pose[:, :3].astype(np.float32)
         quat = pose[:, 3:7].astype(np.float32)
+        if cam_id in self._camera_look_at_overrides:
+            target, fovy = self._camera_look_at_overrides[cam_id]
+            quat = np.stack([self._look_at_quat_xyzw(p, target) for p in pos], axis=0)
+            return pos, quat.astype(np.float32), fovy
         quat /= np.linalg.norm(quat, axis=1, keepdims=True) + 1e-12
         return pos, quat, float(getattr(cam, "fovy", 45.0))
 
-    def render_frame(self, cam_id: int = 0, width: int = 640, height: int = 480) -> np.ndarray:
+    def render_frame(
+        self,
+        cam_id: int = 0,
+        width: int = 640,
+        height: int = 480,
+        cache_background: bool = True,
+    ) -> np.ndarray:
         if self._gs_renderer is None and self._bg_renderer is None:
             return np.zeros((height, width, 3), dtype=np.uint8)
 
@@ -203,19 +234,25 @@ class SimEnv:
         cam_xmat_t = torch.from_numpy(cam_xmat[:, None, :, :]).to(device=device, dtype=torch.float32)
         fovy_np = np.full((cam_pos.shape[0], 1), fovy, dtype=np.float32)
 
-        if self._bg_renderer is not None and self._bg_imgs is None:
+        bg_imgs = None
+        bg_cache_key = (int(cam_id), int(width), int(height))
+        if self._bg_renderer is not None and cache_background:
+            bg_imgs = self._bg_imgs.get(bg_cache_key)
+        if self._bg_renderer is not None and bg_imgs is None:
             bg_gsb = self._bg_renderer.batch_update_gaussians(body_pos, body_quat)
-            self._bg_imgs, _ = self._bg_renderer.batch_env_render(
+            bg_imgs, _ = self._bg_renderer.batch_env_render(
                 bg_gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np
             )
+            if cache_background:
+                self._bg_imgs[bg_cache_key] = bg_imgs
 
         if self._gs_renderer is not None:
             gsb = self._gs_renderer.batch_update_gaussians(body_pos, body_quat)
             rgb_t, _ = self._gs_renderer.batch_env_render(
-                gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np, bg_imgs=self._bg_imgs
+                gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np, bg_imgs=bg_imgs
             )
-        elif self._bg_imgs is not None:
-            rgb_t = self._bg_imgs
+        elif bg_imgs is not None:
+            rgb_t = bg_imgs
         else:
             return np.zeros((height, width, 3), dtype=np.uint8)
         rgb = rgb_t.detach().cpu().numpy() if isinstance(rgb_t, torch.Tensor) else np.asarray(rgb_t)
