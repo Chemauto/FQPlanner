@@ -341,7 +341,7 @@ def _step_active_command(env):
                 final = get_base_info(env)
                 _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": _public_yaw_deg(final)})
                 return True
-            move(env, Vx=state["vx"], Vw=state["vw"])
+            set_base_velocity_cmd(Vx=state["vx"], Vw=state["vw"], timeout=0.5)
             return True
 
         if cmd_type == "grasp":

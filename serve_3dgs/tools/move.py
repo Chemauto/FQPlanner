@@ -3,6 +3,8 @@
 import math
 import numpy as np
 
+_BASE_LINK_NAME = "chassis"
+
 
 def _normalize_angle(angle):
     return float(np.arctan2(np.sin(angle), np.cos(angle)))
@@ -24,10 +26,17 @@ def base_link_yaw_deg_from_chassis_yaw_deg(yaw_deg):
     return _normalize_angle_deg(float(yaw_deg) + 180.0)
 
 
-def _get_floating_base(env):
-    if env.model.floating_bases:
-        return env.model.floating_bases[0]
-    return None
+def _get_chassis_link(env):
+    if hasattr(env, '_link_name_to_idx'):
+        idx = env._link_name_to_idx.get(_BASE_LINK_NAME)
+    else:
+        try:
+            idx = list(env.model.link_names).index(_BASE_LINK_NAME)
+        except ValueError:
+            idx = None
+    if idx is None:
+        return None, None
+    return idx, env.model.get_link(idx)
 
 
 def _find_actuator_idx(env, name: str) -> int:
@@ -39,25 +48,24 @@ def _find_actuator_idx(env, name: str) -> int:
 
 
 def _set_wheel_actuators(env, vx: float, wz: float):
-    """Set forward/turn actuator controls for visual feedback in viewer."""
-    fwd_idx = _find_actuator_idx(env, "forward")
-    turn_idx = _find_actuator_idx(env, "turn")
-    ctrl = env.data.actuator_ctrls
-    if fwd_idx >= 0:
-        if ctrl.ndim == 2:
-            ctrl[0, fwd_idx] = float(np.clip(vx, -1.0, 1.0))
-        else:
-            ctrl[fwd_idx] = float(np.clip(vx, -1.0, 1.0))
-    if turn_idx >= 0:
-        if ctrl.ndim == 2:
-            ctrl[0, turn_idx] = float(np.clip(-wz, -1.0, 1.0))
-        else:
-            ctrl[turn_idx] = float(np.clip(-wz, -1.0, 1.0))
+    """Set forward/turn actuator controls for differential drive."""
+    fwd_act = None
+    turn_act = None
+    for i in range(env.model.num_actuators):
+        act = env.model.get_actuator(i)
+        if act.name == "forward":
+            fwd_act = act
+        elif act.name == "turn":
+            turn_act = act
+    if fwd_act is not None:
+        fwd_act.set_ctrl(env.data, float(np.clip(vx, -1.0, 1.0)))
+    if turn_act is not None:
+        turn_act.set_ctrl(env.data, float(np.clip(-wz, -1.0, 1.0)))
 
 
 def get_base_info(env):
-    fb = _get_floating_base(env)
-    if fb is None:
+    chassis_idx, chassis_link = _get_chassis_link(env)
+    if chassis_idx is None or chassis_link is None:
         return {
             "pos": [0.0, 0.0, 0.0],
             "yaw_deg": 0.0,
@@ -67,22 +75,24 @@ def get_base_info(env):
             "qvel": [0.0, 0.0, 0.0],
         }
 
-    pos = np.asarray(fb.get_translation(env.data), dtype=float).reshape(-1)
-    quat = np.asarray(fb.get_rotation(env.data), dtype=float).reshape(-1)
-    qi, qj, qk, qw = quat
+    poses = env.model.get_link_poses(env.data)
+    pose = poses[0, chassis_idx] if poses.ndim == 3 else poses[chassis_idx]
+    pos = pose[:3]
+    qi, qj, qk, qw = pose[3], pose[4], pose[5], pose[6]
 
     yaw_rad = np.arctan2(2.0 * (qw * qk + qi * qj), 1.0 - 2.0 * (qj * qj + qk * qk))
     yaw_deg = np.rad2deg(yaw_rad)
     base_link_yaw_rad = base_link_yaw_from_chassis_yaw(yaw_rad)
     base_link_yaw_deg = base_link_yaw_deg_from_chassis_yaw_deg(yaw_deg)
 
-    vel = np.asarray(fb.get_dof_vel(env.data), dtype=float).reshape(-1)
+    lin_vel = np.asarray(chassis_link.get_linear_velocity(env.data), dtype=float).reshape(-1)
+    ang_vel = np.asarray(chassis_link.get_angular_velocity(env.data), dtype=float).reshape(-1)
     cos_y = math.cos(base_link_yaw_rad)
     sin_y = math.sin(base_link_yaw_rad)
-    vx_world, vy_world = vel[0], vel[1]
+    vx_world, vy_world = lin_vel[0], lin_vel[1]
     body_vx = vx_world * cos_y + vy_world * sin_y
     body_vy = -vx_world * sin_y + vy_world * cos_y
-    wz = vel[5] if len(vel) > 5 else 0.0
+    wz = ang_vel[2]
 
     return {
         "pos": pos.tolist(),
@@ -95,22 +105,6 @@ def get_base_info(env):
 
 
 def set_base_velocity(env, vx=0.0, vy=0.0, wz=0.0):
-    fb = _get_floating_base(env)
-    if fb is None:
-        return
-    info = get_base_info(env)
-    bl_yaw = info["base_link_yaw_rad"]
-    cos_y = math.cos(bl_yaw)
-    sin_y = math.sin(bl_yaw)
-    vx_world = vx * cos_y - vy * sin_y
-    vy_world = vx * sin_y + vy * cos_y
-
-    data = env.data
-    lin_vel = np.array([[vx_world, vy_world, 0.0]], dtype=np.float64)
-    ang_vel = np.array([[0.0, 0.0, wz]], dtype=np.float64)
-    fb.set_global_linear_velocity(data, lin_vel)
-    fb.set_global_angular_velocity(data, ang_vel)
-
     _set_wheel_actuators(env, vx, wz)
 
 
