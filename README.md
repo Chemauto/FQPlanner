@@ -63,6 +63,12 @@ Python 依赖见 [`requirements.txt`](requirements.txt)。敏感信息请放入 
 
 ## Quick Start
 
+安装 Git LFS（首次克隆后必须执行，否则大文件会损坏）：
+
+```bash
+git lfs install
+```
+
 启动 Redis：
 
 ```bash
