@@ -3,32 +3,16 @@ waypoint_manager.py - 工作点管理器
 根据目标物体名或坐标，找到最近的导航工作点
 """
 
-import os
 import sys
-import math
-import json
 import numpy as np
 import yaml
 
 from robot_api.client import get_fixtures, get_objects
-
-try:
-    from serve.scene.scene_memory import get_object_coords, get_object_location
-except Exception:
-    def get_object_coords(obj_name):
-        return None
-
-    def get_object_location(obj_name):
-        return None
-
-_WAYPOINTS_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'serve', 'scene', 'config', 'waypoints.yaml'
-)
-_NAV2_CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'nav2', 'config.yaml'
-)
-_FREE_POINTS_PATH = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'nav2', 'maps', 'free_points.json'
+from robot_api.scene_memory import get_object_coords, get_object_location
+from robot_api.scene_metadata import (
+    load_free_points as _load_free_points,
+    load_reach_limits as _load_reach_limits,
+    load_waypoints as _load_waypoints,
 )
 
 _waypoints_cache = None
@@ -39,9 +23,7 @@ def load_waypoints():
     global _waypoints_cache
     if _waypoints_cache is not None:
         return _waypoints_cache
-    with open(_WAYPOINTS_PATH, 'r') as f:
-        data = yaml.safe_load(f)
-    _waypoints_cache = data['waypoints']
+    _waypoints_cache = _load_waypoints()
     print(f"[waypoint] 加载了 {len(_waypoints_cache)} 个工作点", file=sys.stderr)
     return _waypoints_cache
 
@@ -50,26 +32,14 @@ def load_free_points():
     global _free_points_cache
     if _free_points_cache is not None:
         return _free_points_cache
-    with open(_FREE_POINTS_PATH, 'r') as f:
-        data = json.load(f)
-    _free_points_cache = [
-        {
-            "name": p['name'],
-            "pos": [p['x'], p['y']],
-            "serves": [],
-        }
-        for p in data.get('points', [])
-    ]
+    _free_points_cache = _load_free_points()
     print(f"[waypoint] 加载了 {len(_free_points_cache)} 个可通行点", file=sys.stderr)
     return _free_points_cache
 
 
 def load_reach_limits():
     try:
-        with open(_NAV2_CONFIG_PATH, 'r') as f:
-            cfg = yaml.safe_load(f)
-        wp_cfg = cfg.get('waypoints', {})
-        return wp_cfg.get('min_dist', 0.1), wp_cfg.get('max_reach', 1.0)
+        return _load_reach_limits()
     except Exception as e:
         print(f"[waypoint] 读取工作点距离配置失败，使用默认值: {e}", file=sys.stderr)
         return 0.1, 1.0
@@ -77,7 +47,9 @@ def load_reach_limits():
 
 def _load_perception_config():
     """读取感知模式配置"""
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
+    from pathlib import Path
+
+    config_path = Path(__file__).resolve().parents[1] / 'config.yaml'
     with open(config_path) as f:
         config = yaml.safe_load(f)
     return config.get('perception', {}).get('use_realtime_coords', True)

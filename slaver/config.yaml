@@ -71,10 +71,5 @@ robot:
 # Output reasoning context, time cost and other information
 profiling: true
 
-# Legacy MuJoCo simulation server key. Kept for compatibility with old code.
-robocasa:
-  server_url: "http://127.0.0.1:5001"
-  timeout: 120
-
 perception:
   use_realtime_coords: true  # true=调实时API, false=只用记忆

@@ -5,6 +5,7 @@ from agents.prompts import MASTER_PLANNING_PLANNING
 from agent.collaboration import Collaborator
 from openai import AzureOpenAI, OpenAI
 from robot_api.client import get_objects
+from robot_api.scene_metadata import build_navigation_guide
 
 
 class GlobalTaskPlanner:
@@ -91,13 +92,9 @@ class GlobalTaskPlanner:
 
         # ===== 注入工作点信息 =====
         try:
-            all_environments_info['_navigation_guide'] = {
-                '说明': '导航时使用以下简单名称，不要使用fixture原始名称',
-                'counter': {'工作点': 'counter_front', '可服务物体': ['apple', 'mug', 'pot', 'cup']},
-                'sink': {'工作点': 'island_north', '可服务物体': ['sink', 'sponge', 'bowl']},
-                'island': {'工作点': 'island_north', '可服务物体': ['island', 'bowl', 'sponge']},
-                'stove': {'工作点': 'stove_front', '可服务物体': ['stove']},
-            }
+            navigation_guide = build_navigation_guide()
+            if navigation_guide and isinstance(all_environments_info, dict):
+                all_environments_info['_navigation_guide'] = navigation_guide
         except Exception as e:
             print(f"[Planner] Warning: could not load waypoints: {e}")
         # ===== 注入结束 =====

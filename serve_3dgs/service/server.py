@@ -4,14 +4,22 @@ server.py - Flask API 服务
 """
 
 import os
+import sys
 import math
 import time
 import threading
+from pathlib import Path
+
 import numpy as np
-import yaml
 from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 from PIL import Image as PILImage
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from robot_api.scene_metadata import load_camera_config
 
 from tools.arm import (
     get_arm_info, get_obj_pos,
@@ -71,12 +79,7 @@ _camera_config_cache = None
 def _camera_config():
     global _camera_config_cache
     if _camera_config_cache is None:
-        path = os.path.join(os.path.abspath("scene"), "config", "camera.yaml")
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                _camera_config_cache = yaml.safe_load(f) or {}
-        else:
-            _camera_config_cache = {}
+        _camera_config_cache = load_camera_config()
     return _camera_config_cache
 
 
@@ -218,6 +221,31 @@ def _np_to_list(obj):
     return obj
 
 
+def _object_link(env, public_name):
+    if hasattr(env, "object_link"):
+        return env.object_link(public_name)
+    return public_name
+
+
+def _scene_objects(env):
+    object_map = getattr(env, "scene_objects", {}) or {}
+    result = {}
+    for public_name, link_name in object_map.items():
+        if link_name not in env._link_name_to_idx:
+            continue
+        pos = get_obj_pos(env, link_name)
+        result[public_name] = {
+            "pos": pos.tolist(),
+            "grasped": is_grasped(env, link_name),
+            "link": link_name,
+        }
+    return result
+
+
+def _scene_fixtures(env):
+    return dict(getattr(env, "scene_fixtures", {}) or {})
+
+
 def submit_command(cmd_type, params):
     event = threading.Event()
     cmd_id = id(event)
@@ -318,11 +346,12 @@ def _step_active_command(env):
 
         if cmd_type == "grasp":
             obj_name = state["obj_name"]
-            if obj_name not in env._link_name_to_idx:
+            link_name = _object_link(env, obj_name)
+            if link_name not in env._link_name_to_idx:
                 _finish_command(cmd, {"success": False, "result": f"物体 {obj_name} 不存在"})
                 return True
             from tools.arm import grasp as do_grasp
-            ok = do_grasp(env, obj_name, snap_threshold=state.get("snap_threshold", 0.15))
+            ok = do_grasp(env, link_name, snap_threshold=state.get("snap_threshold", 0.15))
             if ok:
                 _finish_command(cmd, {"success": True, "result": f"成功抓取 {obj_name}"})
             else:
@@ -331,11 +360,12 @@ def _step_active_command(env):
 
         if cmd_type == "place":
             obj_name = state["obj_name"]
-            if obj_name not in env._link_name_to_idx:
+            link_name = _object_link(env, obj_name)
+            if link_name not in env._link_name_to_idx:
                 _finish_command(cmd, {"success": False, "result": f"物体 {obj_name} 不存在"})
                 return True
             from tools.arm import place as do_place
-            ok = do_place(env, obj_name, state["target_pos"], snap_threshold=state.get("snap_threshold", 0.15))
+            ok = do_place(env, link_name, state["target_pos"], snap_threshold=state.get("snap_threshold", 0.15))
             if ok:
                 _finish_command(cmd, {"success": True, "result": f"成功放置 {obj_name}"})
             else:
@@ -523,17 +553,16 @@ def api_objects():
     if env is None:
         return jsonify({"error": "not ready"}), 503
     with _env_lock:
-        result = {}
-        for name in env.model.link_names:
-            if name and name in ("toothbrush_cup", "rack"):
-                pos = get_obj_pos(env, name)
-                result[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
+        result = _scene_objects(env)
     return jsonify(result)
 
 
 @app.route("/fixtures", methods=["GET"])
 def api_fixtures():
-    return jsonify({})
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "not ready"}), 503
+    return jsonify(_np_to_list(_scene_fixtures(env)))
 
 
 @app.route("/scene", methods=["GET"])
@@ -543,13 +572,8 @@ def api_scene():
         return jsonify({"error": "仿真器未初始化"}), 503
 
     with _env_lock:
-        objects = {}
-        for name in env.model.link_names:
-            if name and name in ("toothbrush_cup", "rack"):
-                pos = get_obj_pos(env, name)
-                objects[name] = {"pos": pos.tolist(), "grasped": is_grasped(env, name)}
-
-        fixtures = {}
+        objects = _scene_objects(env)
+        fixtures = _scene_fixtures(env)
 
         arm_info = get_arm_info(env)
         base_info = get_base_info(env)

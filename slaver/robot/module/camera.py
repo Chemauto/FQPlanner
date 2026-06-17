@@ -17,6 +17,7 @@ load_dotenv(os.path.join(_project_root, '.env'))
 import yaml
 
 from robot_api.client import capture_image as _api_capture_image
+from robot_api.scene_metadata import load_camera_config
 
 # ============================================================
 # 从 config.yaml 加载配置
@@ -28,17 +29,11 @@ with open(_config_path) as _f:
 _camera_cfg = _cfg.get("camera", {})
 _vlm_cfg = _camera_cfg.get("vlm", {})
 
-_serve_camera_config_path = os.path.join(
-    _project_root, "serve", "scene", "config", "camera.yaml"
-)
-_serve_camera_cfg = {}
-if os.path.exists(_serve_camera_config_path):
-    with open(_serve_camera_config_path, "r", encoding="utf-8") as _f:
-        _serve_camera_cfg = yaml.safe_load(_f) or {}
+_scene_camera_cfg = load_camera_config()
 
 CAMERAS = (
-    (_serve_camera_cfg.get("preview") or {}).get("cameras")
-    or list((_serve_camera_cfg.get("cameras") or {}).keys())
+    (_scene_camera_cfg.get("preview") or {}).get("cameras")
+    or list((_scene_camera_cfg.get("cameras") or {}).keys())
     or _camera_cfg.get("cameras")
     or ["overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam"]
 )

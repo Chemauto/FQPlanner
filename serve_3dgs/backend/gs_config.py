@@ -1,35 +1,112 @@
 """3DGS asset path configuration."""
 
+import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
-FQPLANNER_ROOT = Path("/home/fangqi/WorkXCJ/FQPlanner_Mujoco3DGSNew")
+FQPLANNER_ROOT = Path(__file__).resolve().parents[2]
+NAV_ASSET_DIR = FQPLANNER_ROOT / "assets" / "scene_3dgs"
+DEFAULT_NAV_CONFIG = NAV_ASSET_DIR / "config.json"
+DEFAULT_DIRECT_VIEWER_CAMERAS = ("overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam")
+DEFAULT_NAV_VIEWER_CAMERAS = ("follower", "head_cam", "right_arm_cam", "left_arm_cam")
 
 
 class GSConfig:
     """Manages 3DGS asset paths for MotrixSim backend."""
 
-    def __init__(self, assets_dir: Optional[str] = None, scene: str = "tabletop"):
+    def __init__(
+        self,
+        assets_dir: Optional[str] = None,
+        scene: str = "xlerobot_nav",
+        robot_gs_dir: Optional[str] = None,
+        scene_config: Optional[str] = None,
+    ):
         self.scene = scene
         self._assets_dir = Path(assets_dir) if assets_dir else None
+        self._robot_gs_dir = Path(robot_gs_dir) if robot_gs_dir else None
+        self.scene_kind = "direct"
+        self.robot_xml: Optional[str] = None
+        self.base_link_name = "chassis"
+        self.follower_camera_pos: Optional[Tuple[float, float, float]] = None
+        self.default_viewer_cameras = DEFAULT_DIRECT_VIEWER_CAMERAS
+        self.scene_objects: Dict[str, str] = {}
+        self.scene_fixtures: Dict[str, dict] = {}
 
-        if scene == "tabletop":
-            self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "scene_3dgs" / "scene.xml")
-            ply = FQPLANNER_ROOT / "assets" / "scene_3dgs" / "scene.ply"
-            self._background_ply = str(ply) if ply.exists() else None
-        elif scene == "kitchen":
-            self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "scene" / "scene.xml")
-            self._background_ply = None
+        if scene == "xlerobot_nav" or (scene and scene.endswith(".json")):
+            config_path = Path(scene_config or scene)
+            if str(config_path) == "xlerobot_nav":
+                config_path = DEFAULT_NAV_CONFIG
+            self._load_navigation_config(config_path)
         elif scene == "xlerobot":
             self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml")
             self._background_ply = None
-        elif scene == "franka":
-            self._assets_dir = Path(assets_dir) if assets_dir else Path("/home/fangqi/WorkXCJ/gs_playground/demo/live_demo/assets")
-            self.mjcf_path = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "xmls" / "table30_04_hang_toothbrush_cup.xml")
-            self._background_ply = str(self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs" / "background_085.ply")
         else:
             self.mjcf_path = scene
             self._background_ply = None
+
+    def _resolve_navigation_path(self, path: str | Path, base_dir: Path) -> Path:
+        path = Path(path)
+        return path if path.is_absolute() else base_dir / path
+
+    def _load_navigation_config(self, config_path: Path) -> None:
+        config_path = self._resolve_navigation_path(config_path, NAV_ASSET_DIR)
+        with config_path.open("r", encoding="utf-8") as f:
+            config = json.load(f)
+        if not isinstance(config, dict):
+            raise ValueError(f"navigation scene config must be a JSON object: {config_path}")
+
+        scene_path = config.get("scene")
+        if not scene_path:
+            raise ValueError(f"navigation scene config missing 'scene': {config_path}")
+
+        self.scene_kind = "navigation"
+        config_dir = config_path.parent
+        self.mjcf_path = self._resolve_navigation_path(scene_path, config_dir).as_posix()
+        self.robot_xml = (FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml").as_posix()
+        self.base_link_name = "chassis"
+        self.follower_camera_pos = (-2.0, 0.0, 1.0)
+        self.default_viewer_cameras = DEFAULT_NAV_VIEWER_CAMERAS
+
+        scene_gaussians = config.get("scene_gaussians", {}) or {}
+        scene_ply = scene_gaussians.get("scene")
+        self._background_ply = (
+            self._resolve_navigation_path(scene_ply, config_dir).as_posix()
+            if scene_ply
+            else None
+        )
+        self.scene_objects = self._parse_scene_objects(
+            config.get("objects") or config.get("scene_objects") or []
+        )
+        self.scene_fixtures = self._parse_scene_fixtures(config.get("fixtures") or {})
+
+        robot_gs_dir = config.get("robot_gs_dir")
+        if robot_gs_dir and self._robot_gs_dir is None:
+            candidate = self._resolve_navigation_path(robot_gs_dir, config_dir)
+            self._robot_gs_dir = candidate if candidate.exists() else None
+
+    def _parse_scene_objects(self, raw) -> Dict[str, str]:
+        if isinstance(raw, dict):
+            return {str(name): str(link or name) for name, link in raw.items()}
+        objects: Dict[str, str] = {}
+        for item in raw or []:
+            if isinstance(item, str):
+                objects[item] = item
+            elif isinstance(item, dict):
+                name = item.get("name")
+                if name:
+                    objects[str(name)] = str(item.get("link") or name)
+        return objects
+
+    def _parse_scene_fixtures(self, raw) -> Dict[str, dict]:
+        if isinstance(raw, dict):
+            return {str(name): dict(value or {}) for name, value in raw.items()}
+        fixtures: Dict[str, dict] = {}
+        for item in raw or []:
+            if isinstance(item, dict) and item.get("name"):
+                entry = dict(item)
+                name = str(entry.pop("name"))
+                fixtures[name] = entry
+        return fixtures
 
     @property
     def scene_xml(self) -> str:
@@ -37,20 +114,11 @@ class GSConfig:
 
     @property
     def body_gaussians(self) -> Dict[str, str]:
-        if self.scene == "franka" and self._assets_dir:
-            task_dir = self._assets_dir / "models" / "tasks" / "table30" / "_04_hang_toothbrush_cup"
-            robot_3dgs = self._assets_dir / "models" / "robots" / "manipulation" / "franka_emika_panda_robotiq" / "3dgs"
-            d: Dict[str, str] = {}
-            for i in range(1, 8):
-                d[f"link{i}"] = (robot_3dgs / "franka" / f"link{i}.ply").as_posix()
-            for name in ("robotiq_base", "left_driver", "left_coupler", "left_spring_link", "left_follower",
-                          "right_driver", "right_coupler", "right_spring_link", "right_follower"):
-                d[name] = (robot_3dgs / "robotiq" / f"{name}.ply").as_posix()
-            task_3dgs = task_dir / "3dgs"
-            d["toothbrush_cup"] = (task_3dgs / "toothbrush_cup.ply").as_posix()
-            d["rack"] = (task_3dgs / "rack.ply").as_posix()
-            return d
-        return {}
+        d: Dict[str, str] = {}
+        if self._robot_gs_dir and self._robot_gs_dir.is_dir():
+            for ply in sorted(self._robot_gs_dir.glob("*.ply")):
+                d[ply.stem] = ply.as_posix()
+        return d
 
     @property
     def background_ply(self) -> Optional[str]:

@@ -16,24 +16,26 @@ if os.path.isdir(CUDA_HOME):
     os.environ.setdefault("LD_LIBRARY_PATH", os.path.join(CUDA_HOME, "lib64") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""))
 
 LOOP_SLEEP_SEC = 0.01
-DEFAULT_VIEWER_GS_CAMERAS = "overhead_cam,head_cam,right_arm_cam,left_arm_cam"
 
 
 def main():
     parser = argparse.ArgumentParser(description="serve_3dgs - MotrixSim + 3DGS backend")
     parser.add_argument("--port", type=int,
                         default=int(os.environ.get("SERVE_3DGS_PORT", 5002)))
-    parser.add_argument("--gs_assets", type=str,
-                        default="/home/fangqi/WorkXCJ/gs_playground/demo/live_demo/assets")
+    parser.add_argument("--gs_assets", type=str, default="")
+    parser.add_argument("--robot_gs_dir", type=str, default="")
+    parser.add_argument("--scene_config", type=str,
+                        default=os.environ.get("SERVE_3DGS_SCENE_CONFIG", ""))
     parser.add_argument("--no-viewer", action="store_true")
     parser.add_argument("--gs_w", type=int, default=320)
     parser.add_argument("--gs_h", type=int, default=240)
     parser.add_argument("--viewer_gs_fps", type=float, default=5.0)
-    parser.add_argument("--viewer_cameras", type=str, default=DEFAULT_VIEWER_GS_CAMERAS)
+    parser.add_argument("--viewer_cameras", type=str,
+                        default=os.environ.get("SERVE_3DGS_VIEWER_CAMERAS", ""))
     parser.add_argument("--no-gs-screens", action="store_true")
     parser.add_argument("--physics_steps_per_loop", type=int, default=10)
-    parser.add_argument("--scene", type=str, default="tabletop",
-                        help="Scene: tabletop (default), kitchen, xlerobot, franka, or path to MJCF XML")
+    parser.add_argument("--scene", type=str, default="xlerobot_nav",
+                        help="Scene: xlerobot_nav (default), xlerobot, path to MJCF XML, or path to navigation JSON")
     args = parser.parse_args()
 
     from backend.gs_config import GSConfig
@@ -47,11 +49,17 @@ def main():
         start_server, process_commands, apply_base_velocity, get_lock,
     )
 
-    viewer_camera_names = tuple(
-        name.strip() for name in args.viewer_cameras.split(",") if name.strip()
+    gs_cfg = GSConfig(
+        assets_dir=args.gs_assets,
+        scene=args.scene,
+        robot_gs_dir=args.robot_gs_dir or None,
+        scene_config=args.scene_config or None,
     )
-
-    gs_cfg = GSConfig(assets_dir=args.gs_assets, scene=args.scene)
+    viewer_camera_names = (
+        tuple(name.strip() for name in args.viewer_cameras.split(",") if name.strip())
+        if args.viewer_cameras
+        else gs_cfg.default_viewer_cameras
+    )
     print(f"Loading scene: {gs_cfg.scene_xml}")
     env = SimEnv(gs_cfg.scene_xml, gs_cfg)
     print(f"Model loaded: {env.model.num_links} links, {env.model.num_dof_pos} DOFs")

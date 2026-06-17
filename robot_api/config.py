@@ -34,10 +34,22 @@ class BackendConfig:
 @dataclass(frozen=True)
 class RobotApiConfig:
     backends: list[BackendConfig]
+    active_backend: str | None = None
     navigation: BackendConfig | None = None
+
+    def _active(self) -> BackendConfig | None:
+        if not self.active_backend:
+            return None
+        for backend in self.backends:
+            if backend.name == self.active_backend:
+                return backend
+        return None
 
     @property
     def server_url(self) -> str:
+        active = self._active()
+        if active is not None and active.url:
+            return active.url
         for backend in self.backends:
             if backend.enabled and backend.url:
                 return backend.url
@@ -52,15 +64,24 @@ class RobotApiConfig:
 
     @property
     def backend(self) -> str:
+        active = self._active()
+        if active is not None:
+            return active.name
         for backend in self.backends:
             if backend.enabled:
                 return backend.name
-        return "mujoco"
+        return self.active_backend or "mujoco"
 
     def state_backends(self) -> list[BackendConfig]:
+        active = self._active()
+        if active is not None:
+            return [active] if active.enabled and active.provide_state else []
         return [b for b in self.backends if b.enabled and b.provide_state]
 
     def action_backends(self) -> list[BackendConfig]:
+        active = self._active()
+        if active is not None:
+            return [active] if active.enabled and active.accept_action else []
         return [b for b in self.backends if b.enabled and b.accept_action]
 
     def navigation_backend(self) -> BackendConfig | None:
@@ -149,6 +170,12 @@ def load_robot_api_config() -> RobotApiConfig:
     data = _read_yaml(CONFIG_PATH)
     backends_cfg = data.get("backends") or _default_backends()
 
+    active_backend = str(
+        os.getenv("ROBOT_API_BACKEND")
+        or os.getenv("ROBOT_BACKEND")
+        or data.get("active_backend")
+        or ""
+    ).strip() or None
     env_url = os.getenv("ROBOT_API_URL")
     env_nav_url = os.getenv("ROBOT_NAV_URL") or os.getenv("NAV2_API_URL")
     env_timeout = os.getenv("ROBOT_API_TIMEOUT")
@@ -157,7 +184,7 @@ def load_robot_api_config() -> RobotApiConfig:
     for name, raw in backends_cfg.items():
         raw = raw or {}
         url = str(raw.get("url") or "").rstrip("/")
-        if name == "mujoco" and env_url:
+        if env_url and (active_backend is None or name == active_backend):
             url = env_url.rstrip("/")
         timeout = float(env_timeout or raw.get("timeout") or DEFAULT_TIMEOUT)
         backends.append(
@@ -187,6 +214,7 @@ def load_robot_api_config() -> RobotApiConfig:
                     raw={},
                 )
             ],
+            active_backend=active_backend,
             navigation=None,
         )
 
@@ -205,4 +233,4 @@ def load_robot_api_config() -> RobotApiConfig:
             raw=nav_cfg,
         )
 
-    return RobotApiConfig(backends=backends, navigation=navigation)
+    return RobotApiConfig(backends=backends, active_backend=active_backend, navigation=navigation)

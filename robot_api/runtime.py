@@ -43,11 +43,19 @@ class RobotRuntime:
 
     def set_backend_url(self, url: str) -> None:
         updated = []
+        active_backend = self.config.active_backend
         for backend in self.config.backends:
-            if backend.name in ("mujoco", "mujoco_3dgs"):
+            if (
+                backend.name == active_backend
+                or (active_backend is None and backend.name in ("mujoco", "mujoco_3dgs"))
+            ):
                 backend = BackendConfig(**{**backend.__dict__, "url": str(url).rstrip("/")})
             updated.append(backend)
-        self.config = type(self.config)(backends=updated)
+        self.config = type(self.config)(
+            backends=updated,
+            active_backend=active_backend,
+            navigation=self.config.navigation,
+        )
 
     def get_state(self, name: str, params: dict[str, Any] | None = None):
         if name not in STATE_ENDPOINTS:

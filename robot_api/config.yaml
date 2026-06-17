@@ -1,3 +1,5 @@
+active_backend: "mujoco_3dgs"
+
 backends:
   mujoco:
     enabled: 1

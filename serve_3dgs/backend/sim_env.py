@@ -15,10 +15,6 @@ if os.path.isfile(os.path.join(_CUDA_HOME, "bin", "nvcc")):
     if _lib64 not in os.environ.get("LD_LIBRARY_PATH", ""):
         os.environ["LD_LIBRARY_PATH"] = _lib64 + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
 
-_GS_VENV_BIN = "/home/fangqi/WorkXCJ/gs_playground/.venv/bin"
-if os.path.isdir(_GS_VENV_BIN):
-    os.environ["PATH"] = _GS_VENV_BIN + os.pathsep + os.environ.get("PATH", "")
-
 import numpy as np
 import torch
 
@@ -52,12 +48,57 @@ class SimEnv:
         model_xml: str,
         gs_cfg: GSConfig,
         batch_size: int = 1,
+        enable_renderers: bool = True,
     ):
         self._gs_cfg = gs_cfg
         self._batch_size = batch_size
 
-        scene = mx.msd.from_file(model_xml)
+        scene = self._load_scene(model_xml, gs_cfg)
+        self.model = scene.build()
+        self._configure_navigation_camera_tracking(gs_cfg)
+        self.data = SceneData(self.model, batch=(batch_size,))
 
+        self._gs_renderer = None
+        self._bg_renderer = None
+        if enable_renderers:
+            self._setup_renderers(gs_cfg, batch_size)
+        self._bg_imgs: Dict[Tuple[int, int, int], object] = {}
+
+        self._link_name_to_idx: Dict[str, int] = {
+            name: idx for idx, name in enumerate(self.model.link_names)
+        }
+        self.scene_objects: Dict[str, str] = dict(gs_cfg.scene_objects)
+        self.scene_fixtures: Dict[str, dict] = dict(gs_cfg.scene_fixtures)
+        self.object_names = tuple(self.scene_objects.keys())
+
+        self._grasped_object = None
+
+        self.data.reset(self.model)
+        forward_kinematic(self.model, self.data)
+        self._camera_fixed_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
+        self._camera_look_at_overrides: Dict[int, Tuple[np.ndarray, float]] = {}
+        if gs_cfg.scene_kind != "navigation":
+            self._setup_camera_overrides()
+
+    def _load_scene(self, model_xml: str, gs_cfg: GSConfig):
+        if gs_cfg.scene_kind == "navigation":
+            scene = mx.msd.from_file(model_xml)
+            if not gs_cfg.robot_xml:
+                raise ValueError("navigation scene requires robot_xml")
+            robot = mx.msd.from_file(gs_cfg.robot_xml)
+            if gs_cfg.follower_camera_pos is not None:
+                x, y, z = gs_cfg.follower_camera_pos
+                camera_mjcf = f"""<mujoco model="camera">
+  <worldbody>
+    <camera name="follower" pos="{x:g} {y:g} {z:g}"
+      xyaxes="0 -1 0 0 0 1" trackposspeed="2" trackrotspeed="2" />
+  </worldbody>
+</mujoco>"""
+                robot.attach(mx.msd.from_str(camera_mjcf), gs_cfg.base_link_name)
+            scene.attach(robot)
+            return scene
+
+        scene = mx.msd.from_file(model_xml)
         try:
             floor_xml = """<mujoco model="floor">
   <worldbody>
@@ -67,35 +108,47 @@ class SimEnv:
             scene.attach(mx.msd.from_str(floor_xml))
         except (RuntimeError, Exception):
             pass
+        return scene
 
-        self.model = scene.build()
-        self.data = SceneData(self.model, batch=(batch_size,))
+    def _configure_navigation_camera_tracking(self, gs_cfg: GSConfig) -> None:
+        if gs_cfg.scene_kind != "navigation" or gs_cfg.follower_camera_pos is None:
+            return
+        try:
+            camera = self.model.cameras["follower"]
+            camera.rotation_track = "look_at_link"
+            camera.position_track = "fixed_local"
+            camera.track_target_link = self.model.get_link(gs_cfg.base_link_name)
+        except Exception as exc:
+            raise RuntimeError(f"failed to configure navigation follower camera: {exc}") from exc
 
-        self._gs_renderer = None
-        self._bg_renderer = None
-        if gs_cfg.body_gaussians:
+    def _setup_renderers(self, gs_cfg: GSConfig, batch_size: int) -> None:
+        body_gaussians = self._filter_body_gaussians(gs_cfg.body_gaussians)
+        if body_gaussians:
+            print(f"Loaded {len(body_gaussians)} body 3DGS assets: {', '.join(sorted(body_gaussians))}", flush=True)
             self._gs_renderer = MtxBatchSplatRenderer(
-                BatchSplatConfig(body_gaussians=gs_cfg.body_gaussians, background_ply=None, minibatch=batch_size),
+                BatchSplatConfig(body_gaussians=body_gaussians, background_ply=None, minibatch=batch_size),
                 self.model,
             )
+        elif gs_cfg.body_gaussians:
+            print("No body 3DGS assets matched model link names; rendering background 3DGS only.", flush=True)
+        else:
+            print("No body 3DGS assets configured; rendering background 3DGS only.", flush=True)
         if gs_cfg.background_ply:
             self._bg_renderer = MtxBatchSplatRenderer(
                 BatchSplatConfig(body_gaussians={}, background_ply=gs_cfg.background_ply, minibatch=batch_size),
                 self.model,
             )
-        self._bg_imgs: Dict[Tuple[int, int, int], object] = {}
 
-        self._link_name_to_idx: Dict[str, int] = {
-            name: idx for idx, name in enumerate(self.model.link_names)
+    def _filter_body_gaussians(self, body_gaussians: Dict[str, str]) -> Dict[str, str]:
+        link_names = set(self.model.link_names)
+        return {
+            name: path
+            for name, path in body_gaussians.items()
+            if name in link_names and os.path.exists(path)
         }
 
-        self._grasped_object = None
-
-        self.data.reset(self.model)
-        forward_kinematic(self.model, self.data)
-        self._camera_fixed_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
-        self._camera_look_at_overrides: Dict[int, Tuple[np.ndarray, float]] = {}
-        self._setup_camera_overrides()
+    def object_link(self, object_name: str) -> str:
+        return self.scene_objects.get(object_name, object_name)
 
     def step(self, n: int = 1) -> None:
         for _ in range(n):
