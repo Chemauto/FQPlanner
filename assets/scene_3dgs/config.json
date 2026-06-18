@@ -10,8 +10,13 @@
   "prompt": "Navigate in the scene",
   "objects": [
     {
-      "name": "apple",
-      "link": "pushable_box"
+      "name": "bottle",
+      "link": "hunyuan_bottle_body"
+    }
+  ],
+  "composite_mesh_objects": [
+    {
+      "link": "hunyuan_bottle_body"
     }
   ],
   "fixtures": [],
