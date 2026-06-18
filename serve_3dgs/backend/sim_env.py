@@ -83,11 +83,8 @@ class SimEnv:
         forward_kinematic(self.model, self.data)
         self._camera_fixed_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
         self._camera_look_at_overrides: Dict[int, Tuple[np.ndarray, float]] = {}
-        self._camera_link_look_at_overrides: Dict[int, Tuple[str, np.ndarray, float]] = {}
         if gs_cfg.scene_kind != "navigation":
             self._setup_camera_overrides()
-        else:
-            self._setup_navigation_composite_camera_overrides(gs_cfg)
 
     def _load_scene(self, model_xml: str, gs_cfg: GSConfig):
         if gs_cfg.scene_kind == "navigation":
@@ -181,26 +178,6 @@ class SimEnv:
             print(f"Composite mesh renderer init failed: {exc}", flush=True)
             self._composite_renderer = None
             return False
-
-    def _setup_navigation_composite_camera_overrides(self, gs_cfg: GSConfig) -> None:
-        if not self._composite_cfg:
-            return
-        target_link = str(self._composite_cfg[0].get("link", ""))
-        if not target_link or target_link not in self._link_name_to_idx:
-            return
-        camera_names = tuple(gs_cfg.default_viewer_cameras or ())
-        camera_ids = {
-            getattr(camera, "name", ""): idx
-            for idx, camera in enumerate(getattr(self.model.cameras, "cameras", ()))
-        }
-        # The physical navigation cameras face different directions. These
-        # overrides keep their positions but make the 3DGS widgets inspect the
-        # configured composite object.
-        target_offset = np.array([0.0, 0.0, 0.22], dtype=np.float32)
-        for name in camera_names:
-            cam_id = camera_ids.get(name)
-            if cam_id is not None:
-                self._camera_link_look_at_overrides[cam_id] = (target_link, target_offset, 70.0)
 
     def object_link(self, object_name: str) -> str:
         return self.scene_objects.get(object_name, object_name)
@@ -311,11 +288,6 @@ class SimEnv:
             pose = pose.reshape(pose.shape[0], -1, pose.shape[-1])[:, 0, :]
         pos = pose[:, :3].astype(np.float32)
         quat = pose[:, 3:7].astype(np.float32)
-        if cam_id in self._camera_link_look_at_overrides:
-            target_link, target_offset, fovy = self._camera_link_look_at_overrides[cam_id]
-            target = self.get_body_xpos(target_link).astype(np.float32) + target_offset
-            quat = np.stack([self._look_at_quat_xyzw(p, target) for p in pos], axis=0)
-            return pos, quat.astype(np.float32), fovy
         if cam_id in self._camera_look_at_overrides:
             target, fovy = self._camera_look_at_overrides[cam_id]
             quat = np.stack([self._look_at_quat_xyzw(p, target) for p in pos], axis=0)
@@ -332,6 +304,8 @@ class SimEnv:
     ) -> np.ndarray:
         if self._gs_renderer is None and self._bg_renderer is None:
             return np.zeros((height, width, 3), dtype=np.uint8)
+        if self._composite_cfg:
+            cache_background = False
 
         self.forward_kinematic()
         link_poses = self.model.get_link_poses(self.data)
