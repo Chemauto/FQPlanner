@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 _CUDA_HOME = "/usr/local/cuda-12.4"
@@ -73,12 +74,20 @@ class SimEnv:
 
         self._grasped_object = None
 
+        self._composite_renderer = None
+        self._composite_cfg = gs_cfg.composite_mesh_objects if gs_cfg.composite_mesh_objects else []
+        self._composite_scene_xml = Path(gs_cfg.scene_xml) if gs_cfg.composite_mesh_objects else None
+        self._composite_warning_reported = False
+
         self.data.reset(self.model)
         forward_kinematic(self.model, self.data)
         self._camera_fixed_overrides: Dict[int, Tuple[np.ndarray, np.ndarray, float]] = {}
         self._camera_look_at_overrides: Dict[int, Tuple[np.ndarray, float]] = {}
+        self._camera_link_look_at_overrides: Dict[int, Tuple[str, np.ndarray, float]] = {}
         if gs_cfg.scene_kind != "navigation":
             self._setup_camera_overrides()
+        else:
+            self._setup_navigation_composite_camera_overrides(gs_cfg)
 
     def _load_scene(self, model_xml: str, gs_cfg: GSConfig):
         if gs_cfg.scene_kind == "navigation":
@@ -146,6 +155,52 @@ class SimEnv:
             for name, path in body_gaussians.items()
             if name in link_names and os.path.exists(path)
         }
+
+    def _ensure_composite_renderer(self, width: int, height: int) -> bool:
+        if self._composite_renderer is not None and self._composite_renderer.width == width and self._composite_renderer.height == height:
+            return True
+        if not self._composite_cfg or not self._composite_scene_xml:
+            return False
+        from .mesh_compositor import PyrenderMeshCompositor
+
+        if self._composite_renderer is not None:
+            try:
+                self._composite_renderer.close()
+            except Exception:
+                pass
+        try:
+            self._composite_renderer = PyrenderMeshCompositor(
+                self._composite_cfg,
+                width=width,
+                height=height,
+                scene_xml=self._composite_scene_xml,
+            )
+            print(f"Composite mesh rendering enabled for {len(self._composite_cfg)} object(s) at {width}x{height}", flush=True)
+            return True
+        except Exception as exc:
+            print(f"Composite mesh renderer init failed: {exc}", flush=True)
+            self._composite_renderer = None
+            return False
+
+    def _setup_navigation_composite_camera_overrides(self, gs_cfg: GSConfig) -> None:
+        if not self._composite_cfg:
+            return
+        target_link = str(self._composite_cfg[0].get("link", ""))
+        if not target_link or target_link not in self._link_name_to_idx:
+            return
+        camera_names = tuple(gs_cfg.default_viewer_cameras or ())
+        camera_ids = {
+            getattr(camera, "name", ""): idx
+            for idx, camera in enumerate(getattr(self.model.cameras, "cameras", ()))
+        }
+        # The physical navigation cameras face different directions. These
+        # overrides keep their positions but make the 3DGS widgets inspect the
+        # configured composite object.
+        target_offset = np.array([0.0, 0.0, 0.22], dtype=np.float32)
+        for name in camera_names:
+            cam_id = camera_ids.get(name)
+            if cam_id is not None:
+                self._camera_link_look_at_overrides[cam_id] = (target_link, target_offset, 70.0)
 
     def object_link(self, object_name: str) -> str:
         return self.scene_objects.get(object_name, object_name)
@@ -256,6 +311,11 @@ class SimEnv:
             pose = pose.reshape(pose.shape[0], -1, pose.shape[-1])[:, 0, :]
         pos = pose[:, :3].astype(np.float32)
         quat = pose[:, 3:7].astype(np.float32)
+        if cam_id in self._camera_link_look_at_overrides:
+            target_link, target_offset, fovy = self._camera_link_look_at_overrides[cam_id]
+            target = self.get_body_xpos(target_link).astype(np.float32) + target_offset
+            quat = np.stack([self._look_at_quat_xyzw(p, target) for p in pos], axis=0)
+            return pos, quat.astype(np.float32), fovy
         if cam_id in self._camera_look_at_overrides:
             target, fovy = self._camera_look_at_overrides[cam_id]
             quat = np.stack([self._look_at_quat_xyzw(p, target) for p in pos], axis=0)
@@ -288,12 +348,13 @@ class SimEnv:
         fovy_np = np.full((cam_pos.shape[0], 1), fovy, dtype=np.float32)
 
         bg_imgs = None
+        bg_depth_t = None
         bg_cache_key = (int(cam_id), int(width), int(height))
         if self._bg_renderer is not None and cache_background:
             bg_imgs = self._bg_imgs.get(bg_cache_key)
         if self._bg_renderer is not None and bg_imgs is None:
             bg_gsb = self._bg_renderer.batch_update_gaussians(body_pos, body_quat)
-            bg_imgs, _ = self._bg_renderer.batch_env_render(
+            bg_imgs, bg_depth_t = self._bg_renderer.batch_env_render(
                 bg_gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np
             )
             if cache_background:
@@ -301,17 +362,40 @@ class SimEnv:
 
         if self._gs_renderer is not None:
             gsb = self._gs_renderer.batch_update_gaussians(body_pos, body_quat)
-            rgb_t, _ = self._gs_renderer.batch_env_render(
+            rgb_t, depth_t = self._gs_renderer.batch_env_render(
                 gsb, cam_pos_t, cam_xmat_t, int(height), int(width), fovy_np, bg_imgs=bg_imgs
             )
         elif bg_imgs is not None:
             rgb_t = bg_imgs
+            depth_t = bg_depth_t
         else:
             return np.zeros((height, width, 3), dtype=np.uint8)
         rgb = rgb_t.detach().cpu().numpy() if isinstance(rgb_t, torch.Tensor) else np.asarray(rgb_t)
-        # rgb shape: (Nenv, Ncam, H, W, 3)
-        rgb = rgb[0, 0]  # (H, W, 3)
-        return (np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+        rgb = rgb[0, 0]
+        rgb_u8 = (np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+        if self._composite_cfg and depth_t is not None and self._ensure_composite_renderer(int(width), int(height)):
+            gs_depth = depth_t.detach().cpu().numpy() if isinstance(depth_t, torch.Tensor) else np.asarray(depth_t)
+            gs_depth = gs_depth[0, 0]
+            try:
+                camera_pose = np.concatenate([cam_pos[0], cam_quat[0]], axis=0)
+                mesh_rgb, mesh_depth = self._composite_renderer.render(
+                    self.model,
+                    self.data,
+                    cam_id,
+                    int(width),
+                    int(height),
+                    camera_pose=camera_pose,
+                    fovy=fovy,
+                )
+                from .mesh_compositor import composite_rgb_depth
+                rgb_u8 = composite_rgb_depth(rgb_u8, gs_depth.astype(np.float32), mesh_rgb, mesh_depth)
+            except Exception as exc:
+                if not self._composite_warning_reported:
+                    print(f"Composite mesh render failed: {exc}", flush=True)
+                    self._composite_warning_reported = True
+
+        return rgb_u8
 
     @staticmethod
     def _quat_to_xmat(quat_xyzw: np.ndarray) -> np.ndarray:

@@ -31,6 +31,7 @@ class GSConfig:
         self.default_viewer_cameras = DEFAULT_DIRECT_VIEWER_CAMERAS
         self.scene_objects: Dict[str, str] = {}
         self.scene_fixtures: Dict[str, dict] = {}
+        self.composite_mesh_objects: list = []
 
         if scene == "xlerobot_nav" or (scene and scene.endswith(".json")):
             config_path = Path(scene_config or scene)
@@ -78,6 +79,7 @@ class GSConfig:
             config.get("objects") or config.get("scene_objects") or []
         )
         self.scene_fixtures = self._parse_scene_fixtures(config.get("fixtures") or {})
+        self.composite_mesh_objects = config.get("composite_mesh_objects") or []
 
         robot_gs_dir = config.get("robot_gs_dir")
         if robot_gs_dir and self._robot_gs_dir is None:
