@@ -12,9 +12,22 @@ The default scene is fully local to this repository:
 assets/scene_3dgs/
 ├── config.json
 └── nav_scene_1/
-    ├── 3dgs/point_cloud.ply
+    ├── 3dgs/point_cloud.ply   # 3DGS 点云（从 HuggingFace 下载）
     ├── mjcf/scene.xml
     └── meshes/
+```
+
+`point_cloud.ply`（~234 MB）存放在 HuggingFace，需要手动下载：
+
+```bash
+# 使用 huggingface-cli 下载（推荐）
+pip install huggingface_hub
+huggingface-cli download ChemAuto/gs_playground point_cloud.ply \
+  --local-dir assets/scene_3dgs/nav_scene_1/3dgs/
+
+# 或者直接 wget
+wget -O assets/scene_3dgs/nav_scene_1/3dgs/point_cloud.ply \
+  https://huggingface.co/ChemAuto/gs_playground/resolve/main/point_cloud.ply
 ```
 
 `assets/scene_3dgs/config.json` controls the active navigation scene. Replacing
