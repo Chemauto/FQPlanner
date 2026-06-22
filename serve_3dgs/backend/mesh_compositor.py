@@ -19,8 +19,8 @@ def composite_rgb_depth(
     mesh_rgb: np.ndarray,
     mesh_depth: np.ndarray,
 ) -> np.ndarray:
-    gs_d = np.asarray(gs_depth, dtype=np.float32)
-    mesh_d = np.asarray(mesh_depth, dtype=np.float32)
+    gs_d = np.asarray(gs_depth, dtype=np.float32).squeeze()
+    mesh_d = np.asarray(mesh_depth, dtype=np.float32).squeeze()
     valid_mesh = np.isfinite(mesh_d)
     valid_gs = np.isfinite(gs_d) & (gs_d > 1e-6)
     use_mesh = valid_mesh & ((~valid_gs) | (mesh_d < gs_d))

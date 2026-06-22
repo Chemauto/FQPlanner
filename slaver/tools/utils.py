@@ -31,7 +31,7 @@ from agent.collaboration import Collaborator
 
 # Load .env from project root
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-load_dotenv(os.path.join(_project_root, '.env'))
+load_dotenv(os.path.join(_project_root, '.env'), override=True)
 
 if TYPE_CHECKING:
     from memory import AgentLogger

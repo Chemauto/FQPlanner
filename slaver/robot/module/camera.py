@@ -12,7 +12,7 @@ from openai import OpenAI
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-load_dotenv(os.path.join(_project_root, '.env'))
+load_dotenv(os.path.join(_project_root, '.env'), override=True)
 
 import yaml
 
