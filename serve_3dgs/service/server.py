@@ -76,6 +76,23 @@ _video_dir = os.path.join(os.path.dirname(__file__), "..", "videos")
 _camera_config_cache = None
 
 
+def _camera_model_name(camera_name: str) -> str:
+    cameras = _camera_config().get("cameras", {})
+    entry = cameras.get(camera_name, {})
+    if isinstance(entry, dict) and "model_name" in entry:
+        return entry["model_name"]
+    return camera_name
+
+
+def _find_camera_id(model, camera_name: str) -> int:
+    model_name = _camera_model_name(camera_name)
+    for idx, camera in enumerate(model.cameras.cameras if hasattr(model.cameras, 'cameras') else model.cameras):
+        name = getattr(camera, "name", "")
+        if name == model_name or name.endswith(model_name):
+            return idx
+    return 0
+
+
 def _camera_config():
     global _camera_config_cache
     if _camera_config_cache is None:
@@ -100,18 +117,29 @@ def _camera_labels():
 
 
 def _render_combined_frame(env, view_w, view_h):
-    try:
-        img = env.render_frame(cam_id=0, width=view_w, height=view_h)
-    except Exception:
-        img = np.zeros((view_h, view_w, 3), dtype=np.uint8)
-    return img
+    cameras = _preview_config().get("cameras", ["overhead_cam"])
+    panels = []
+    for cam_name in cameras[:4]:
+        try:
+            cam_id = _find_camera_id(env.model, cam_name)
+            img = env.render_frame(cam_id=cam_id, width=view_w, height=view_h)
+        except Exception:
+            img = np.zeros((view_h, view_w, 3), dtype=np.uint8)
+        panels.append(PILImage.fromarray(img))
+    while len(panels) < 4:
+        panels.append(PILImage.new("RGB", (view_w, view_h), (0, 0, 0)))
+    image = PILImage.new("RGB", (view_w * 2, view_h * 2))
+    for idx, panel in enumerate(panels):
+        image.paste(panel, ((idx % 2) * view_w, (idx // 2) * view_h))
+    return np.array(image)
 
 
 def _render_camera_preview(env, camera_names, width, height):
     panels = []
     for name in camera_names:
         try:
-            img = env.render_frame(cam_id=0, width=width, height=height)
+            cam_id = _find_camera_id(env.model, name)
+            img = env.render_frame(cam_id=cam_id, width=width, height=height)
         except Exception:
             img = np.zeros((height, width, 3), dtype=np.uint8)
         panel = PILImage.fromarray(img)
@@ -455,10 +483,12 @@ def process_commands(env):
                     from io import BytesIO
                     import base64
                     defaults = _screenshot_defaults()
+                    cam = params.get("camera_name") or defaults.get("default_camera", "overhead_cam")
                     w = params.get("width") or defaults.get("width", 640)
                     h = params.get("height") or defaults.get("height", 480)
                     quality = int(defaults.get("jpeg_quality", 80))
-                    rgb = env.render_frame(cam_id=0, width=w, height=h)
+                    cam_id = _find_camera_id(env.model, cam)
+                    rgb = env.render_frame(cam_id=cam_id, width=w, height=h)
                     pil_img = PILImage.fromarray(rgb)
                     buf = BytesIO()
                     pil_img.save(buf, format="JPEG", quality=quality)
@@ -466,7 +496,7 @@ def process_commands(env):
                     result = {
                         "success": True,
                         "image": img_b64,
-                        "camera": "cam_0",
+                        "camera": cam,
                         "width": int(w),
                         "height": int(h),
                     }
@@ -474,17 +504,26 @@ def process_commands(env):
                     from io import BytesIO
                     import base64
                     preview = _preview_config()
+                    camera_name = params.get("camera_name")
+                    camera_names = [camera_name] if camera_name else preview.get("cameras", ["overhead_cam"])
                     w = int(params.get("width") or preview.get("width", 640))
                     h = int(params.get("height") or preview.get("height", 480))
                     quality = int(preview.get("jpeg_quality", 80))
-                    panels = _render_camera_preview(env, ["cam_0"], w, h)
-                    image = panels[0]
+                    panels = _render_camera_preview(env, camera_names, w, h)
+                    if len(panels) == 1:
+                        image = panels[0]
+                    else:
+                        while len(panels) < 4:
+                            panels.append(PILImage.new("RGB", (w, h), (0, 0, 0)))
+                        image = PILImage.new("RGB", (w * 2, h * 2))
+                        for idx, panel in enumerate(panels[:4]):
+                            image.paste(panel, ((idx % 2) * w, (idx // 2) * h))
                     buf = BytesIO()
                     image.save(buf, format="JPEG", quality=quality)
                     result = {
                         "success": True,
                         "image": base64.b64encode(buf.getvalue()).decode("utf-8"),
-                        "camera": params.get("camera_name"),
+                        "camera": camera_name,
                     }
                 else:
                     result = {"error": f"未知命令: {cmd_type}"}
@@ -793,6 +832,7 @@ def api_screenshot():
     data = request.json or {}
     defaults = _screenshot_defaults()
     params = {
+        "camera_name": data.get("camera_name") or defaults.get("default_camera", "overhead_cam"),
         "width": data.get("width") or defaults.get("width", 640),
         "height": data.get("height") or defaults.get("height", 480),
     }

@@ -35,11 +35,10 @@ CAMERAS = (
     (_scene_camera_cfg.get("preview") or {}).get("cameras")
     or list((_scene_camera_cfg.get("cameras") or {}).keys())
     or _camera_cfg.get("cameras")
-    or ["overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam"]
 )
-VLM_MODEL = _vlm_cfg.get("model", "mimo-v2.5")
-VLM_API_BASE = _vlm_cfg.get("api_base", "https://api.xiaomimimo.com/v1")
-VLM_MAX_TOKENS = _vlm_cfg.get("max_tokens", 1000)
+VLM_MODEL = _vlm_cfg["model"]
+VLM_API_BASE = _vlm_cfg["api_base"]
+VLM_MAX_TOKENS = _vlm_cfg["max_tokens"]
 
 
 # ============================================================

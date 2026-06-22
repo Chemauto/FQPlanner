@@ -25,7 +25,7 @@
       <include file="object/sugar_collision.xml" />
     </body>
     <geom name="ground" type="plane" size="50 50 0.1" rgba="0.5 0.5 0.5 1" group="2" contype="1" conaffinity="1"/>
-    <body name="hunyuan_bottle_body" pos="0.0 1.2 0.1400000" quat="0 1 0 0">
+    <body name="hunyuan_bottle_body" pos="-3.0 0.0 1.000000" quat="0 1 0 0">
       <joint name="hunyuan_bottle_freejoint" type="free" />
       <inertial pos="-0.000702328 0.001313276 -0.173913410" quat="-0.035219884 0.705949265 0.035419682 0.706498861" mass="0.20" diaginertia="0.000312471 0.002106656 0.002107683" />
       <geom name="hunyuan_bottle_visual" type="mesh" mesh="hunyuan_bottle" material="hunyuan_bottle_mat" group="2" contype="0" conaffinity="0" />
