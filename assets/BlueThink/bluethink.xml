@@ -56,6 +56,7 @@
     <mesh name="Right_Wrist_Roll_Link_c" file="Right_Wrist_Roll_Link.STL"/>
 
     <mesh name="D435i_Solid" file="D435i_Solid.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="bind" file="bind.STL" scale="0.001 0.001 0.001"/>
   </asset>
 
   <worldbody>
@@ -108,8 +109,15 @@
                     <joint name="Left_Wrist_Roll_Joint" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-36 36" damping="3.5" armature="0.06"/>
                     <geom type="mesh" rgba="0.890196 0.890196 0.913725 1" mesh="Left_Wrist_Roll_Link" class="visual"/>
                     <geom type="mesh" mesh="Left_Wrist_Roll_Link_c" class="collision"/>
-                    <geom type="mesh" mesh="D435i_Solid" pos="-0.08 0 -0.05" rgba="0.2 0.2 0.2 1" euler="3.14 0 1.57"/>
-                    <camera name="left_ee_cam" pos="-0.08 0 -0.05" zaxis="0 0 -1" xyaxes="1 0 0 0 1 0" fovy="60"/>
+                    <body name="Left_bind" pos="-0.09 -0.045 -0.03">
+                      <inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>
+                      <geom type="mesh" mesh="bind" rgba="0.4 0.4 0.4 1" euler="3.14 0 -1.57"/>
+                      <body name="Left_D435i" pos="0.01 0.046 -0.036">
+                        <inertial pos="0 0 0" mass="0.072" diaginertia="1e-5 1e-5 1e-5"/>
+                        <geom type="mesh" mesh="D435i_Solid" rgba="0.2 0.2 0.2 1" euler="3.14 0 -1.57"/>
+                        <camera name="left_ee_cam" pos="0 0 0" xyaxes="1 0 0 0 1 0" fovy="60"/>
+                      </body>
+                    </body>
                   </body>
                 </body>
               </body>
@@ -163,8 +171,15 @@
                     <joint name="Right_Wrist_Roll_Joint" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-36 36" damping="3.5" armature="0.06"/>
                     <geom type="mesh" rgba="0.890196 0.890196 0.913725 1" mesh="Right_Wrist_Roll_Link" class="visual"/>
                     <geom type="mesh" mesh="Right_Wrist_Roll_Link_c" class="collision"/>
-                    <geom type="mesh" mesh="D435i_Solid" pos="-0.08 0 -0.05" rgba="0.2 0.2 0.2 1" euler="3.14 0 1.57"/>
-                    <camera name="right_ee_cam" pos="-0.08 0 -0.05" zaxis="0 0 -1" xyaxes="1 0 0 0 1 0" fovy="60"/>
+                    <body name="Right_bind" pos="-0.09 -0.045 -0.03">
+                      <inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>
+                      <geom type="mesh" mesh="bind" rgba="0.4 0.4 0.4 1" euler="3.14 0 -1.57"/>
+                      <body name="Right_D435i" pos="0.01 0.046 -0.036">
+                        <inertial pos="0 0 0" mass="0.072" diaginertia="1e-5 1e-5 1e-5"/>
+                        <geom type="mesh" mesh="D435i_Solid" rgba="0.2 0.2 0.2 1" euler="3.14 0 1.57"/>
+                        <camera name="right_ee_cam" pos="0 0 0" xyaxes="1 0 0 0 -1 0" fovy="60"/>
+                      </body>
+                    </body>
                   </body>
                 </body>
               </body>
@@ -175,7 +190,7 @@
 
       <body name="D435i_Cam" pos="-0.09 0 1.09">
         <geom type="mesh" mesh="D435i_Solid" rgba="0.2 0.2 0.2 1" euler="0 -1.57 1.57"/>
-        <camera name="base_cam" pos="0 0 0" zaxis="-1 0 0" xyaxes="0 1 0 0 0 1" fovy="60"/>
+        <camera name="base_cam" pos="0 0 0" xyaxes="0 -1 0 0 0 1" fovy="60"/>
       </body>
     </body>
   </worldbody>
@@ -196,6 +211,11 @@
     <exclude body1="Right_Elbow_Pitch_Link" body2="Right_Wrist_Yaw_Link"/>
     <exclude body1="Right_Wrist_Yaw_Link" body2="Right_Wrist_Pitch_Link"/>
     <exclude body1="Right_Wrist_Pitch_Link" body2="Right_Wrist_Roll_Link"/>
+    <!-- bind/D435i camera exclusions -->
+    <exclude body1="Left_Wrist_Roll_Link" body2="Left_bind"/>
+    <exclude body1="Left_bind" body2="Left_D435i"/>
+    <exclude body1="Right_Wrist_Roll_Link" body2="Right_bind"/>
+    <exclude body1="Right_bind" body2="Right_D435i"/>
   </contact>
 
   <actuator>
