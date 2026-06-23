@@ -760,7 +760,7 @@ def api_move_to():
         return jsonify({"error": "缺少 target 参数"}), 400
     params = {
         "target_pos": target,
-        "max_steps": data.get("max_steps", 200),
+        "max_steps": data.get("max_steps", 1000),
         "pos_threshold": data.get("pos_threshold", 0.03),
     }
     return jsonify(submit_command("move_to", params))

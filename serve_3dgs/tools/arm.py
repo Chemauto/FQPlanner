@@ -25,28 +25,28 @@ def _ensure_ik(env, side="right"):
     start = RIGHT_ARM_START_LINK if side == "right" else LEFT_ARM_START_LINK
     ee = RIGHT_EE_LINK if side == "right" else LEFT_EE_LINK
     _ik_chain_r = IkChain(env.model, end_link=ee, start_link=start)
-    _ik_solver = DlsSolver(max_iter=50, step_size=0.5, tolerance=0.01, damping=0.01)
-    print(f"[arm] IK chain ready: start={start}, ee={ee}, dof={_ik_chain_r.num_dof_pos}")
+    _ik_solver = DlsSolver(max_iter=200, step_size=0.2, tolerance=0.005, damping=1e-4)
+    print(f"[arm] IK chain: start={start}, ee={ee}, dof={_ik_chain_r.num_dof_pos}, "
+          f"links={_ik_chain_r.num_links}", flush=True)
+    for i in range(_ik_chain_r.num_links):
+        link = _ik_chain_r.get_link(i)
+        print(f"  link[{i}] {link.name}", flush=True)
 
 
-def _find_actuator_idx(env, name: str) -> int:
+def _find_actuator(env, name: str):
     for i in range(env.model.num_actuators):
         act = env.model.get_actuator(i)
         if act.name == name:
-            return i
-    return -1
+            return act
+    return None
 
 
 def _set_arm_ctrl(env, qpos, side="right"):
     actuators = RIGHT_ARM_ACTUATORS if side == "right" else LEFT_ARM_ACTUATORS
-    ctrl = env.data.actuator_ctrls
     for i, name in enumerate(actuators):
-        idx = _find_actuator_idx(env, name)
-        if idx >= 0:
-            if ctrl.ndim == 2:
-                ctrl[0, idx] = float(qpos[i])
-            else:
-                ctrl[idx] = float(qpos[i])
+        act = _find_actuator(env, name)
+        if act is not None:
+            act.set_ctrl(env.data, float(qpos[i]))
 
 
 def get_arm_info(env, side: str = "right"):
@@ -60,21 +60,17 @@ def get_arm_info(env, side: str = "right"):
         ee_quat = np.array([0, 0, 0, 1.0])
 
     gripper_act = GRIPPER_ACTUATOR_R if side == "right" else GRIPPER_ACTUATOR_L
-    gripper_idx = _find_actuator_idx(env, gripper_act)
+    gripper = _find_actuator(env, gripper_act)
     gripper_pos = [0.0]
-    if gripper_idx >= 0:
-        ctrl = env.data.actuator_ctrls
-        if ctrl.ndim == 2:
-            gripper_pos = [float(ctrl[0, gripper_idx])]
-        else:
-            gripper_pos = [float(ctrl[gripper_idx])]
+    if gripper is not None:
+        gripper_pos = [float(gripper.get_ctrl(env.data))]
 
     arm_acts = RIGHT_ARM_ACTUATORS if side == "right" else LEFT_ARM_ACTUATORS
     arm_qpos = []
     for act_name in arm_acts:
-        idx = _find_actuator_idx(env, act_name)
-        if idx >= 0:
-            arm_qpos.append(float(env.data.actuator_ctrls[idx]) if env.data.actuator_ctrls.ndim == 1 else float(env.data.actuator_ctrls[0, idx]))
+        act = _find_actuator(env, act_name)
+        if act is not None:
+            arm_qpos.append(float(act.get_ctrl(env.data)))
 
     base_pos = np.zeros(3)
     try:
@@ -94,7 +90,7 @@ def get_arm_info(env, side: str = "right"):
     }
 
 
-def move_arm(env, target_pos, max_steps=200, pos_threshold=0.03, gain=1.5):
+def move_arm(env, target_pos, max_steps=1000, pos_threshold=0.03, gain=1.5):
     _ensure_ik(env)
 
     target_pos = np.asarray(target_pos, dtype=np.float32).reshape(3)
@@ -114,11 +110,17 @@ def move_arm(env, target_pos, max_steps=200, pos_threshold=0.03, gain=1.5):
         residual = float(solved[1])
         qpos = solved[2:]
 
+        if step == 0 or step % 20 == 0:
+            print(f"[move_arm] step={step} iters={iters} residual={residual:.4f} "
+                  f"qpos={qpos[:5].round(4)} ee={ee_pos.round(3)} target={target_pos.round(3)}",
+                  flush=True)
+
         _set_arm_ctrl(env, qpos)
         env.step()
 
     env.forward_kinematic()
     ee_pos = np.asarray(env.get_body_xpos(RIGHT_EE_LINK), dtype=np.float32).reshape(3)
+    print(f"[move_arm] done ee={ee_pos.round(3)} target={target_pos.round(3)}", flush=True)
     return bool(np.linalg.norm(ee_pos - target_pos) < pos_threshold)
 
 
@@ -126,25 +128,17 @@ def open_gripper(env, side: str = "right", steps=10):
     if env.grasped_object:
         env.grasped_object = None
     act_name = GRIPPER_ACTUATOR_R if side == "right" else GRIPPER_ACTUATOR_L
-    idx = _find_actuator_idx(env, act_name)
-    if idx >= 0:
-        ctrl = env.data.actuator_ctrls
-        if ctrl.ndim == 2:
-            ctrl[0, idx] = -1.0
-        else:
-            ctrl[idx] = -1.0
+    act = _find_actuator(env, act_name)
+    if act is not None:
+        act.set_ctrl(env.data, -1.0)
     env.step(steps)
 
 
 def close_gripper(env, side: str = "right", steps=10):
     act_name = GRIPPER_ACTUATOR_R if side == "right" else GRIPPER_ACTUATOR_L
-    idx = _find_actuator_idx(env, act_name)
-    if idx >= 0:
-        ctrl = env.data.actuator_ctrls
-        if ctrl.ndim == 2:
-            ctrl[0, idx] = 1.0
-        else:
-            ctrl[idx] = 1.0
+    act = _find_actuator(env, act_name)
+    if act is not None:
+        act.set_ctrl(env.data, 1.0)
     env.step(steps)
 
 
