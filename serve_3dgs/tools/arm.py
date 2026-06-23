@@ -2,15 +2,31 @@
 
 import numpy as np
 
-
 RIGHT_EE_LINK = "Fixed_Jaw_2"
 LEFT_EE_LINK = "Fixed_Jaw"
 RIGHT_ARM_ACTUATORS = ["Rotation_R", "Pitch_R", "Elbow_R", "Wrist_Pitch_R", "Wrist_Roll_R"]
 LEFT_ARM_ACTUATORS = ["Rotation_L", "Pitch_L", "Elbow_L", "Wrist_Pitch_L", "Wrist_Roll_L"]
+RIGHT_ARM_START_LINK = "Base_2"
+LEFT_ARM_START_LINK = "Base"
 GRIPPER_ACTUATOR_R = "Jaw_R"
 GRIPPER_ACTUATOR_L = "Jaw_L"
 
 _graspable_links = set()
+
+_ik_chain_r = None
+_ik_solver = None
+
+
+def _ensure_ik(env, side="right"):
+    global _ik_chain_r, _ik_solver
+    if _ik_chain_r is not None:
+        return
+    from motrixsim.ik import IkChain, DlsSolver
+    start = RIGHT_ARM_START_LINK if side == "right" else LEFT_ARM_START_LINK
+    ee = RIGHT_EE_LINK if side == "right" else LEFT_EE_LINK
+    _ik_chain_r = IkChain(env.model, end_link=ee, start_link=start)
+    _ik_solver = DlsSolver(max_iter=50, step_size=0.5, tolerance=0.01, damping=0.01)
+    print(f"[arm] IK chain ready: start={start}, ee={ee}, dof={_ik_chain_r.num_dof_pos}")
 
 
 def _find_actuator_idx(env, name: str) -> int:
@@ -19,6 +35,18 @@ def _find_actuator_idx(env, name: str) -> int:
         if act.name == name:
             return i
     return -1
+
+
+def _set_arm_ctrl(env, qpos, side="right"):
+    actuators = RIGHT_ARM_ACTUATORS if side == "right" else LEFT_ARM_ACTUATORS
+    ctrl = env.data.actuator_ctrls
+    for i, name in enumerate(actuators):
+        idx = _find_actuator_idx(env, name)
+        if idx >= 0:
+            if ctrl.ndim == 2:
+                ctrl[0, idx] = float(qpos[i])
+            else:
+                ctrl[idx] = float(qpos[i])
 
 
 def get_arm_info(env, side: str = "right"):
@@ -67,9 +95,31 @@ def get_arm_info(env, side: str = "right"):
 
 
 def move_arm(env, target_pos, max_steps=200, pos_threshold=0.03, gain=1.5):
-    for _ in range(min(int(max_steps), 20)):
+    _ensure_ik(env)
+
+    target_pos = np.asarray(target_pos, dtype=np.float32).reshape(3)
+    ee_quat = np.asarray(env.get_body_xquat(RIGHT_EE_LINK), dtype=np.float32).reshape(4)
+
+    for step in range(int(max_steps)):
+        env.forward_kinematic()
+        ee_pos = np.asarray(env.get_body_xpos(RIGHT_EE_LINK), dtype=np.float32).reshape(3)
+
+        if np.linalg.norm(ee_pos - target_pos) < pos_threshold:
+            return True
+
+        target_pose = np.concatenate([target_pos, ee_quat]).astype(np.float32)
+        result = _ik_solver.solve(_ik_chain_r, env.data, target_pose)
+        solved = result[0]
+        iters = int(solved[0])
+        residual = float(solved[1])
+        qpos = solved[2:]
+
+        _set_arm_ctrl(env, qpos)
         env.step()
-    return True
+
+    env.forward_kinematic()
+    ee_pos = np.asarray(env.get_body_xpos(RIGHT_EE_LINK), dtype=np.float32).reshape(3)
+    return bool(np.linalg.norm(ee_pos - target_pos) < pos_threshold)
 
 
 def open_gripper(env, side: str = "right", steps=10):
