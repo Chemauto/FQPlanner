@@ -34,8 +34,10 @@ def main():
                         default=os.environ.get("SERVE_3DGS_VIEWER_CAMERAS", ""))
     parser.add_argument("--no-gs-screens", action="store_true")
     parser.add_argument("--physics_steps_per_loop", type=int, default=10)
-    parser.add_argument("--scene", type=str, default="xlerobot_nav",
-                        help="Scene: xlerobot_nav (default), xlerobot, path to MJCF XML, or path to navigation JSON")
+    parser.add_argument("--scene", type=str, default="",
+                        help="Scene override: robot_nav (default), robot_only, path to MJCF/XML, or path to navigation JSON")
+    parser.add_argument("--robot", type=str, default="",
+                        help="Robot name override (default: read from assets/config.yaml)")
     args = parser.parse_args()
 
     from backend.gs_config import GSConfig
@@ -54,6 +56,7 @@ def main():
         scene=args.scene,
         robot_gs_dir=args.robot_gs_dir or None,
         scene_config=args.scene_config or None,
+        robot_name=args.robot,
     )
     viewer_camera_names = (
         tuple(name.strip() for name in args.viewer_cameras.split(",") if name.strip())

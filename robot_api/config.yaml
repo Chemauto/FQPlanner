@@ -1,5 +1,8 @@
 active_backend: "mujoco_3dgs"
 
+# Robot selection: "xlerobot" (default) or "BlueThink"
+robot: "xlerobot"
+
 backends:
   mujoco:
     enabled: 1

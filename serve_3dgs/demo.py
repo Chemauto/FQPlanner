@@ -31,7 +31,7 @@ def find_camera_id(model, camera_name: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Keyboard control for XLeRobot")
-    parser.add_argument("--scene", type=str, default="xlerobot_nav")
+    parser.add_argument("--scene", type=str, default="")
     parser.add_argument("--scene_config", type=str, default="")
     parser.add_argument("--gs_assets", type=str, default="")
     parser.add_argument("--robot_gs_dir", type=str, default="")
@@ -41,6 +41,8 @@ def main():
     parser.add_argument("--viewer_gs_fps", type=float, default=5.0)
     parser.add_argument("--viewer_cameras", type=str,
                         default="follower,head_cam,right_arm_cam,left_arm_cam")
+    parser.add_argument("--robot", type=str, default="",
+                        help="Robot name override (default: read from assets/config.yaml)")
     args = parser.parse_args()
 
     gs_cfg = GSConfig(
@@ -48,6 +50,7 @@ def main():
         scene=args.scene,
         robot_gs_dir=args.robot_gs_dir or None,
         scene_config=args.scene_config or None,
+        robot_name=args.robot,
     )
     print(f"Loading scene: {gs_cfg.scene_xml}")
     env = SimEnv(gs_cfg.scene_xml, gs_cfg)

@@ -79,7 +79,14 @@ class CollectController:
 
 
 def main():
-    gs_cfg = GSConfig(scene="xlerobot_nav")
+    import argparse
+    parser = argparse.ArgumentParser(description="Collect data for XLeRobot/BlueThink")
+    parser.add_argument("--robot", type=str, default="xlerobot",
+                        help="Robot name: xlerobot (default), BlueThink")
+    parser.add_argument("--scene", type=str, default="xlerobot_nav")
+    args = parser.parse_args()
+
+    gs_cfg = GSConfig(scene=args.scene, robot_name=args.robot)
     env = SimEnv(gs_cfg.scene_xml, gs_cfg, enable_renderers=True)
     print(f"Model: {env.model.num_links} links")
 

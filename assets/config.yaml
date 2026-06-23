@@ -1,0 +1,15 @@
+# FQPlanner 全局配置
+# 切换机器人只需修改 robot 字段
+
+# 机器人选择: "xlerobot" 或 "BlueThink"
+robot: "BlueThink"
+
+# 场景选择: "robot_nav"(导航场景), "robot_only"(纯机器人), 或自定义路径
+scene: "robot_nav"
+
+# 渲染相机 (用于3DGS viewer screens)
+viewer_cameras:
+  # - overhead_cam
+  - head_cam
+  - right_arm_cam
+  - left_arm_cam

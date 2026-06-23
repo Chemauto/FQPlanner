@@ -31,30 +31,44 @@ import yaml
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-XLEROBOT_DIR = os.path.join(ROOT_DIR, "assets", "xlerobot")
 SCENE_ASSET_DIR = os.path.join(ROOT_DIR, "assets", "scene")
-XLEROBOT_XML = os.path.join(XLEROBOT_DIR, "xlerobot.xml")
 GENERATED_SCENE = os.path.join(SCENE_ASSET_DIR, "scene.xml")
 GENERATED_META = os.path.join(SCENE_ASSET_DIR, "scene_meta.json")
+ASSETS_CONFIG = os.path.join(ROOT_DIR, "assets", "config.yaml")
+
+
+def _load_assets_config():
+    if os.path.isfile(ASSETS_CONFIG):
+        with open(ASSETS_CONFIG, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
 
 
 # ============================================================
 # 主入口
 # ============================================================
 
-def build_scene_xml(scene_dir, seed=42):
+def build_scene_xml(scene_dir, seed=42, robot_dir=None):
     """
     场景生成主入口。
 
-    流程：
-      1. 加载配置文件
-      2. 用 RoboCasa 创建厨房 Arena（墙壁、地板、固定家具）
-      3. 按配置放置物体（pot/cup/apple 等）
-      4. 导出厨房 MJCF，合并到 XLeRobot XML
-      5. 后处理：相机、初始位姿、碰撞修复、隐藏非视觉几何
-      6. 写出 scene.xml 和 scene_meta.json
+    Args:
+        scene_dir: 场景配置目录路径
+        seed: 随机种子
+        robot_dir: 机器人 asset 目录路径。默认从 assets/config.yaml 读取 robot 字段。
     """
     os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
+    # resolve robot xml path
+    if robot_dir is None:
+        _global = _load_assets_config()
+        robot_name = _global.get("robot", "xlerobot")
+        robot_dir = os.path.join(ROOT_DIR, "assets", robot_name)
+    elif not os.path.isabs(robot_dir):
+        robot_dir = os.path.join(ROOT_DIR, robot_dir)
+    robot_xml = os.path.join(robot_dir, os.path.basename(robot_dir).lower() + ".xml")
+    if not os.path.isfile(robot_xml):
+        robot_xml = os.path.join(robot_dir, os.path.basename(robot_dir) + ".xml")
 
     from robocasa.models.objects.kitchen_object_utils import sample_kitchen_object
     from robocasa.models.scenes import KitchenArena
@@ -142,13 +156,13 @@ def build_scene_xml(scene_dir, seed=42):
         enable_sleeping_islands=False,
     )
     robocasa_root = ET.fromstring(task.get_xml())
-    robot_root = ET.parse(XLEROBOT_XML).getroot()
+    robot_root = ET.parse(robot_xml).getroot()
 
     # 将 RoboCasa 厨房的 asset/worldbody/actuator 等合并到机器人 XML
     _merge_robocasa_into_robot(robot_root, robocasa_root)
 
     # ---- 5. 后处理 ----
-    _set_generated_compiler_paths(robot_root)   # 设置生成场景的 meshdir
+    _set_generated_compiler_paths(robot_root, robot_dir)   # 设置生成场景的 meshdir
     _add_cameras(robot_root)                    # 添加渲染相机
     _set_statistic(robot_root)                  # 设置 MuJoCo viewer 中心点
     _set_robot_initial_pose(robot_root)         # 设置机器人初始位姿
@@ -223,13 +237,15 @@ def _merge_robocasa_into_robot(robot_root, robocasa_root):
 # 后处理：编译器路径 / 相机 / 统计 / 初始位姿
 # ============================================================
 
-def _set_generated_compiler_paths(root):
-    """设置生成场景的 meshdir 为 ../xlerobot/，使其能找到机器人 mesh 文件。"""
+def _set_generated_compiler_paths(root, robot_dir):
+    """设置生成场景的 meshdir，使其能找到机器人 mesh 文件。"""
     compiler = root.find("compiler")
     if compiler is None:
         compiler = ET.SubElement(root, "compiler")
     compiler.set("angle", "radian")
-    compiler.set("meshdir", "../xlerobot/")
+    # meshdir relative to scene.xml (assets/scene/) pointing to robot dir (assets/<robot>/)
+    robot_dir_name = os.path.basename(robot_dir.rstrip("/"))
+    compiler.set("meshdir", f"../{robot_dir_name}/")
 
 
 def _add_cameras(root):

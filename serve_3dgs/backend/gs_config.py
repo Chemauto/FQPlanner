@@ -1,6 +1,7 @@
 """3DGS asset path configuration."""
 
 import json
+import yaml
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -9,6 +10,18 @@ NAV_ASSET_DIR = FQPLANNER_ROOT / "assets" / "scene_3dgs"
 DEFAULT_NAV_CONFIG = NAV_ASSET_DIR / "config.json"
 DEFAULT_DIRECT_VIEWER_CAMERAS = ("overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam")
 DEFAULT_NAV_VIEWER_CAMERAS = ("follower", "head_cam", "right_arm_cam", "left_arm_cam")
+ASSETS_CONFIG_PATH = FQPLANNER_ROOT / "assets" / "config.yaml"
+
+
+def load_assets_config() -> dict:
+    """Load assets/config.yaml, return empty dict if not found."""
+    if ASSETS_CONFIG_PATH.is_file():
+        with open(ASSETS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+ROBOT_ASSETS_DIR = FQPLANNER_ROOT / "assets"
 
 
 class GSConfig:
@@ -17,29 +30,53 @@ class GSConfig:
     def __init__(
         self,
         assets_dir: Optional[str] = None,
-        scene: str = "xlerobot_nav",
+        scene: str = "",
         robot_gs_dir: Optional[str] = None,
         scene_config: Optional[str] = None,
+        robot_name: str = "",
     ):
+        # load global assets/config.yaml as defaults
+        _global = load_assets_config()
+
+        self.robot_name = robot_name or _global.get("robot", "xlerobot")
+        scene = scene or _global.get("scene", "robot_nav")
         self.scene = scene
         self._assets_dir = Path(assets_dir) if assets_dir else None
         self._robot_gs_dir = Path(robot_gs_dir) if robot_gs_dir else None
         self.scene_kind = "direct"
         self.robot_xml: Optional[str] = None
-        self.base_link_name = "chassis"
         self.follower_camera_pos: Optional[Tuple[float, float, float]] = None
-        self.default_viewer_cameras = DEFAULT_DIRECT_VIEWER_CAMERAS
         self.scene_objects: Dict[str, str] = {}
         self.scene_fixtures: Dict[str, dict] = {}
         self.composite_mesh_objects: list = []
 
-        if scene == "xlerobot_nav" or (scene and scene.endswith(".json")):
+        # resolve robot xml path and load robot-specific config
+        self._robot_dir = ROBOT_ASSETS_DIR / self.robot_name
+        self._robot_config: dict = {}
+        if self._robot_dir.is_dir():
+            robot_xml_path = self._robot_dir / f"{self.robot_name.lower()}.xml"
+            if not robot_xml_path.exists():
+                robot_xml_path = self._robot_dir / f"{self.robot_name}.xml"
+            self.robot_xml = robot_xml_path.as_posix() if robot_xml_path.exists() else None
+            robot_cfg_path = self._robot_dir / "config.yaml"
+            if robot_cfg_path.is_file():
+                with open(robot_cfg_path, "r", encoding="utf-8") as f:
+                    self._robot_config = yaml.safe_load(f) or {}
+
+        self.base_link_name = self._robot_config.get("base_link", "Base_Link")
+        self._mobile_base = self._robot_config.get("mobile_base", False)
+        _viewer_cameras = _global.get("viewer_cameras")
+        self.default_viewer_cameras = (
+            tuple(_viewer_cameras) if _viewer_cameras else DEFAULT_DIRECT_VIEWER_CAMERAS
+        )
+
+        if scene == "robot_nav" or (scene and scene.endswith(".json")):
             config_path = Path(scene_config or scene)
-            if str(config_path) == "xlerobot_nav":
+            if str(config_path) == "robot_nav":
                 config_path = DEFAULT_NAV_CONFIG
             self._load_navigation_config(config_path)
-        elif scene == "xlerobot":
-            self.mjcf_path = str(FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml")
+        elif scene == "robot_only":
+            self.mjcf_path = self.robot_xml or str(FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml")
             self._background_ply = None
         else:
             self.mjcf_path = scene
@@ -63,10 +100,16 @@ class GSConfig:
         self.scene_kind = "navigation"
         config_dir = config_path.parent
         self.mjcf_path = self._resolve_navigation_path(scene_path, config_dir).as_posix()
-        self.robot_xml = (FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml").as_posix()
-        self.base_link_name = "chassis"
-        self.follower_camera_pos = (-2.0, 0.0, 1.0)
-        self.default_viewer_cameras = DEFAULT_NAV_VIEWER_CAMERAS
+        self.robot_xml = (self.robot_xml
+                          or (FQPLANNER_ROOT / "assets" / "xlerobot" / "xlerobot.xml").as_posix())
+        # follower camera only for mobile base robots
+        if self._mobile_base:
+            self.follower_camera_pos = (-2.0, 0.0, 1.0)
+        robot_cameras = self._robot_config.get("cameras")
+        if robot_cameras:
+            self.default_viewer_cameras = tuple(robot_cameras)
+        elif self._mobile_base:
+            self.default_viewer_cameras = DEFAULT_NAV_VIEWER_CAMERAS
 
         scene_gaussians = config.get("scene_gaussians", {}) or {}
         scene_ply = scene_gaussians.get("scene")
