@@ -32,3 +32,8 @@ pyserial
 # 电机驱动依赖 (来自 motors/ 模块)
 deepdiff
 tqdm
+
+# ACT training dependencies
+einops>=0.8.0
+h5py>=3.10.0
+opencv-python
