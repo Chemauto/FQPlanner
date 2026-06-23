@@ -1,0 +1,107 @@
+<mujoco model="towel_softcloth_drop_test">
+  <compiler angle="degree" meshdir="." autolimits="true" />
+  <option timestep="0.001" gravity="0 0 -9.81" integrator="implicit" iterations="100" tolerance="1e-10" />
+  <extension>
+    <plugin plugin="mujoco.elasticity.shell" />
+  </extension>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.18 0.18 0.18" rgb2="0.28 0.28 0.28" width="512" height="512" />
+    <texture name="towel_tex" type="2d" file="visual/texture_pbr_20250901_roughness.png" />
+    <material name="floor_mat" texture="grid" texrepeat="4 4" reflectance="0.15" />
+    <material name="towel_mat" texture="towel_tex" texrepeat="1 1" rgba="0.72 0.72 0.68 1" roughness="0.75" />
+    <material name="towel_ref_mat" rgba="0.78 0.78 0.74 0.38" />
+    <material name="clamp_mat" rgba="0.16 0.18 0.20 1" />
+    <material name="ball_mat" rgba="0.95 0.18 0.12 1" />
+    <material name="bag_mat" rgba="0.85 0.62 0.36 1" />
+    <mesh name="towel_full_visual" file="visual/0a6bf3c2d16eaf94a957350e746d954a.obj" scale="0.35 0.35 0.35" />
+    <mesh name="bag_visual_mesh" file="bag_convex/visual/5778521f0eabef128c97d8ba866f96c7.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_00" file="bag_convex/collision_parts/bag_part_00.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_01" file="bag_convex/collision_parts/bag_part_01.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_02" file="bag_convex/collision_parts/bag_part_02.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_03" file="bag_convex/collision_parts/bag_part_03.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_04" file="bag_convex/collision_parts/bag_part_04.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_05" file="bag_convex/collision_parts/bag_part_05.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_06" file="bag_convex/collision_parts/bag_part_06.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_07" file="bag_convex/collision_parts/bag_part_07.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_08" file="bag_convex/collision_parts/bag_part_08.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_09" file="bag_convex/collision_parts/bag_part_09.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_10" file="bag_convex/collision_parts/bag_part_10.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_11" file="bag_convex/collision_parts/bag_part_11.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_12" file="bag_convex/collision_parts/bag_part_12.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_13" file="bag_convex/collision_parts/bag_part_13.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_14" file="bag_convex/collision_parts/bag_part_14.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_15" file="bag_convex/collision_parts/bag_part_15.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_16" file="bag_convex/collision_parts/bag_part_16.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_17" file="bag_convex/collision_parts/bag_part_17.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_18" file="bag_convex/collision_parts/bag_part_18.obj" scale="0.5 0.5 0.5" />
+    <mesh name="bag_part_19" file="bag_convex/collision_parts/bag_part_19.obj" scale="0.5 0.5 0.5" />
+  </asset>
+
+  <worldbody>
+    <light name="key" pos="0 -3 4" dir="0 1 -1" diffuse="0.9 0.9 0.9" />
+    <camera name="overview" pos="0.35 -2.3 1.15" xyaxes="1 0 0 0 0.45 0.89" />
+    <geom name="floor" type="plane" size="2.5 2.5 0.05" material="floor_mat" friction="1.0 0.05 0.01" />
+
+    <!-- Actual soft towel cloth. Gravity and contacts are enabled; no edge is pinned. -->
+    <flexcomp name="towel" type="grid" dim="2"
+              count="10 7 1"
+              spacing="0.033333 0.025000 0.020"
+              pos="0 0 0.220000"
+              mass="0.120000"
+              radius="0.003000"
+              material="towel_mat"
+              flatskin="false"
+              rgba="0.72 0.72 0.68 1">
+      <edge equality="true" solref="0.006 1" solimp="0.95 0.995 0.0005" />
+      <plugin plugin="mujoco.elasticity.shell">
+        <config key="young" value="50000" />
+        <config key="poisson" value="0.30" />
+        <config key="thickness" value="0.01" />
+        <config key="damping" value="0.4" />
+      </plugin>
+    </flexcomp>
+
+    <!-- Hunyuan3D visual reference, not used for collision. -->
+    <body name="reference_full_towel_visual" pos="0 0.50 0.09" euler="90 0 0">
+      <geom name="reference_full_towel_visual_geom" type="mesh" mesh="towel_full_visual" material="towel_ref_mat" contype="0" conaffinity="0" group="2" />
+    </body>
+
+    <body name="towel_drop_ball" pos="0.05 0 0.420000">
+      <freejoint name="towel_drop_ball_freejoint" />
+      <geom name="towel_drop_ball_geom" type="sphere" size="0.030" mass="0.010" material="ball_mat" friction="0.7 0.02 0.01" solref="0.02 1" solimp="0.8 0.95 0.001" />
+    </body>
+
+    <!-- Convex-decomposed bag collision test, copied from bag_convex_demo. -->
+    <body name="bag" pos="0.700000 0 0.005" euler="90 0 0">
+      <freejoint name="bag_freejoint" />
+      <inertial pos="0 0 0.08" mass="0.15" diaginertia="0.01 0.01 0.01" />
+      <geom name="bag_visual" type="mesh" mesh="bag_visual_mesh" material="bag_mat" contype="0" conaffinity="0" group="2" />
+      <geom name="bag_part_00_collision" type="mesh" mesh="bag_part_00" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_01_collision" type="mesh" mesh="bag_part_01" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_02_collision" type="mesh" mesh="bag_part_02" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_03_collision" type="mesh" mesh="bag_part_03" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_04_collision" type="mesh" mesh="bag_part_04" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_05_collision" type="mesh" mesh="bag_part_05" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_06_collision" type="mesh" mesh="bag_part_06" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_07_collision" type="mesh" mesh="bag_part_07" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_08_collision" type="mesh" mesh="bag_part_08" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_09_collision" type="mesh" mesh="bag_part_09" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_10_collision" type="mesh" mesh="bag_part_10" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_11_collision" type="mesh" mesh="bag_part_11" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_12_collision" type="mesh" mesh="bag_part_12" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_13_collision" type="mesh" mesh="bag_part_13" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_14_collision" type="mesh" mesh="bag_part_14" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_15_collision" type="mesh" mesh="bag_part_15" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_16_collision" type="mesh" mesh="bag_part_16" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_17_collision" type="mesh" mesh="bag_part_17" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_18_collision" type="mesh" mesh="bag_part_18" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+      <geom name="bag_part_19_collision" type="mesh" mesh="bag_part_19" rgba="0.1 0.8 0.1 0.22" contype="1" conaffinity="1" friction="0.8 0.05 0.01" />
+    </body>
+
+    <body name="bag_drop_ball" pos="0.700000 0 0.680000">
+      <freejoint name="bag_drop_ball_freejoint" />
+      <geom name="bag_drop_ball_geom" type="sphere" size="0.055" mass="0.08" material="ball_mat" contype="1" conaffinity="1" friction="0.7 0.02 0.01" />
+    </body>
+  </worldbody>
+</mujoco>
