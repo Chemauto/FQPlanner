@@ -219,20 +219,20 @@
   </contact>
 
   <actuator>
-    <general class="bluethink" name="left_actuator1" joint="Left_Shoulder_Pitch_Joint" gainprm="4000" biasprm="0 -4000 -400" forcerange="-150 150"/>
-    <general class="bluethink" name="left_actuator2" joint="Left_Shoulder_Roll_Joint" gainprm="4000" biasprm="0 -4000 -400" forcerange="-150 150"/>
-    <general class="bluethink" name="left_actuator3" joint="Left_Shoulder_Yaw_Joint" gainprm="3000" biasprm="0 -3000 -300" forcerange="-100 100"/>
-    <general class="bluethink" name="left_actuator4" joint="Left_Elbow_Pitch_Joint" gainprm="2500" biasprm="0 -2500 -250" forcerange="-80 80"/>
-    <general class="bluethink" name="left_actuator5" joint="Left_Wrist_Yaw_Joint"   gainprm="1800" biasprm="0 -1800 -180" forcerange="-25 25"/>
-    <general class="bluethink" name="left_actuator6" joint="Left_Wrist_Pitch_Joint" gainprm="1600" biasprm="0 -1600 -160" forcerange="-25 25"/>
-    <general class="bluethink" name="left_actuator7" joint="Left_Wrist_Roll_Joint"  gainprm="1400" biasprm="0 -1400 -140" forcerange="-25 25"/>
+    <position name="left_actuator1" joint="Left_Shoulder_Pitch_Joint" kp="4000" kv="200" forcerange="-1500 1500"/>
+    <position name="left_actuator2" joint="Left_Shoulder_Roll_Joint" kp="4000" kv="200" forcerange="-1500 1500"/>
+    <position name="left_actuator3" joint="Left_Shoulder_Yaw_Joint" kp="3000" kv="150" forcerange="-1000 1000"/>
+    <position name="left_actuator4" joint="Left_Elbow_Pitch_Joint" kp="2500" kv="125" forcerange="-800 800"/>
+    <position name="left_actuator5" joint="Left_Wrist_Yaw_Joint"   kp="1800" kv="90" forcerange="-250 250"/>
+    <position name="left_actuator6" joint="Left_Wrist_Pitch_Joint" kp="1600" kv="80" forcerange="-250 250"/>
+    <position name="left_actuator7" joint="Left_Wrist_Roll_Joint"  kp="1400" kv="70" forcerange="-250 250"/>
 
-    <general class="bluethink" name="right_actuator1" joint="Right_Shoulder_Pitch_Joint" gainprm="4000" biasprm="0 -4000 -400" forcerange="-150 150"/>
-    <general class="bluethink" name="right_actuator2" joint="Right_Shoulder_Roll_Joint" gainprm="4000" biasprm="0 -4000 -400" forcerange="-150 150"/>
-    <general class="bluethink" name="right_actuator3" joint="Right_Shoulder_Yaw_Joint" gainprm="3000" biasprm="0 -3000 -300" forcerange="-100 100"/>
-    <general class="bluethink" name="right_actuator4" joint="Right_Elbow_Pitch_Joint" gainprm="2500" biasprm="0 -2500 -250" forcerange="-80 80"/>
-    <general class="bluethink" name="right_actuator5" joint="Right_Wrist_Yaw_Joint"   gainprm="1800" biasprm="0 -1800 -180" forcerange="-25 25"/>
-    <general class="bluethink" name="right_actuator6" joint="Right_Wrist_Pitch_Joint" gainprm="1600" biasprm="0 -1600 -160" forcerange="-25 25"/>
-    <general class="bluethink" name="right_actuator7" joint="Right_Wrist_Roll_Joint"  gainprm="1400" biasprm="0 -1400 -140" forcerange="-25 25"/>
+    <position name="right_actuator1" joint="Right_Shoulder_Pitch_Joint" kp="4000" kv="200" forcerange="-1500 1500"/>
+    <position name="right_actuator2" joint="Right_Shoulder_Roll_Joint" kp="4000" kv="200" forcerange="-1500 1500"/>
+    <position name="right_actuator3" joint="Right_Shoulder_Yaw_Joint" kp="3000" kv="150" forcerange="-1000 1000"/>
+    <position name="right_actuator4" joint="Right_Elbow_Pitch_Joint" kp="2500" kv="125" forcerange="-800 800"/>
+    <position name="right_actuator5" joint="Right_Wrist_Yaw_Joint"   kp="1800" kv="90" forcerange="-250 250"/>
+    <position name="right_actuator6" joint="Right_Wrist_Pitch_Joint" kp="1600" kv="80" forcerange="-250 250"/>
+    <position name="right_actuator7" joint="Right_Wrist_Roll_Joint"  kp="1400" kv="70" forcerange="-250 250"/>
   </actuator>
 </mujoco>
