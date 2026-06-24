@@ -175,6 +175,7 @@ cython_debug/
 
 # 3DGS large assets (download from HuggingFace: https://huggingface.co/ChemAuto/gs_playground)
 *.ply
+*.obj
 
 # vscode
 .vscode/

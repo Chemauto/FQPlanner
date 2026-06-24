@@ -6,8 +6,8 @@ scene:
 
 # 场景 body 变换 (来自 scene.xml 中 mesh body 的 pos 和 euler)
 body_transform:
-  pos: [0.0, 0.0, 1.4]
-  euler_deg: [-179.3572, -57.1439, 178.8196]
+  pos: [-0.62, 1.06, 4.00]
+  euler_deg: [82.89, -1.00, 0.89]
 
 # 地图生成参数
 map:
