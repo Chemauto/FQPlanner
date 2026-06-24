@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Sequence
 
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 
 DEFAULT_VIEWER_CAMERA_NAMES = ("overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam")
@@ -109,6 +110,24 @@ def create_viewer_screen_images(
     return images
 
 
+def _overlay_camera_name(frame: np.ndarray, name: str) -> np.ndarray:
+    """Draw camera name label at top-left corner of the frame."""
+    img = Image.fromarray(frame)
+    draw = ImageDraw.Draw(img)
+    font_size = max(14, int(min(img.size) / 20))
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+    except (OSError, IOError):
+        font = ImageFont.load_default()
+    text = name
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad = 4
+    draw.rectangle([(pad, pad), (pad + tw + pad * 2, pad + th + pad * 2)], fill=(0, 0, 0, 180))
+    draw.text((pad * 2, pad + 2), text, fill=(0, 255, 0), font=font)
+    return np.array(img)
+
+
 def update_viewer_screen_images(
     env,
     bindings: Sequence[ViewerScreenBinding],
@@ -128,6 +147,7 @@ def update_viewer_screen_images(
             height=int(height),
             cache_background=False,
         )
+        frame = _overlay_camera_name(frame, binding.camera_name)
         image.pixels = np.ascontiguousarray(frame)
         updated += 1
     return updated

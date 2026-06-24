@@ -109,7 +109,7 @@
                     <joint name="Left_Wrist_Roll_Joint" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-36 36" damping="3.5" armature="0.06"/>
                     <geom type="mesh" rgba="0.890196 0.890196 0.913725 1" mesh="Left_Wrist_Roll_Link" class="visual"/>
                     <geom type="mesh" mesh="Left_Wrist_Roll_Link_c" class="collision"/>
-                    <body name="Left_bind" pos="-0.09 -0.045 -0.03">
+                    <body name="Left_bind" pos="0.045 0.045 -0.056" quat="0 0 0 1">
                       <inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>
                       <geom type="mesh" mesh="bind" rgba="0.4 0.4 0.4 1" euler="3.14 0 -1.57"/>
                       <body name="Left_D435i" pos="0.01 0.046 -0.036">
@@ -171,13 +171,13 @@
                     <joint name="Right_Wrist_Roll_Joint" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-36 36" damping="3.5" armature="0.06"/>
                     <geom type="mesh" rgba="0.890196 0.890196 0.913725 1" mesh="Right_Wrist_Roll_Link" class="visual"/>
                     <geom type="mesh" mesh="Right_Wrist_Roll_Link_c" class="collision"/>
-                    <body name="Right_bind" pos="-0.09 -0.045 -0.03">
+                    <body name="Right_bind" pos="0.045 0.045 -0.056" quat="0 0 0 1">
                       <inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>
                       <geom type="mesh" mesh="bind" rgba="0.4 0.4 0.4 1" euler="3.14 0 -1.57"/>
                       <body name="Right_D435i" pos="0.01 0.046 -0.036">
                         <inertial pos="0 0 0" mass="0.072" diaginertia="1e-5 1e-5 1e-5"/>
                         <geom type="mesh" mesh="D435i_Solid" rgba="0.2 0.2 0.2 1" euler="3.14 0 1.57"/>
-                        <camera name="right_ee_cam" pos="0 0 0" xyaxes="1 0 0 0 -1 0" fovy="60"/>
+                        <camera name="right_ee_cam" pos="0 0 0" xyaxes="1 0 0 0 1 0" fovy="60"/>
                       </body>
                     </body>
                   </body>
@@ -188,7 +188,7 @@
         </body>
       </body>
 
-      <body name="D435i_Cam" pos="-0.09 0 1.09">
+      <body name="D435i_Cam" pos="0.033 0 1.09">
         <geom type="mesh" mesh="D435i_Solid" rgba="0.2 0.2 0.2 1" euler="0 -1.57 1.57"/>
         <camera name="base_cam" pos="0 0 0" xyaxes="0 -1 0 0 0 1" fovy="60"/>
       </body>

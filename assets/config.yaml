@@ -5,7 +5,7 @@
 robot: "BlueThink"
 
 # 场景选择: "robot_nav"(导航场景), "robot_only"(纯机器人), 或自定义路径
-scene: "robot_only"
+scene: "robot_nav"
 
 # 渲染相机 (用于3DGS viewer screens)
 viewer_cameras:
