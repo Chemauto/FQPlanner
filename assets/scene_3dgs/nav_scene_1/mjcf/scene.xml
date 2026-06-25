@@ -3,14 +3,81 @@
   <compiler meshdir="../meshes" texturedir="../meshes/" />
   <asset>
     <mesh name="mesh" file="object/mesh/mesh.obj" />
-    <material name="hunyuan_bottle_mat" rgba="0.20 0.55 0.95 1" />
-    <material name="hunyuan_maojin_mat" rgba="0.90 0.25 0.25 1" />
-    <material name="hunyuan_lajitong_mat" rgba="0.40 0.40 0.40 1" />
-    <material name="hunyuan_bianzhidai_mat" rgba="0.85 0.55 0.25 1" />
-    <mesh name="hunyuan_bottle" file="hunyuan3d/bottle/bottle.glb" scale="0.333333 0.333333 0.333333" />
-    <mesh name="hunyuan_maojin" file="hunyuan3d/maojin/maojin.glb" scale="0.333333 0.333333 0.333333" />
-    <mesh name="hunyuan_lajitong" file="hunyuan3d/lajitong/lajitong.glb" scale="0.333333 0.333333 0.333333" />
-    <mesh name="hunyuan_bianzhidai" file="hunyuan3d/bianzhidai/bianzhidai.glb" scale="0.333333 0.333333 0.333333" />
+    <!-- BEGIN OPERATION_OBJECT_ASSETS -->
+    <material name="hunyuan_bottle_mat" rgba="0.20 0.55 0.95 1" roughness="0.80" />
+    <mesh name="hunyuan_bottle" file="hunyuan3d/bottle/bottle.glb" scale="0.188630 0.187920 0.199348" />
+    <material name="hunyuan_lajitong_mat" rgba="0.40 0.40 0.40 1" roughness="0.80" />
+    <mesh name="hunyuan_lajitong" file="hunyuan3d/lajitong/lajitong.glb" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_00" file="hunyuan3d/lajitong/collision_parts/lajitong_part_00.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_01" file="hunyuan3d/lajitong/collision_parts/lajitong_part_01.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_02" file="hunyuan3d/lajitong/collision_parts/lajitong_part_02.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_03" file="hunyuan3d/lajitong/collision_parts/lajitong_part_03.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_04" file="hunyuan3d/lajitong/collision_parts/lajitong_part_04.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_05" file="hunyuan3d/lajitong/collision_parts/lajitong_part_05.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_06" file="hunyuan3d/lajitong/collision_parts/lajitong_part_06.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_07" file="hunyuan3d/lajitong/collision_parts/lajitong_part_07.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_08" file="hunyuan3d/lajitong/collision_parts/lajitong_part_08.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_09" file="hunyuan3d/lajitong/collision_parts/lajitong_part_09.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_10" file="hunyuan3d/lajitong/collision_parts/lajitong_part_10.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_11" file="hunyuan3d/lajitong/collision_parts/lajitong_part_11.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_12" file="hunyuan3d/lajitong/collision_parts/lajitong_part_12.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_13" file="hunyuan3d/lajitong/collision_parts/lajitong_part_13.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_14" file="hunyuan3d/lajitong/collision_parts/lajitong_part_14.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_15" file="hunyuan3d/lajitong/collision_parts/lajitong_part_15.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_16" file="hunyuan3d/lajitong/collision_parts/lajitong_part_16.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_17" file="hunyuan3d/lajitong/collision_parts/lajitong_part_17.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_18" file="hunyuan3d/lajitong/collision_parts/lajitong_part_18.obj" scale="0.260943 0.261363 0.447252" />
+    <mesh name="hunyuan_lajitong_part_19" file="hunyuan3d/lajitong/collision_parts/lajitong_part_19.obj" scale="0.260943 0.261363 0.447252" />
+    <material name="hunyuan_bianzhidai_mat" rgba="0.85 0.55 0.25 1" roughness="0.80" />
+    <mesh name="hunyuan_bianzhidai" file="hunyuan3d/bianzhidai/bianzhidai.glb" scale="0.375604 0.349458 0.352269" />
+    <material name="hunyuan_bag_mat" rgba="0.85 0.62 0.36 1" roughness="0.80" />
+    <mesh name="hunyuan_bag_visual" file="hunyuan3d/bag/visual/5778521f0eabef128c97d8ba866f96c7.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_00" file="hunyuan3d/bag/collision_parts/bag_part_00.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_01" file="hunyuan3d/bag/collision_parts/bag_part_01.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_02" file="hunyuan3d/bag/collision_parts/bag_part_02.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_03" file="hunyuan3d/bag/collision_parts/bag_part_03.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_04" file="hunyuan3d/bag/collision_parts/bag_part_04.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_05" file="hunyuan3d/bag/collision_parts/bag_part_05.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_06" file="hunyuan3d/bag/collision_parts/bag_part_06.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_07" file="hunyuan3d/bag/collision_parts/bag_part_07.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_08" file="hunyuan3d/bag/collision_parts/bag_part_08.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_09" file="hunyuan3d/bag/collision_parts/bag_part_09.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_10" file="hunyuan3d/bag/collision_parts/bag_part_10.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_11" file="hunyuan3d/bag/collision_parts/bag_part_11.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_12" file="hunyuan3d/bag/collision_parts/bag_part_12.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_13" file="hunyuan3d/bag/collision_parts/bag_part_13.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_14" file="hunyuan3d/bag/collision_parts/bag_part_14.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_15" file="hunyuan3d/bag/collision_parts/bag_part_15.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_16" file="hunyuan3d/bag/collision_parts/bag_part_16.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_17" file="hunyuan3d/bag/collision_parts/bag_part_17.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_18" file="hunyuan3d/bag/collision_parts/bag_part_18.obj" scale="0.432732 0.367021 0.388572" />
+    <mesh name="hunyuan_bag_part_19" file="hunyuan3d/bag/collision_parts/bag_part_19.obj" scale="0.432732 0.367021 0.388572" />
+    <texture name="hunyuan_maojin_tex" type="2d" file="../../towel_multibody_demo/visual/texture_pbr_20250901_roughness.png" />
+    <material name="hunyuan_maojin_mat" texture="hunyuan_maojin_tex" texrepeat="1 1" rgba="0.72 0.72 0.68 1" roughness="0.75" />
+    <mesh name="hunyuan_maojin" file="hunyuan3d/maojin/maojin.glb" scale="0.228794 0.240113 0.035578" />
+    <material name="hunyuan_yujin_mat" rgba="0.74 0.78 0.82 1" roughness="0.80" />
+    <mesh name="hunyuan_yujin" file="hunyuan3d/yujin/yujin.glb" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_00" file="hunyuan3d/yujin/collision_parts/yujin_part_00.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_01" file="hunyuan3d/yujin/collision_parts/yujin_part_01.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_02" file="hunyuan3d/yujin/collision_parts/yujin_part_02.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_03" file="hunyuan3d/yujin/collision_parts/yujin_part_03.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_04" file="hunyuan3d/yujin/collision_parts/yujin_part_04.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_05" file="hunyuan3d/yujin/collision_parts/yujin_part_05.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_06" file="hunyuan3d/yujin/collision_parts/yujin_part_06.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_07" file="hunyuan3d/yujin/collision_parts/yujin_part_07.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_08" file="hunyuan3d/yujin/collision_parts/yujin_part_08.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_09" file="hunyuan3d/yujin/collision_parts/yujin_part_09.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_10" file="hunyuan3d/yujin/collision_parts/yujin_part_10.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_11" file="hunyuan3d/yujin/collision_parts/yujin_part_11.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_12" file="hunyuan3d/yujin/collision_parts/yujin_part_12.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_13" file="hunyuan3d/yujin/collision_parts/yujin_part_13.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_14" file="hunyuan3d/yujin/collision_parts/yujin_part_14.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_15" file="hunyuan3d/yujin/collision_parts/yujin_part_15.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_16" file="hunyuan3d/yujin/collision_parts/yujin_part_16.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_17" file="hunyuan3d/yujin/collision_parts/yujin_part_17.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_18" file="hunyuan3d/yujin/collision_parts/yujin_part_18.obj" scale="0.255136 0.242349 0.159593" />
+    <mesh name="hunyuan_yujin_part_19" file="hunyuan3d/yujin/collision_parts/yujin_part_19.obj" scale="0.255136 0.242349 0.159593" />
+    <!-- END OPERATION_OBJECT_ASSETS -->
   </asset>
   <default>
     <default class="obj_visual">
@@ -25,29 +92,100 @@
       <include file="object/sugar_collision.xml" />
     </body>
     <geom name="ground" type="plane" size="50 50 0.1" rgba="0.5 0.5 0.5 1" group="2" contype="1" conaffinity="1"/>
+    <!-- BEGIN OPERATION_OBJECT_BODIES -->
     <body name="hunyuan_bottle_body" pos="0.0 1.2 0.1400000" quat="0 1 0 0">
-      <joint name="hunyuan_bottle_freejoint" type="free" />
-      <inertial pos="-0.000702328 0.001313276 -0.173913410" quat="-0.035219884 0.705949265 0.035419682 0.706498861" mass="0.20" diaginertia="0.000312471 0.002106656 0.002107683" />
-      <geom name="hunyuan_bottle_visual" type="mesh" mesh="hunyuan_bottle" material="hunyuan_bottle_mat" group="2" contype="0" conaffinity="0" />
-      <geom name="hunyuan_bottle_collision" type="mesh" mesh="hunyuan_bottle" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" />
-    </body>
-    <body name="hunyuan_maojin_body" pos="0.0 -1.2 0.2200000" quat="0 1 0 0">
-      <joint name="hunyuan_maojin_freejoint" type="free" />
-      <inertial pos="0.029656368 -0.000526693 -0.037308415" quat="0.999506377 -0.000155548 0.001783047 -0.031365572" mass="0.10" diaginertia="0.000678199 0.000700543 0.001290098" />
-      <geom name="hunyuan_maojin_visual" type="mesh" mesh="hunyuan_maojin" material="hunyuan_maojin_mat" group="2" contype="0" conaffinity="0" />
-      <geom name="hunyuan_maojin_collision" type="mesh" mesh="hunyuan_maojin" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" />
+      <joint name="hunyuan_bottle_body_freejoint" type="free" />
+      <inertial pos="0 0 0" mass="0.200000" diaginertia="0.00099302 0.00099302 0.00014520" />
+      <geom name="hunyuan_bottle_body_visual" type="mesh" mesh="hunyuan_bottle" material="hunyuan_bottle_mat" group="2" contype="0" conaffinity="0" />
+      <geom name="hunyuan_bottle_body_collision" type="mesh" mesh="hunyuan_bottle" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
     </body>
     <body name="hunyuan_lajitong_body" pos="-0.45 1.2 0.258493105" quat="0 1 0 0">
-      <joint name="hunyuan_lajitong_freejoint" type="free" />
-      <inertial pos="0.000081064 0.000711380 -0.132037735" quat="0.999965171 -0.000148167 0.000317584 0.008338718" mass="0.35" diaginertia="0.003508876 0.003517785 0.003843199" />
-      <geom name="hunyuan_lajitong_visual" type="mesh" mesh="hunyuan_lajitong" material="hunyuan_lajitong_mat" group="2" contype="0" conaffinity="0" />
-      <geom name="hunyuan_lajitong_collision" type="mesh" mesh="hunyuan_lajitong" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" />
+      <joint name="hunyuan_lajitong_body_freejoint" type="free" />
+      <inertial pos="0 0 0" mass="0.350000" diaginertia="0.00495833 0.00495833 0.00394333" />
+      <geom name="hunyuan_lajitong_body_visual" type="mesh" mesh="hunyuan_lajitong" material="hunyuan_lajitong_mat" group="2" contype="0" conaffinity="0" />
+      <geom name="hunyuan_lajitong_body_part_00_collision" type="mesh" mesh="hunyuan_lajitong_part_00" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_01_collision" type="mesh" mesh="hunyuan_lajitong_part_01" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_02_collision" type="mesh" mesh="hunyuan_lajitong_part_02" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_03_collision" type="mesh" mesh="hunyuan_lajitong_part_03" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_04_collision" type="mesh" mesh="hunyuan_lajitong_part_04" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_05_collision" type="mesh" mesh="hunyuan_lajitong_part_05" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_06_collision" type="mesh" mesh="hunyuan_lajitong_part_06" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_07_collision" type="mesh" mesh="hunyuan_lajitong_part_07" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_08_collision" type="mesh" mesh="hunyuan_lajitong_part_08" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_09_collision" type="mesh" mesh="hunyuan_lajitong_part_09" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_10_collision" type="mesh" mesh="hunyuan_lajitong_part_10" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_11_collision" type="mesh" mesh="hunyuan_lajitong_part_11" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_12_collision" type="mesh" mesh="hunyuan_lajitong_part_12" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_13_collision" type="mesh" mesh="hunyuan_lajitong_part_13" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_14_collision" type="mesh" mesh="hunyuan_lajitong_part_14" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_15_collision" type="mesh" mesh="hunyuan_lajitong_part_15" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_16_collision" type="mesh" mesh="hunyuan_lajitong_part_16" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_17_collision" type="mesh" mesh="hunyuan_lajitong_part_17" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_18_collision" type="mesh" mesh="hunyuan_lajitong_part_18" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_lajitong_body_part_19_collision" type="mesh" mesh="hunyuan_lajitong_part_19" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
     </body>
     <body name="hunyuan_bianzhidai_body" pos="0.45 -1.2 0.303874049" quat="0 1 0 0">
-      <joint name="hunyuan_bianzhidai_freejoint" type="free" />
-      <inertial pos="0.001176132 -0.002161252 -0.134131335" quat="0.696563907 0.717260756 -0.005762074 -0.017393374" mass="0.15" diaginertia="0.001326188 0.001417323 0.001808860" />
-      <geom name="hunyuan_bianzhidai_visual" type="mesh" mesh="hunyuan_bianzhidai" material="hunyuan_bianzhidai_mat" group="2" contype="0" conaffinity="0" />
-      <geom name="hunyuan_bianzhidai_collision" type="mesh" mesh="hunyuan_bianzhidai" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" />
+      <joint name="hunyuan_bianzhidai_body_freejoint" type="free" />
+      <inertial pos="0 0 0" mass="0.150000" diaginertia="0.00190625 0.00274500 0.00240125" />
+      <geom name="hunyuan_bianzhidai_body_visual" type="mesh" mesh="hunyuan_bianzhidai" material="hunyuan_bianzhidai_mat" group="2" contype="0" conaffinity="0" />
+      <geom name="hunyuan_bianzhidai_body_collision" type="mesh" mesh="hunyuan_bianzhidai" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
     </body>
+    <body name="hunyuan_bag_convex_body" pos="0.72 0.0 0.005" euler="90 0 0">
+      <joint name="hunyuan_bag_convex_body_freejoint" type="free" />
+      <inertial pos="0 0 0" mass="0.250000" diaginertia="0.00353333 0.00603333 0.00416667" />
+      <geom name="hunyuan_bag_convex_body_visual" type="mesh" mesh="hunyuan_bag_visual" material="hunyuan_bag_mat" group="2" contype="0" conaffinity="0" />
+      <geom name="hunyuan_bag_convex_body_part_00_collision" type="mesh" mesh="hunyuan_bag_part_00" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_01_collision" type="mesh" mesh="hunyuan_bag_part_01" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_02_collision" type="mesh" mesh="hunyuan_bag_part_02" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_03_collision" type="mesh" mesh="hunyuan_bag_part_03" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_04_collision" type="mesh" mesh="hunyuan_bag_part_04" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_05_collision" type="mesh" mesh="hunyuan_bag_part_05" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_06_collision" type="mesh" mesh="hunyuan_bag_part_06" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_07_collision" type="mesh" mesh="hunyuan_bag_part_07" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_08_collision" type="mesh" mesh="hunyuan_bag_part_08" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_09_collision" type="mesh" mesh="hunyuan_bag_part_09" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_10_collision" type="mesh" mesh="hunyuan_bag_part_10" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_11_collision" type="mesh" mesh="hunyuan_bag_part_11" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_12_collision" type="mesh" mesh="hunyuan_bag_part_12" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_13_collision" type="mesh" mesh="hunyuan_bag_part_13" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_14_collision" type="mesh" mesh="hunyuan_bag_part_14" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_15_collision" type="mesh" mesh="hunyuan_bag_part_15" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_16_collision" type="mesh" mesh="hunyuan_bag_part_16" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_17_collision" type="mesh" mesh="hunyuan_bag_part_17" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_18_collision" type="mesh" mesh="hunyuan_bag_part_18" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+      <geom name="hunyuan_bag_convex_body_part_19_collision" type="mesh" mesh="hunyuan_bag_part_19" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.8 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+    </body>
+    <body name="hunyuan_maojin_body" pos="0.720000 0.000000 0.420000" quat="0 1 0 0">
+      <joint name="hunyuan_maojin_body_freejoint" type="free" />
+      <inertial pos="0 0 0" mass="0.060000" diaginertia="0.00020032 0.00020032 0.00040000" />
+      <geom name="hunyuan_maojin_body_visual" type="mesh" mesh="hunyuan_maojin" material="hunyuan_maojin_mat" group="2" contype="0" conaffinity="0" />
+      <geom name="hunyuan_maojin_body_collision" type="box" size="0.100000 0.100000 0.004000" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.03 1" solimp="0.8 0.95 0.001" />
+    </body>
+    <body name="hunyuan_yujin_body" pos="-0.720000 0.000000 0.000000" quat="0 1 0 0">
+      <joint name="hunyuan_yujin_body_freejoint" type="free" />
+      <inertial pos="0 0 0" mass="0.350000" diaginertia="0.00093333 0.00186667 0.00242667" />
+      <geom name="hunyuan_yujin_body_visual" type="mesh" mesh="hunyuan_yujin" material="hunyuan_yujin_mat" group="2" contype="0" conaffinity="0" />
+      <geom name="hunyuan_yujin_body_part_00_collision" type="mesh" mesh="hunyuan_yujin_part_00" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_01_collision" type="mesh" mesh="hunyuan_yujin_part_01" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_02_collision" type="mesh" mesh="hunyuan_yujin_part_02" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_03_collision" type="mesh" mesh="hunyuan_yujin_part_03" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_04_collision" type="mesh" mesh="hunyuan_yujin_part_04" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_05_collision" type="mesh" mesh="hunyuan_yujin_part_05" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_06_collision" type="mesh" mesh="hunyuan_yujin_part_06" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_07_collision" type="mesh" mesh="hunyuan_yujin_part_07" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_08_collision" type="mesh" mesh="hunyuan_yujin_part_08" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_09_collision" type="mesh" mesh="hunyuan_yujin_part_09" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_10_collision" type="mesh" mesh="hunyuan_yujin_part_10" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_11_collision" type="mesh" mesh="hunyuan_yujin_part_11" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_12_collision" type="mesh" mesh="hunyuan_yujin_part_12" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_13_collision" type="mesh" mesh="hunyuan_yujin_part_13" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_14_collision" type="mesh" mesh="hunyuan_yujin_part_14" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_15_collision" type="mesh" mesh="hunyuan_yujin_part_15" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_16_collision" type="mesh" mesh="hunyuan_yujin_part_16" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_17_collision" type="mesh" mesh="hunyuan_yujin_part_17" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_18_collision" type="mesh" mesh="hunyuan_yujin_part_18" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+      <geom name="hunyuan_yujin_body_part_19_collision" type="mesh" mesh="hunyuan_yujin_part_19" group="3" rgba="0 1 0 0" contype="1" conaffinity="1" friction="0.9 0.05 0.01" solref="0.045 1" solimp="0.72 0.95 0.001" />
+    </body>
+    <!-- END OPERATION_OBJECT_BODIES -->
   </worldbody>
 </mujoco>

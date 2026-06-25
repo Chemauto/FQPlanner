@@ -14,16 +14,24 @@
       "link": "hunyuan_bottle_body"
     },
     {
-      "name": "maojin",
-      "link": "hunyuan_maojin_body"
-    },
-    {
       "name": "lajitong",
       "link": "hunyuan_lajitong_body"
     },
     {
       "name": "bianzhidai",
       "link": "hunyuan_bianzhidai_body"
+    },
+    {
+      "name": "bag",
+      "link": "hunyuan_bag_convex_body"
+    },
+    {
+      "name": "maojin",
+      "link": "hunyuan_maojin_body"
+    },
+    {
+      "name": "yujin",
+      "link": "hunyuan_yujin_body"
     }
   ],
   "composite_mesh_objects": [
@@ -31,13 +39,19 @@
       "link": "hunyuan_bottle_body"
     },
     {
-      "link": "hunyuan_maojin_body"
-    },
-    {
       "link": "hunyuan_lajitong_body"
     },
     {
       "link": "hunyuan_bianzhidai_body"
+    },
+    {
+      "link": "hunyuan_bag_convex_body"
+    },
+    {
+      "link": "hunyuan_maojin_body"
+    },
+    {
+      "link": "hunyuan_yujin_body"
     }
   ],
   "fixtures": [],
