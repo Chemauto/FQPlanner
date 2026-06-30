@@ -1,9 +1,8 @@
 """
 move.py - 机器人底座移动控制
 
-XLeRobot 差速驱动模型：2 个 motor actuator 通过 tendon 控制轮子。
-ctrl[0] = forward (前进/后退), ctrl[1] = turn (左转/右转)
-与 MuJoCo-GS-Web 实物接口一致。
+BlueThink 差速驱动：4 个 wheel velocity actuator
+ctrl[14:18] = ZQL(FR), ZHL(RR), YQL(FL), YHL(RL)
 """
 
 import math
@@ -12,12 +11,10 @@ import mujoco
 
 
 def _normalize_angle(angle):
-    """角度归一化到 [-pi, pi]"""
     return float(np.arctan2(np.sin(angle), np.cos(angle)))
 
 
 def _normalize_angle_deg(angle):
-    """角度归一化到 [-180, 180]"""
     while angle > 180:
         angle -= 360
     while angle < -180:
@@ -35,22 +32,15 @@ def base_link_yaw_deg_from_chassis_yaw_deg(yaw_deg):
     return _normalize_angle_deg(float(yaw_deg) + 180.0)
 
 
-def get_base_info(env):
-    """
-    获取底座全部运动相关数据
+def _get_chassis_body_id(model):
+    return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "YD_link")
 
-    Returns:
-        dict:
-            pos:       世界坐标 [x, y, z]
-            yaw_deg:   朝向（度）
-            yaw_rad:   朝向（弧度）
-            qpos:      关节值 [x, y, yaw]
-            qvel:      关节速度 [vx, vy, vyaw]
-            ctrl:      控制信号 [forward, turn, ...]
-    """
+
+def get_base_info(env):
+    """获取底座全部运动相关数据"""
     model = env.sim.model
     data = env.sim.data
-    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
+    base_id = _get_chassis_body_id(model)
 
     pos = data.xpos[base_id].copy()
     quat = data.xquat[base_id]
@@ -61,21 +51,18 @@ def get_base_info(env):
     base_link_yaw_deg = base_link_yaw_deg_from_chassis_yaw_deg(yaw_deg)
 
     qpos = [float(pos[0]), float(pos[1]), float(yaw_rad)]
-    # Compute body-frame velocities for odom twist.
-    # freejoint qvel: [vx_world, vy_world, vz, wx, wy, wz_yaw]
     qvel = [0.0, 0.0, 0.0]
     qvel_raw = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     if getattr(env, "base_free_joint_id", -1) >= 0:
         dadr = model.jnt_dofadr[env.base_free_joint_id]
         full = data.qvel[dadr:dadr + 6].tolist()
-        # Public body-frame velocity uses base_link, not raw chassis frame.
         cos_y = math.cos(base_link_yaw_rad)
         sin_y = math.sin(base_link_yaw_rad)
         vx_world = full[0]
         vy_world = full[1]
         body_vx = vx_world * cos_y + vy_world * sin_y
         body_vy = -vx_world * sin_y + vy_world * cos_y
-        qvel = [body_vx, body_vy, full[5]]  # [vx_body, vy_body, wz]
+        qvel = [body_vx, body_vy, full[5]]
         qvel_raw = full
     ctrl = data.ctrl[:min(env.model.nu, data.ctrl.size)].copy().tolist()
 
@@ -92,74 +79,40 @@ def get_base_info(env):
     }
 
 
+def _set_wheels(data, vx, wz):
+    """BlueThink differential drive: ctrl[14:18]"""
+    scale = 10.0
+    right = vx * scale + wz * scale
+    left  = vx * scale - wz * scale
+    data.ctrl[14] = right
+    data.ctrl[15] = right
+    data.ctrl[16] = left
+    data.ctrl[17] = left
+
+
 def move(env, Vx=0.0, Vy=0.0, Vw=0.0):
-    """
-    底座速度控制（一步）
-
-    差速驱动：ctrl[0]=forward, ctrl[1]=turn
-    Vy 被忽略（差速驱动物理上不能侧移）
-
-    Args:
-        env: 环境对象
-        Vx:  前进速度 [-1, 1]，body X 轴方向（前进为正）
-        Vy:  忽略（差速驱动不支持侧移）
-        Vw:  旋转速度 [-1, 1]，逆时针为正
-
-    Returns:
-        dict: 执行后的底座状态
-    """
-    forward = np.clip(Vx, -1.0, 1.0)
-    # MuJoCo tendon sign is opposite to the public Vw convention.
-    turn = -np.clip(Vw, -1.0, 1.0)
-
-    env.data.ctrl[0] = forward
-    env.data.ctrl[1] = turn
+    """底座速度控制（一步）"""
+    _set_wheels(env.data, np.clip(Vx, -1, 1), np.clip(Vw, -1, 1))
     env.step()
-
     return get_base_info(env)
 
 
 def stop_base(env):
-    """Stop commanded base motion and clear residual chassis/wheel velocity."""
-    env.data.ctrl[0] = 0.0
-    env.data.ctrl[1] = 0.0
-
+    """Stop base motion."""
+    _set_wheels(env.data, 0.0, 0.0)
     if getattr(env, "base_free_joint_id", -1) >= 0:
         dadr = env.model.jnt_dofadr[env.base_free_joint_id]
         env.data.qvel[dadr:dadr + 6] = 0.0
-
-    for joint_name in ("left_wheel_joint", "right_wheel_joint"):
-        joint_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-        if joint_id >= 0:
-            dadr = env.model.jnt_dofadr[joint_id]
-            env.data.qvel[dadr] = 0.0
-
+    for name in ("ZQL", "ZHL", "YQL", "YHL"):
+        jid = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        if jid >= 0:
+            env.data.qvel[env.model.jnt_dofadr[jid]] = 0.0
     env.sim.forward()
     return get_base_info(env)
 
 
 def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_threshold=3.0, max_steps=800):
-    """
-    导航到世界坐标系目标点（差速驱动 PD 控制）
-
-    差速驱动不能侧移，策略：
-    1. 计算到目标的方向偏差 (heading_error)
-    2. 同时输出 forward 和 turn，大偏差时衰减前进速度先转向
-
-    Args:
-        env:            环境对象
-        x:              目标世界坐标 x
-        y:              目标世界坐标 y
-        target_yaw:     目标偏航角（度），None 表示不调整朝向
-        Kp:             比例增益
-        Kd:             微分增益
-        pos_threshold:  位置误差阈值（米），默认 0.1
-        yaw_threshold:  偏航角误差阈值（度），默认 3.0
-        max_steps:      最大步数
-
-    Returns:
-        dict: 最终底座状态
-    """
+    """导航到世界坐标系目标点（差速驱动 PD 控制）"""
     prev_heading_err = 0.0
     prev_pos_err = 0.0
 
@@ -172,7 +125,6 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
         err_y = y - y_now
         pos_err = float(np.hypot(err_x, err_y))
 
-        # 到位后检查朝向
         if pos_err < pos_threshold:
             if target_yaw is None:
                 break
@@ -183,31 +135,25 @@ def nav(env, x, y, target_yaw=None, Kp=2.5, Kd=0.3, pos_threshold=0.1, yaw_thres
             yaw_err_deg = _normalize_angle_deg(target_yaw - current_yaw_deg)
             if abs(yaw_err_deg) < yaw_threshold:
                 break
-            # 原地转向到目标朝向
             Vw = np.clip(Kp * (yaw_err_deg / 90.0), -1.0, 1.0)
             move(env, Vx=0.0, Vw=Vw)
             continue
 
-        # 计算到目标的世界方向
         angle_to_target = np.arctan2(err_y, err_x)
         heading_err = _normalize_angle(angle_to_target - yaw_now)
 
-        # PD 控制
         d_heading = heading_err - prev_heading_err
         prev_heading_err = heading_err
         d_pos = pos_err - prev_pos_err
         prev_pos_err = pos_err
 
         turn = np.clip(Kp * heading_err + Kd * d_heading, -1.0, 1.0)
-
-        # 前进速度：距离越远越快，朝向偏差大时衰减
         forward = np.clip(Kp * pos_err, -1.0, 1.0)
         forward *= max(0.0, np.cos(heading_err))
         forward = np.clip(forward + Kd * d_pos * 0.1, -1.0, 1.0)
 
         move(env, Vx=forward, Vw=turn)
 
-    # 最终朝向对齐
     if target_yaw is not None:
         for _ in range(200):
             info = get_base_info(env)

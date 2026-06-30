@@ -3,7 +3,7 @@
 import math
 import numpy as np
 
-_BASE_LINK_NAME = "chassis"
+_BASE_LINK_NAME = "YD_link"
 
 
 def _normalize_angle(angle):
@@ -48,19 +48,26 @@ def _find_actuator_idx(env, name: str) -> int:
 
 
 def _set_wheel_actuators(env, vx: float, wz: float):
-    """Set forward/turn actuator controls for differential drive."""
-    fwd_act = None
-    turn_act = None
+    """Set forward/turn actuator controls for differential drive.
+
+    BlueThink wheel actuators: ctrl[14:18] = ZQL(FR), ZHL(RR), YQL(FL), YHL(RL)
+    Differential drive: right = vx+wz, left = vx-wz
+    """
+    # Map vx [-1,1] and wz [-1,1] to wheel speed range [-10, 10]
+    wheel_scale = 10.0
+    right = vx * wheel_scale + wz * wheel_scale
+    left  = vx * wheel_scale - wz * wheel_scale
+
     for i in range(env.model.num_actuators):
         act = env.model.get_actuator(i)
-        if act.name == "forward":
-            fwd_act = act
-        elif act.name == "turn":
-            turn_act = act
-    if fwd_act is not None:
-        fwd_act.set_ctrl(env.data, float(np.clip(vx, -1.0, 1.0)))
-    if turn_act is not None:
-        turn_act.set_ctrl(env.data, float(np.clip(-wz, -1.0, 1.0)))
+        if act.name == "wheel_ZQL":
+            act.set_ctrl(env.data, float(np.clip(right, -10, 10)))
+        elif act.name == "wheel_ZHL":
+            act.set_ctrl(env.data, float(np.clip(right, -10, 10)))
+        elif act.name == "wheel_YQL":
+            act.set_ctrl(env.data, float(np.clip(left, -10, 10)))
+        elif act.name == "wheel_YHL":
+            act.set_ctrl(env.data, float(np.clip(left, -10, 10)))
 
 
 def get_base_info(env):

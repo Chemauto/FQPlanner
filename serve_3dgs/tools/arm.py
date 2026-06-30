@@ -74,7 +74,7 @@ def get_arm_info(env, side: str = "right"):
 
     base_pos = np.zeros(3)
     try:
-        base_pos = np.asarray(env.get_body_xpos("chassis"), dtype=float).reshape(-1)
+        base_pos = np.asarray(env.get_body_xpos("YD_link"), dtype=float).reshape(-1)
     except KeyError:
         pass
 
@@ -154,9 +154,9 @@ def grasp(env, obj_name, snap_threshold=0.15):
     if obj_name not in env._link_name_to_idx:
         print(f"[grasp] object '{obj_name}' not found in model")
         available = [n for n in env.model.link_names if n and n not in (
-            "chassis", "left_wheel", "right_wheel", "Base", "Base_2",
-            "top_base_link", "head_pan_link", "head_tilt_link",
-            "head_camera_link", "head_camera_rgb_frame", "head_camera_depth_frame",
+            "YD_link", "ZQ_Link", "YQ_Link", "ZH_Link", "YH_Link",
+            "ZQL_Link", "YQL_Link", "ZHL_Link", "YHL_Link",
+            "Base_Link", "Left_Shoulder_Base_Link", "Right_Shoulder_Base_Link",
         )]
         print(f"[grasp] available: {available}")
         return False

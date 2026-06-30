@@ -52,6 +52,7 @@ dependencies = [
     "einops>=0.8.0",
     "h5py>=3.10.0",
     "opencv-python",
+    "socksio>=1.0.0",
 ]
 
 [[tool.uv.index]]

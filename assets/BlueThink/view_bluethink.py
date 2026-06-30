@@ -11,7 +11,7 @@ import mujoco
 import mujoco.viewer
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-XML_PATH = os.path.join(SCRIPT_DIR, "bluethink.xml")
+XML_PATH = os.path.join(SCRIPT_DIR, "scene_test.xml")
 
 # Arm home pose
 ARM_HOME = [0.5, 1.5, 0, 1.2, 0, 0, 0,    # left
