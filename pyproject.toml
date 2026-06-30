@@ -53,6 +53,9 @@ dependencies = [
     "h5py>=3.10.0",
     "opencv-python",
     "socksio>=1.0.0",
+    "lerobot>=0.4.4,<0.5",
+    # Pin pydantic stable (alpha breaks mcp import)
+    "pydantic>=2.5,<2.14",
 ]
 
 [[tool.uv.index]]

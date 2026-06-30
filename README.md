@@ -18,7 +18,7 @@
 - 🧠 **LLM 任务规划** — 从自然语言到 MCP 工具调用的闭环执行
 - 🤖 **XLeRobot 仿真** — 双臂移动机器人在 RoboCasa 风格厨房场景中的 MuJoCo 仿真
 - 🏠 **3DGS 场景** — 基于 3D Gaussian Splatting 的真实感场景渲染与导航
-- 🫳 **操作能力** — 抓取、放置、推动等基础机器人操作接口
+- 🫳 **操作能力** — IK 与 ACT 策略抓取、放置等基础机器人操作接口
 - 🗺️ **导航规划** — Nav2 风格的 2D 占据地图生成与路径规划
 - 🌐 **Web 控制台** — 浏览器端的任务下发与状态监控
 - 🔌 **实机桥接** — 仿真验证后向真实开发板发送动作信号
@@ -38,6 +38,7 @@ FQPlanner_Mujoco3DGS/
 ├── 🧠 master/                   # LLM 任务规划服务
 ├── 🗺️ nav2/                     # 导航地图生成与路径规划
 ├── 🤖 robot_api/                # 统一机器人接口层
+├── 🔮 services/                 # ACT 策略推理服务（独立进程）
 ├── 🎮 serve/                    # MuJoCo HTTP 后端（厨房场景）
 ├── 🎨 serve_3dgs/               # 3DGS 场景渲染后端
 ├── 🔧 serve_real/               # 真实机器人桥接服务
@@ -56,10 +57,8 @@ FQPlanner_Mujoco3DGS/
 | `FQPlanner` | 规划链路 | 运行 Master、Slaver、Web、MCP 工具 |
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt   # ⚠️ 敏感信息请放入 .env，不要提交
 ```
-
-> ⚠️ 敏感信息（API Key、开发板密码、私有 Token）请放入 `.env` 或本地配置文件，不要提交到仓库。
 
 ---
 
@@ -84,8 +83,10 @@ redis-server
 ```bash
 conda activate robocasa
 cd serve  or cd serve_3dgs
-python main.py
+python main.py                  # 策略服务地址自动读取 robot_api/config.yaml
 ```
+
+> 💡 使用 ACT 抓取时，在 `robot_api/config.yaml` 中启用 `policy_services.act`，并启动推理服务。
 
 ### 4️⃣ 启动规划链路
 

@@ -138,10 +138,13 @@ class RobotRuntime:
 
     def _action_payload(self, action: str, args: dict[str, Any]):
         if action == "grasp_object":
-            return {
+            payload = {
                 "obj_name": args["object_name"],
                 "snap_threshold": 0.15,
             }
+            if args.get("mode"):
+                payload["mode"] = args["mode"]
+            return payload
         if action == "place_object":
             return {
                 "obj_name": args["object_name"],

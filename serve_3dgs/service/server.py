@@ -26,6 +26,7 @@ from tools.arm import (
     move_arm,
     open_gripper, close_gripper, is_grasped,
 )
+from tools.act_grasp import act_grasp_init, act_grasp_step
 from tools.move import (
     base_link_yaw_deg_from_chassis_yaw_deg,
     base_link_yaw_from_chassis_yaw,
@@ -74,6 +75,9 @@ RECORD_CAMERAS = []
 
 _video_dir = os.path.join(os.path.dirname(__file__), "..", "videos")
 _camera_config_cache = None
+_act_config = {
+    "url": None,  # ACT inference service URL, e.g. http://localhost:5003
+}
 
 
 def _camera_model_name(camera_name: str) -> str:
@@ -172,8 +176,30 @@ def get_lock():
     return _env_lock
 
 
+def set_act_config(url: str | None):
+    """Set ACT inference service URL. Reads from robot_api/config.yaml if url is None."""
+    if url is None:
+        try:
+            from robot_api.config import load_robot_api_config
+            cfg = load_robot_api_config()
+            svc = cfg.policy_service("act")
+            url = svc.url if svc else None
+        except Exception as exc:
+            print(f"[service] 读取 policy_services 配置失败: {exc}")
+            url = None
+    _act_config["url"] = url.rstrip("/") if url else None
+    if _act_config["url"]:
+        print(f"[service] 🔮 ACT 推理服务: {_act_config['url']}")
+    else:
+        print("[service] ACT 推理服务: 未配置 (在 robot_api/config.yaml 中设置 policy_services.act.enabled: 1)")
+
+
 def has_active_base_command():
     return _active_command is not None and _active_command.get("type") in ("nav", "cmd_vel", "move_duration")
+
+
+def has_active_act_command():
+    return _active_command is not None and _active_command.get("type") == "act_grasp"
 
 
 def set_base_velocity_cmd(Vx=0.0, Vy=0.0, Vw=0.0, timeout=0.25):
@@ -399,6 +425,17 @@ def _step_active_command(env):
             else:
                 _finish_command(cmd, {"success": False, "result": f"放置 {obj_name} 失败"})
             return True
+
+        if cmd_type == "act_grasp":
+            act_grasp_step(env, state)
+            if state["done"]:
+                obj_name = state["obj_name"]
+                if state["success"]:
+                    final = get_base_info(env)
+                    _finish_command(cmd, {"success": True, "result": f"ACT 抓取 {obj_name} 成功", **_np_to_list(final)})
+                else:
+                    _finish_command(cmd, {"success": False, "result": f"ACT 抓取 {obj_name} 失败"})
+            return True
     except Exception as e:
         _finish_command(cmd, {"success": False, "error": str(e)})
         return True
@@ -423,6 +460,26 @@ def process_commands(env):
         try:
             with _env_lock:
                 if cmd_type == "grasp":
+                    mode = params.get("mode", "ik")
+                    if mode == "act":
+                        act_url = _act_config.get("url")
+                        if not act_url:
+                            result = {"success": False, "result": "ACT 推理服务未配置 (--act-url)"}
+                            with _queue_lock:
+                                _results[cmd_id] = result
+                            cmd["event"].set()
+                            return
+                        state = act_grasp_init(
+                            env, act_url, params["obj_name"],
+                            max_steps=params.get("max_steps", 300),
+                            policy_fps=params.get("policy_fps", 30.0),
+                        )
+                        _active_command = {
+                            **cmd,
+                            "type": "act_grasp",
+                            "state": state,
+                        }
+                        return
                     _active_command = {
                         **cmd,
                         "state": {
@@ -727,10 +784,15 @@ def api_grasp():
     obj_name = data.get("obj_name")
     if not obj_name:
         return jsonify({"error": "缺少 obj_name 参数"}), 400
+    mode = data.get("mode", "ik")
     params = {
         "obj_name": obj_name,
-        "snap_threshold": data.get("snap_threshold", 0.15),
+        "mode": mode,
     }
+    if mode == "ik":
+        params["snap_threshold"] = data.get("snap_threshold", 0.15)
+    elif mode == "act":
+        params["max_steps"] = data.get("max_steps", 300)
     return jsonify(submit_command("grasp", params))
 
 

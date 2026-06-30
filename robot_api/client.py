@@ -40,8 +40,8 @@ def get_map_data(params: dict | None = None, timeout=None):
     return _RUNTIME.get_state("map_data", params or {})
 
 
-def grasp_object(object_name: str):
-    return _RUNTIME.execute("grasp_object", {"object_name": object_name})
+def grasp_object(object_name: str, mode: str = "ik"):
+    return _RUNTIME.execute("grasp_object", {"object_name": object_name, "mode": mode})
 
 
 def place_object(object_name: str, target):

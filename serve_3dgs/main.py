@@ -38,6 +38,8 @@ def main():
                         help="Scene override: robot_nav (default), robot_only, path to MJCF/XML, or path to navigation JSON")
     parser.add_argument("--robot", type=str, default="",
                         help="Robot name override (default: read from assets/config.yaml)")
+    parser.add_argument("--act-url", type=str, default=None,
+                        help="ACT service URL override (default: read from robot_api/config.yaml)")
     args = parser.parse_args()
 
     from backend.gs_config import GSConfig
@@ -49,6 +51,7 @@ def main():
     )
     from service.server import (
         start_server, process_commands, apply_base_velocity, get_lock,
+        set_act_config, has_active_act_command,
     )
 
     gs_cfg = GSConfig(
@@ -68,6 +71,7 @@ def main():
     print(f"Model loaded: {env.model.num_links} links, {env.model.num_dof_pos} DOFs")
 
     start_server(env, port=args.port)
+    set_act_config(args.act_url)
     print(f"API: http://localhost:{args.port}")
 
     try:
@@ -123,6 +127,7 @@ def main():
                         env.step()
                     env.forward_kinematic()
                     now = time.perf_counter()
+                    act_gs_interval = gs_update_interval * (10 if has_active_act_command() else 1)
                     if gs_screen_images and now >= next_gs_update_at:
                         try:
                             update_viewer_screen_images(
@@ -136,7 +141,7 @@ def main():
                             if not gs_screen_warning_reported:
                                 print(f"3DGS viewer screen update failed: {exc}", flush=True)
                                 gs_screen_warning_reported = True
-                        next_gs_update_at = now + gs_update_interval
+                        next_gs_update_at = now + act_gs_interval
                     render.sync(env.data)
                     time.sleep(LOOP_SLEEP_SEC)
         else:

@@ -32,10 +32,19 @@ class BackendConfig:
 
 
 @dataclass(frozen=True)
+class PolicyServiceConfig:
+    name: str
+    enabled: bool
+    url: str = ""
+    raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class RobotApiConfig:
     backends: list[BackendConfig]
     active_backend: str | None = None
     navigation: BackendConfig | None = None
+    policy_services: list[PolicyServiceConfig] | None = None
 
     def _active(self) -> BackendConfig | None:
         if not self.active_backend:
@@ -88,6 +97,21 @@ class RobotApiConfig:
         if self.navigation is not None and self.navigation.enabled:
             return self.navigation
         return None
+
+    def policy_service(self, name: str) -> PolicyServiceConfig | None:
+        """Get an enabled policy service by name (e.g. "act")."""
+        if not self.policy_services:
+            return None
+        for svc in self.policy_services:
+            if svc.name == name and svc.enabled:
+                return svc
+        return None
+
+    def active_policy_services(self) -> list[PolicyServiceConfig]:
+        """Return all enabled policy services."""
+        if not self.policy_services:
+            return []
+        return [svc for svc in self.policy_services if svc.enabled]
 
 
 def _as_bool(value, default=False) -> bool:
@@ -233,4 +257,21 @@ def load_robot_api_config() -> RobotApiConfig:
             raw=nav_cfg,
         )
 
-    return RobotApiConfig(backends=backends, active_backend=active_backend, navigation=navigation)
+    policy_services = None
+    ps_cfg = data.get("policy_services") or {}
+    if ps_cfg:
+        policy_services = [
+            PolicyServiceConfig(
+                name=str(name),
+                enabled=_as_bool(raw.get("enabled"), default=False),
+                url=str(raw.get("url") or "").rstrip("/"),
+                raw=raw,
+            )
+            for name, raw in ps_cfg.items()
+            if isinstance(raw, dict)
+        ]
+
+    return RobotApiConfig(
+        backends=backends, active_backend=active_backend,
+        navigation=navigation, policy_services=policy_services,
+    )
