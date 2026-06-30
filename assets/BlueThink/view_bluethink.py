@@ -1,48 +1,40 @@
 #!/usr/bin/env python3
-"""BlueThink MuJoCo model viewer."""
+"""BlueThink Mobile — MuJoCo viewer.
 
+打开后:
+  - 右侧面板 → Actuators → 拖动 wheel_ZQL/ZHL/YQL/YHL 控制底盘
+  - 左侧面板 → Contact / Constraint 查看碰撞状态
+  - 左键拖拽旋转 | 滚轮缩放 | 右键平移 | Esc 退出
+"""
+import os
 import mujoco
 import mujoco.viewer
-import time
-import sys
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+XML_PATH = os.path.join(SCRIPT_DIR, "bluethink.xml")
+
+# Arm home pose
+ARM_HOME = [0.5, 1.5, 0, 1.2, 0, 0, 0,    # left
+            0.5, -1.5, 0, 1.2, 0, 0, 0]    # right
+
 
 def main():
-    model = mujoco.MjModel.from_xml_path('bluethink.xml')
+    model = mujoco.MjModel.from_xml_path(XML_PATH)
     data = mujoco.MjData(model)
 
-    print(f"BlueThink Model Loaded:")
-    print(f"  Bodies: {model.nbody}, Joints: {model.njnt}, Actuators: {model.nu}")
-    print(f"\nJoints:")
-    for i in range(model.njnt):
-        name = model.joint(i).name
-        lo, hi = model.jnt_range[i]
-        print(f"  [{i:2d}] {name:40s} range=[{lo:+.3f}, {hi:+.3f}]")
+    # Set arm home pose
+    for i, v in enumerate(ARM_HOME):
+        data.ctrl[i] = v
 
-    print(f"\nActuators:")
-    for i in range(model.nu):
-        name = model.actuator(i).name
-        print(f"  [{i:2d}] {name}")
+    print(f"BlueThink Mobile — {model.nbody} bodies, {model.njnt} joints, {model.nu} actuators")
+    print(f"  ctrl[0..13]  手臂 (position)")
+    print(f"  ctrl[14..17] 车轮 (velocity): wheel_ZQL  wheel_ZHL  wheel_YQL  wheel_YHL")
 
-    print(f"\nCameras:")
-    for i in range(model.ncam):
-        name = model.camera(i).name
-        print(f"  [{i:2d}] {name}")
-
-    print("\nLaunching viewer...")
-    print("  Left-drag: rotate | Right-drag: pan | Scroll: zoom")
-    print("  Space: pause | Backspace: reset | Ctrl: drag joints")
-
-    viewer = mujoco.viewer.launch_passive(model, data)
-
-    try:
+    with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
             mujoco.mj_step(model, data)
             viewer.sync()
-            time.sleep(0.01)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        viewer.close()
+
 
 if __name__ == "__main__":
     main()

@@ -78,6 +78,13 @@ def main():
 
     with mujoco.viewer.launch_passive(model, data,
                                        key_callback=_key_callback) as viewer:
+        # ── 关闭昂贵渲染特效，减少 GPU 负担 ──
+        viewer.opt.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0
+        viewer.opt.flags[mujoco.mjtRndFlag.mjRND_REFLECTION] = 0
+        viewer.opt.flags[mujoco.mjtRndFlag.mjRND_SKYBOX] = 0
+        viewer.opt.flags[mujoco.mjtRndFlag.mjRND_FOG] = 0
+        viewer.opt.flags[mujoco.mjtRndFlag.mjRND_HAZE] = 0
+
         while viewer.is_running():
             vx   = drv.vx   * speed
             vyaw = drv.vyaw  * speed
