@@ -344,7 +344,6 @@
             stopTaskPolling();
             refreshTaskStatus();
             taskPollingTimer = setInterval(refreshTaskStatus, 3000);
-            startTimelineRefresh();  // 任务执行时,四宫格时间线随之更新为该任务
         }
 
         function stopTaskPolling() {
@@ -352,19 +351,6 @@
                 clearInterval(taskPollingTimer);
                 taskPollingTimer = null;
             }
-            stopTimelineRefresh();
-        }
-
-        // 任务执行期间定时刷新四宫格时间线(后端在为该任务采集 → 时间线随即变成该任务)
-        let timelineRefreshTimer = null;
-        function startTimelineRefresh() {
-            stopTimelineRefresh();
-            loadTimeline(true);
-            timelineRefreshTimer = setInterval(() => loadTimeline(true), 8000);
-        }
-        function stopTimelineRefresh() {
-            if (timelineRefreshTimer) { clearInterval(timelineRefreshTimer); timelineRefreshTimer = null; }
-            setTimeout(() => loadTimeline(true), 4000);  // 任务结束后再拉一次,补上"完成"帧
         }
 
         // ── 经验弹窗 ──────────────────────────────────────────────────────
@@ -712,7 +698,7 @@
             quadLiveTimer = setInterval(refresh, 1500);
         }
 
-        async function loadTimeline(showLast = false) {
+        async function loadTimeline() {
             stopQuadLive();
             const empty = document.getElementById('timeline-empty');
             try {
@@ -728,13 +714,13 @@
                 document.getElementById('timeline-controls').style.display = 'block';
                 const slider = document.getElementById('timeline-slider');
                 slider.max = tlFrames.length - 1;
+                slider.value = 0;
                 const wonTag = data.won === true ? ' · <span style="color:#4ade80">✓完成</span>'
                              : data.won === false ? ' · <span style="color:#f87171">✗未完成</span>' : '';
                 document.getElementById('quad-meta').innerHTML =
                     `任务: <b>${data.task || '?'}</b>${wonTag}` +
                     `<br><span style="font-size:11px">采集于 ${data.created || ''} · 宫格: ${(data.cameras || []).join(' / ')}</span>`;
-                // 任务进行中自动刷新时看最新帧(像直播);手动加载看第一帧
-                showFrame(showLast ? tlFrames.length - 1 : 0);
+                showFrame(0);
             } catch (e) {
                 empty.textContent = '加载时间线失败: ' + e.message;
             }
