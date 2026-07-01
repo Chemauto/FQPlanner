@@ -43,7 +43,7 @@ def get_base_info(env):
     """
     model = env.sim.model
     data = env.sim.data
-    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "robot0_base")
 
     pos = data.xpos[base_id].copy()
     quat = data.xquat[base_id]

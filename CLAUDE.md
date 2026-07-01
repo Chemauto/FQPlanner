@@ -1,6 +1,6 @@
 # FQPlanner_Mujoco 技术说明
 
-本项目是 FQPlanner 的 MuJoCo / XLeRobot 迁移版本。保留 Master、Slaver、Web 控制台和原服务 API 形态，同时将仿真后端改为本地 XLeRobot MuJoCo 模型。
+本项目是 FQPlanner 的 MuJoCo 迁移版本。保留 Master、Slaver、Web 控制台和原服务 API 形态，仿真后端是 RoboCasa 厨房 + robosuite **PandaOmron** 机器人（曾短暂用过 XLeRobot，已换回 PandaOmron，见「## 机器人」）。
 
 ## 架构
 
@@ -12,7 +12,7 @@
   -> Slaver / MCP 工具
   -> robot_api
   -> serve Flask API (5001)
-  -> MuJoCo: XLeRobot + RoboCasa kitchen MJCF
+  -> MuJoCo: PandaOmron + RoboCasa kitchen MJCF
 ```
 
 ## 当前后端
@@ -32,8 +32,8 @@
 - 读取 `serve/scene/config/objects.yaml`
 - 调用 RoboCasa `KitchenArena`
 - 调用 RoboCasa / robosuite object MJCF 工具生成真实厨房 fixtures 和 objects
-- 合并本地 `assets/xlerobot/xlerobot.xml`
-- 隐藏 collision / registry / backing / eef target 等非视觉调试几何
+- robosuite 装配 PandaOmron 并 merge 进 `ManipulationTask`（见 `_assemble_pandaomron`）
+- 隐藏 collision / registry / backing / eef target / 机器人调试 site 等非视觉几何
 - 写出：
 
 ```text
@@ -41,29 +41,35 @@ assets/scene/scene.xml
 assets/scene/scene_meta.json
 ```
 
-## XLeRobot
+## 机器人：PandaOmron
 
-当前机器人模型路径：
-
-```text
-assets/xlerobot/xlerobot.xml
-assets/xlerobot/*.stl
-```
+当前机器人是 **PandaOmron**（Franka Panda 白色 7-DOF 臂 + Omron 移动底座 + PandaGripper），
+由 robosuite 原生装配（`create_robot("PandaOmron") + add_base + add_gripper`），
+`scene_generator._assemble_pandaomron` 交给 `ManipulationTask(mujoco_robots=[robot])` merge 进厨房。
+mesh 走 robosuite 安装目录的绝对路径（不需要项目内 mesh 目录）。
 
 注意：
 
-- `assets/xlerobot/` 是有效 mesh 目录，`xlerobot.xml` 和 mesh 文件放在同一级。
-- 不再使用旧的 `assets/xlerobot/meshes/`。
-- 不再使用旧的 `robots/` robosuite 注册目录。
-- 不会启动时从项目外部 XLeRobot 目录同步。
+- 不再用 XLeRobot（`assets/xlerobot/xlerobot.xml`）——已从 robosuite registry 换回 PandaOmron。
+- **底座用 Option F**：`scene_generator._pandaomron_freejoint_base` 给 `robot0_base` 加 `base_freejoint`、
+  剥离 Omron 3 个平面移动关节（forward/side/yaw）及其 actuator → 复用现有 freejoint 运动学 nav。
+- **臂是力矩驱动**（ctrl=0 会因重力下垂）→ `mujoco_backend._hold_arm_pose` 每步把臂/夹爪 qpos 钉回
+  初始位姿（运动学冻结，臂随底座刚性移动，和吸附抓取同一思路）。
+- **相机**：scene_generator 把 `robot0_eye_in_hand`→`right_arm_cam`，另在 `robot0_base` 上加一个
+  抬高俯视工作区的 `head_cam`（PandaOmron 自带 robotview 看的是机器人自己，感知没用），
+  复制 head_cam 当 `left_arm_cam`（单臂凑四宫格）。这样 camera.yaml/四宫格/segmentation 名字全不用改。
+- **碰撞几何隐藏**：`_hide_collision_geoms` 把碰撞几何移到 group 4（不渲染，保留 contype 物理）；
+  因为 `inertiagrouprange` 只算 group0 的质量，必须先把它扩到 `0 5`（`_set_physics_options`）否则
+  freejoint 底座失去质量报错。`_hide_robot_sites` 藏夹爪绿柱等调试 site。
 
 关键 body / actuator：
 
 ```text
-body: chassis
-initial pos: [0, 0, 0.035]
-base actuators: slider_actuator_x, slider_actuator_y, hinge_actuator_z
-right gripper bodies: Fixed_Jaw_2, Moving_Jaw_2
+base body: robot0_base   (加了 base_freejoint;初始 [3.2, -1.5, 0])
+base joint: base_freejoint (freejoint,运动学 nav 直接设 qpos)
+arm joints: robot0_joint1..7 (力矩 actuator robot0_torq_j1..7,靠 _hold_arm_pose 冻结)
+gripper / EE: robot0_right_hand / gripper0_right_eef (抓取吸附到虚拟末端)
+cameras: head_cam(工作区俯视) right_arm_cam(手眼) left_arm_cam(=head 复制) overhead_cam(俯视)
 ```
 
 ## 物体和位置
@@ -124,9 +130,9 @@ placement 规则：
 
 `serve/tools/move.py`：
 
-- 使用 MuJoCo-GS-Web 的 XLeRobot 真实外观模型。
-- `chassis` 是 `freejoint`；`nav()` 根据世界坐标误差生成 body-frame 速度，再由工具层直接更新 x/y/yaw。
-- body 名称是 `chassis`。
+- 使用 robosuite PandaOmron 模型。
+- `robot0_base` 加了 `base_freejoint`；`nav()` 根据世界坐标误差生成 body-frame 速度，再由工具层直接更新 x/y/yaw。
+- 底座 body 名称是 `robot0_base`（不是 `chassis`）。
 
 `serve/tools/arm.py`：
 
@@ -184,6 +190,9 @@ python deploy/run.py
 ## 开发注意
 
 - 修改 `objects.yaml` 后，重启 `serve/main.py` 会重新生成场景 XML。
-- 修改 XLeRobot 模型后，需要直接更新本项目内 `assets/xlerobot/xlerobot.xml` 和 `assets/xlerobot/*.stl`。
-- 不要恢复旧的 `robots/` 目录；当前不通过 robosuite robot registry 加载 XLeRobot。
-- 不要重新创建 `assets/xlerobot/meshes/` 或 `assets/xlerobot/assets/`；当前 robot XML 的 meshdir 是 `./`，生成场景 XML 的 meshdir 是 `../xlerobot/`。
+- 机器人来自 robosuite registry（`create_robot("PandaOmron")`），改机器人在 `scene_generator._assemble_pandaomron`。
+- 换机器人 body/关节/相机名后，`mujoco_backend`（robot0_base/base_freejoint/gripper EE/`_hold_arm_pose` 臂关节）、
+  `serve/tools/move.py`（robot0_base）、`arm.py`（robot0_joint*/gripper）、`server.py`（robot0_base、地图排除）都要跟着改。
+- 感知/四宫格靠 `head_cam` 抬高俯视工作区；换机器人若 head_cam 看不到台面物体，`/visible_objects?camera=head_cam&scan=1`
+  会返回 []，要调 `_rename_robot_cameras` 里 head_cam 的 pos/xyaxes。
+- 隐藏碰撞几何前必须先把 compiler `inertiagrouprange` 扩到含 group 4，否则 freejoint 底座失质量报错。

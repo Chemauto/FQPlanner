@@ -31,11 +31,20 @@ import yaml
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-XLEROBOT_DIR = os.path.join(ROOT_DIR, "assets", "xlerobot")
 SCENE_ASSET_DIR = os.path.join(ROOT_DIR, "assets", "scene")
-XLEROBOT_XML = os.path.join(XLEROBOT_DIR, "xlerobot.xml")
 GENERATED_SCENE = os.path.join(SCENE_ASSET_DIR, "scene.xml")
 GENERATED_META = os.path.join(SCENE_ASSET_DIR, "scene_meta.json")
+
+# 机器人:PandaOmron(Franka Panda 臂 + Omron 移动底座),robosuite 原生装配。
+# 底座用 Option F——给 robot0_base 加 freejoint、剥离 3 个移动关节 → 复用现有 freejoint 运动学 nav。
+ROBOT_NAME = "PandaOmron"
+ROBOT_START_XY = (3.2, -1.5)               # 初始底座 x/y(岛台与台面之间)
+BASE_FREEJOINT = "base_freejoint"          # 加在 robot0_base 上,backend 按名找它
+_BASE_PLANAR_JOINTS = (                     # 要剥离的 Omron 平面移动关节(被 freejoint 取代)
+    "mobilebase0_joint_mobile_forward",
+    "mobilebase0_joint_mobile_side",
+    "mobilebase0_joint_mobile_yaw",
+)
 
 
 # ============================================================
@@ -133,28 +142,27 @@ def build_scene_xml(scene_dir, seed=42):
             "type": group,
         })
 
-    # ---- 4. 合并厨房 + 机器人 ----
+    # ---- 4. 装配 PandaOmron + 合并厨房 ----
+    # robosuite 原生把机器人 merge 进 ManipulationTask(不再手工合并单独的机器人 XML)。
+    robot_model = _assemble_pandaomron(seed)
     task = ManipulationTask(
         mujoco_arena=arena,
-        mujoco_robots=[],
+        mujoco_robots=[robot_model],
         mujoco_objects=fixtures + object_models,
         enable_multiccd=True,
         enable_sleeping_islands=False,
     )
-    robocasa_root = ET.fromstring(task.get_xml())
-    robot_root = ET.parse(XLEROBOT_XML).getroot()
+    robot_root = ET.fromstring(task.get_xml())
 
-    # 将 RoboCasa 厨房的 asset/worldbody/actuator 等合并到机器人 XML
-    _merge_robocasa_into_robot(robot_root, robocasa_root)
-
-    # ---- 5. 后处理 ----
-    _set_generated_compiler_paths(robot_root)   # 设置生成场景的 meshdir
-    _add_cameras(robot_root)                    # 添加渲染相机
-    _set_statistic(robot_root)                  # 设置 MuJoCo viewer 中心点
-    _set_robot_initial_pose(robot_root)         # 设置机器人初始位姿
-    _add_missing_robot_inertials(robot_root)    # 补充相机 body 的 inertial
-    _hide_nonvisual_geoms(robot_root)           # 隐藏碰撞体/registry/backing 等非视觉几何
-    _enable_robocasa_collisions(robot_root)     # 恢复 RoboCasa 碰撞几何的 contype/conaffinity
+    # ---- 5. 后处理(PandaOmron) ----
+    _pandaomron_freejoint_base(robot_root)      # robot0_base 加 freejoint、剥离移动关节+actuator
+    _rename_robot_cameras(robot_root)           # robotview→head_cam, eye_in_hand→right_arm_cam, +left_arm_cam
+    _add_cameras(robot_root)                    # + overhead_cam(全局俯视)
+    _set_statistic(robot_root)                  # MuJoCo viewer 中心点
+    _hide_eef_targets(robot_root)               # 藏 IK target 标记(left/right_eef_target)
+    _hide_robot_sites(robot_root)               # 藏机器人调试 site(夹爪绿柱/中心红点)
+    _hide_collision_geoms(robot_root)           # 藏碰撞几何(绿臂/黄底座/红盒),保留 contype 物理
+    _set_physics_options(robot_root)            # timestep/gravity/接触容量
 
     # ---- 6. 写出文件 ----
     fixture_meta = []
@@ -178,67 +186,151 @@ def build_scene_xml(scene_dir, seed=42):
 
 
 # ============================================================
-# 合并：RoboCasa 厨房 → XLeRobot XML
+# PandaOmron 装配 + 后处理
 # ============================================================
 
-def _merge_robocasa_into_robot(robot_root, robocasa_root):
-    """
-    将 RoboCasa 厨房场景的 MJCF 内容合并到机器人 XML 中。
+def _assemble_pandaomron(seed=42):
+    """robosuite 原生装配 PandaOmron 机器人模型:Panda 臂 + Omron 移动底座 + PandaGripper。
 
-    合并 asset（mesh/材质）、worldbody（几何体）、actuator、sensor 等节点。
-    同名元素会自动去重。同时设置物理参数（timestep、gravity、contact 容量）。
+    对应旧 create_scene 的 robots="PandaOmron",但只要模型(不建 env),交给 ManipulationTask merge。
     """
-    for tag in ("asset", "worldbody", "actuator", "sensor", "tendon", "equality", "contact"):
-        src = robocasa_root.find(tag)
-        if src is None:
-            continue
-        dst = robot_root.find(tag)
-        if dst is None:
-            dst = ET.SubElement(robot_root, tag)
-        existing_names = {(child.tag, child.get("name")) for child in dst if child.get("name")}
-        for child in list(src):
-            name = child.get("name")
-            key = (child.tag, name)
-            if name and key in existing_names:
-                continue
-            dst.append(child)
-            if name:
-                existing_names.add(key)
+    from robosuite.models.robots import create_robot
+    from robosuite.models.bases import robot_base_factory
+    from robosuite.models.grippers import gripper_factory
 
-    option = robot_root.find("option")
+    robot = create_robot(ROBOT_NAME, idn=0)
+    robot.add_base(robot_base_factory(robot.default_base, idn=0))
+    for arm in robot.arms:
+        robot.add_gripper(gripper_factory(robot.default_gripper[arm], idn=f"0_{arm}"),
+                          robot.eef_name[arm])
+    robot.set_base_xpos([ROBOT_START_XY[0], ROBOT_START_XY[1], 0.0])
+    return robot
+
+
+def _pandaomron_freejoint_base(root):
+    """Option F:给 robot0_base 加 freejoint、剥离 Omron 3 个平面移动关节(forward/side/yaw)及其
+    actuator/sensor。这样底座变成一个可直接设 qpos 的自由体,复用现有 freejoint 运动学 nav,
+    读位置精确无偏移。torso_height 关节保留(不影响平面运动)。"""
+    # 1) robot0_base 加 freejoint(初始位姿由 set_base_xpos 写在 body pos 上)
+    for b in root.iter("body"):
+        if b.get("name") == "robot0_base" and b.find("freejoint") is None:
+            b.insert(0, ET.Element("freejoint", {"name": BASE_FREEJOINT}))
+        if b.get("name") == "mobilebase0_base":
+            for j in list(b.findall("joint")):
+                if j.get("name") in _BASE_PLANAR_JOINTS:
+                    b.remove(j)
+    # 2) 删掉引用这些关节的 actuator / sensor(否则编译报 "unknown transmission target")
+    strip = set(_BASE_PLANAR_JOINTS)
+    for parent in root.iter():
+        for child in list(parent):
+            if child.tag in ("motor", "position", "velocity", "general") and child.get("joint") in strip:
+                parent.remove(child)
+            elif child.get("joint") in strip and child.tag not in ("body", "geom", "camera"):
+                parent.remove(child)
+
+
+def _rename_robot_cameras(root):
+    """给 PandaOmron 配测试台沿用的相机名(camera.yaml / 四宫格 / segmentation 全不用动):
+      - head_cam:新挂在 robot0_base 上,抬高俯视工作区(PandaOmron 自带 robotview 看的是机器人自己,
+        感知没用),转头扫描时扫周围台面 = 感知主相机。
+      - right_arm_cam ← robot0_eye_in_hand(腕部手眼)。
+      - left_arm_cam:复制 head_cam(单臂没左腕,凑四宫格第 4 格)。
+    """
+    # eye_in_hand → right_arm_cam
+    for cam in root.iter("camera"):
+        if cam.get("name") == "robot0_eye_in_hand":
+            cam.set("name", "right_arm_cam")
+
+    # 在 robot0_base 里加 head_cam(local 系:抬高 1.75m、前下俯,看工作区台面)
+    base = root.find(".//body[@name='robot0_base']")
+    if base is not None and root.find(".//camera[@name='head_cam']") is None:
+        head = ET.SubElement(base, "camera", {
+            "name": "head_cam", "pos": "0.35 0 1.75",
+            "xyaxes": _xyaxes("0.35 0 1.75", "2.6 0 0.55"), "fovy": "70",
+        })
+        # 单臂没左腕:复制 head_cam 当 left_arm_cam,四宫格第 4 格不空
+        dup = ET.SubElement(base, "camera", dict(head.attrib))
+        dup.set("name", "left_arm_cam")
+
+
+def _hide_collision_geoms(root):
+    """把机器人/家具的碰撞几何移到 group 4(MujocoSim 只渲染 group 0/1/2 → 不渲染),
+    但不动 contype/conaffinity(物理碰撞照常)。否则 PandaOmron 的绿色臂碰撞网格、黄色底座
+    碰撞柱、红色 RoboCasa 碰撞盒会盖在相机视野里(robot 视觉是 *_vis 在 group1,碰撞在 group0)。"""
+    for geom in root.iter("geom"):
+        name = geom.get("name", "").lower()
+        rgba = _rgba_values(geom.get("rgba"))
+        is_collision_name = "collision" in name or name.endswith("_col") or "_col_" in name
+        # robot 碰撞用纯色标注:绿 0 .5 0 / 黄 .5 .5 0;RoboCasa 碰撞盒常是红
+        is_col_rgba = bool(rgba and rgba[3] > 0.9 and (
+            (rgba[0] < 0.05 and 0.4 < rgba[1] < 0.6 and rgba[2] < 0.05) or
+            (0.4 < rgba[0] < 0.6 and 0.4 < rgba[1] < 0.6 and rgba[2] < 0.05) or
+            (rgba[0] >= 0.45 and rgba[1] <= 0.05 and rgba[2] <= 0.05)))
+        if is_collision_name or is_col_rgba:
+            geom.set("group", "4")
+
+
+def _hide_eef_targets(root):
+    """藏掉 IK target 标记 body(left/right_eef_target)的可见几何,避免渲染里出现悬浮小球。"""
+    for b in root.iter("body"):
+        if b.get("name") in ("left_eef_target", "right_eef_target"):
+            for g in b.iter("geom"):
+                g.set("rgba", "0 0 0 0")
+                g.set("group", "4")
+
+
+def _hide_robot_sites(root):
+    """把机器人调试 site 的 alpha 设 0(夹爪 grip_site_cylinder 绿柱、right_center 红点等),
+    否则会在相机视野里出现绿带/悬浮色块。site 只是标记,不影响物理。"""
+    for site in root.iter("site"):
+        nm = site.get("name") or ""
+        if nm.startswith(("gripper0", "robot0", "mobilebase0")):
+            rgba = (site.get("rgba") or "").split()
+            if len(rgba) == 4:
+                rgba[3] = "0"
+                site.set("rgba", " ".join(rgba))
+
+
+def _set_physics_options(root):
+    """设置物理参数(timestep/gravity/接触容量),与原 XLeRobot 场景一致,保证厨房大场景稳定。
+    并把 inertiagrouprange 扩到含 group 4:机器人质量来自 group0 碰撞几何(无显式 inertial),
+    _hide_collision_geoms 把它们移到 group 4 不渲染,inertia range 覆盖 4 才不会丢质量。"""
+    compiler = root.find("compiler")
+    if compiler is not None:
+        compiler.set("inertiagrouprange", "0 5")
+    option = root.find("option")
     if option is None:
-        option = ET.SubElement(robot_root, "option")
+        option = ET.SubElement(root, "option")
     option.set("timestep", "0.002")
     option.set("gravity", "0 0 -9.80665")
     option.set("integrator", "implicitfast")
-
-    size = robot_root.find("size")
+    size = root.find("size")
     if size is None:
-        size = ET.SubElement(robot_root, "size")
+        size = ET.SubElement(root, "size")
     size.set("nconmax", "5000")
     size.set("njmax", "5000")
 
 
-# ============================================================
-# 后处理：编译器路径 / 相机 / 统计 / 初始位姿
-# ============================================================
+def _find_parent(root, target):
+    """ElementTree 无 getparent:线性找 target 的父节点。"""
+    for parent in root.iter():
+        for child in parent:
+            if child is target:
+                return parent
+    return None
 
-def _set_generated_compiler_paths(root):
-    """设置生成场景的 meshdir 为 ../xlerobot/，使其能找到机器人 mesh 文件。"""
-    compiler = root.find("compiler")
-    if compiler is None:
-        compiler = ET.SubElement(root, "compiler")
-    compiler.set("angle", "radian")
-    compiler.set("meshdir", "../xlerobot/")
 
+# ============================================================
+# 后处理：相机 / 统计
+# ============================================================
 
 def _add_cameras(root):
     """
-    添加全局场景相机（顶视）。
+    添加全局场景相机（顶视 overhead_cam）。
 
-    机器人自带相机（right_arm_cam、left_arm_cam、head_cam）
-    定义在 xlerobot.xml 的 body 内，跟随机器人移动。
-    这里只加全局固定的 overhead 相机，用于截图和地图生成。
+    机器人自带相机（head_cam、right_arm_cam、left_arm_cam）由 _rename_robot_cameras
+    从 PandaOmron 的 robotview/eye_in_hand 改名而来，跟随机器人移动。
+    这里只加全局固定的 overhead 相机（仿真俯视，真机没有），用于截图和地图生成。
     """
     world = root.find("worldbody")
     if world is None:
@@ -262,48 +354,8 @@ def _set_statistic(root):
     statistic.set("extent", "5")
 
 
-def _set_robot_initial_pose(root):
-    """
-    设置机器人底盘初始位置和朝向。
-
-    保留模型自身的 z 高度，只改 x/y 到岛台和台面之间的位置 [3.2, -1.5]。
-    朝向通过 quat 设为 yaw=-90°。
-    """
-    chassis = root.find(".//body[@name='chassis']")
-    if chassis is None:
-        return
-    current_pos = [float(v) for v in chassis.get("pos", "0 0 0.035").split()]
-    z = current_pos[2] if len(current_pos) >= 3 else 0.035
-    chassis.set("pos", f"3.2 -1.5 {z}")
-    chassis.set("quat", "0.707108 0 0 -0.707108")
-
-
-def _add_missing_robot_inertials(root):
-    """
-    给缺少 inertial 的机器人相机 body 补充极小惯量。
-
-    GS-Web 模型的一些纯视觉 body（如 Right_Arm_Camera、head_camera_link）
-    没有 inertial 定义，MuJoCo 编译会报 "body mass too small"。
-    """
-    for name in (
-        "Right_Arm_Camera",
-        "Left_Arm_Camera",
-        "head_camera_link",
-        "head_camera_rgb_frame",
-        "head_camera_depth_frame",
-    ):
-        body = root.find(f".//body[@name='{name}']")
-        if body is None or body.find("inertial") is not None:
-            continue
-        ET.SubElement(body, "inertial", {
-            "pos": "0 0 0",
-            "mass": "0.001",
-            "diaginertia": "1e-6 1e-6 1e-6",
-        })
-
-
 # ============================================================
-# 后处理：隐藏非视觉几何 / 恢复碰撞
+# 后处理：隐藏非视觉几何 / 恢复碰撞(PandaOmron 场景暂不调用,保留备用)
 # ============================================================
 
 def _hide_nonvisual_geoms(root):

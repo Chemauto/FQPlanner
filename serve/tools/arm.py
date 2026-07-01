@@ -1,8 +1,8 @@
 """
-arm.py - XLeRobot 纯 MuJoCo 高层抓放工具
+arm.py - PandaOmron 纯 MuJoCo 高层抓放工具
 
 当前版本保留原 API 形状，使用虚拟末端点驱动高层任务测试。
-机器人模型仍是完整 XLeRobot MJCF；抓放通过物体 freejoint 吸附实现。
+机器人模型是 robosuite PandaOmron；抓放通过物体 freejoint 吸附到虚拟末端(夹爪)实现。
 """
 
 import numpy as np
@@ -10,19 +10,22 @@ import numpy as np
 from scene.scene_memory import coords_to_waypoint, move_object
 
 
+# PandaOmron 右臂 7 关节 + 夹爪指(用于 /status 汇报臂状态)
 RIGHT_ARM_JOINTS = [
-    "Rotation_R",
-    "Pitch_R",
-    "Elbow_R",
-    "Wrist_Pitch_R",
-    "Wrist_Roll_R",
-    "Jaw_R",
+    "robot0_joint1",
+    "robot0_joint2",
+    "robot0_joint3",
+    "robot0_joint4",
+    "robot0_joint5",
+    "robot0_joint6",
+    "robot0_joint7",
+    "gripper0_right_finger_joint1",
 ]
 
 
 def get_arm_info(env):
     ee_pos = np.asarray(env.virtual_ee_pos, dtype=float)
-    ee_quat = env.get_body_quat("Fixed_Jaw_2", fallback="Moving_Jaw_2")
+    ee_quat = env.get_body_quat("gripper0_right_eef", fallback="robot0_right_hand")
     arm_qpos = []
     arm_qvel = []
     for joint_name in RIGHT_ARM_JOINTS:

@@ -892,7 +892,7 @@ def process_commands(env):
                     # 模拟"开柜门把东西拿下来",绕开高柜机器人够不到的问题。
                     container = params["container"]
                     opened = env.open_container_door(container)
-                    chassis = env.get_body_pos("chassis")
+                    chassis = env.get_body_pos("robot0_base")
                     out = [float(chassis[0]) + 0.3, float(chassis[1]), 0.95]
                     lifted = []
                     for obj in list(_container_contents.get(container, [])):
@@ -1423,19 +1423,16 @@ def _build_occupancy_grid(env, resolution, x_min, x_max, y_min, y_max):
         model = env.sim.model
         data = env.sim.data
 
-        # 排除机器人 body。XLeRobot 的许多子 body 名称不是稳定的
-        # "robot/arm" 前缀，必须从 chassis 子树排除，避免地图把机器人自身
-        # 投影成静态障碍物。
+        # 排除机器人 body(PandaOmron:robot0_* / mobilebase0_* / gripper0_*),
+        # 从底座根 robot0_base 子树排除,避免地图把机器人自身投影成静态障碍物。
         robot_bodies = set()
-        chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
+        chassis_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "robot0_base")
         for i in range(model.nbody):
             name = (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) or "").lower()
             if chassis_id >= 0 and _is_body_descendant(model, i, chassis_id):
                 robot_bodies.add(i)
             elif any(k in name for k in (
-                "chassis", "arm", "jaw", "wrist", "pitch", "elbow", "rotation",
-                "servo", "motor", "wheel", "base_plate", "head", "battery",
-                "standoff", "mount",
+                "robot0", "mobilebase", "gripper0", "eef_target",
             )):
                 robot_bodies.add(i)
 

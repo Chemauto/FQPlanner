@@ -45,7 +45,7 @@ if __name__ == "__main__":
     # 3. 调试信息
     print(f"[debug] action_dim = {env.action_dim}")
     print(f"[debug] scene_xml = {env.scene_xml}")
-    print(f"[debug] 底座位置 = {env.get_body_pos('chassis').round(3).tolist()}")
+    print(f"[debug] 底座位置 = {env.get_body_pos('robot0_base').round(3).tolist()}")
     print(f"[debug] 末端位置 = {env.virtual_ee_pos.round(3).tolist()}")
 
     # 4. 启动 Flask API 服务

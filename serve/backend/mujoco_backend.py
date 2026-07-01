@@ -98,6 +98,7 @@ class MujocoKitchenEnv:
         self.virtual_ee_pos = np.zeros(3)
         self.base_free_joint_id = -1
         self.base_height = None
+        self._arm_hold = []  # [(qadr, value)] PandaOmron 臂/夹爪初始位姿,每步重置=运动学冻结(臂力矩驱动会下垂)
         self._load_registry()
         self._load_robot_registry()
         self.reset()
@@ -125,7 +126,9 @@ class MujocoKitchenEnv:
             )
 
     def _load_robot_registry(self):
-        body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "chassis")
+        # PandaOmron:底座根 body 是 robot0_base,scene_generator 给它加了 base_freejoint
+        # (剥离了 Omron 平面移动关节),所以复用现有 freejoint 运动学 nav。
+        body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "robot0_base")
         if body_id < 0:
             return
         joint_adr = self.model.body_jntadr[body_id]
@@ -171,33 +174,42 @@ class MujocoKitchenEnv:
         self.sim.forward()
         if self.base_free_joint_id >= 0:
             self.settle_base(steps=2000)
-        self.virtual_ee_pos = self.get_body_pos("Fixed_Jaw_2", fallback="Moving_Jaw_2")
+        # PandaOmron 末端:gripper eef body(抓取吸附点),回退到 hand body
+        self.virtual_ee_pos = self.get_body_pos("gripper0_right_eef", fallback="robot0_right_hand")
         return {}
 
     def _set_initial_arm_pose(self):
+        # PandaOmron 臂初始位姿(robosuite PandaOmron.init_qpos)+ torso 抬高 + 夹爪张开。
+        # 臂是力矩驱动(ctrl=0 会因重力下垂),所以记进 _arm_hold 每步重置=运动学冻结,
+        # 让臂保持自然姿态、随底座刚性移动(和抓取物体的吸附是同一思路)。
+        import math
         arm_pose = {
-            "Rotation_R": 0.0,
-            "Pitch_R": 2.0,
-            "Elbow_R": 0.5,
-            "Wrist_Pitch_R": -0.3,
-            "Wrist_Roll_R": 0.0,
-            "Jaw_R": 0.0,
-            "Rotation_L": 0.0,
-            "Pitch_L": 2.0,
-            "Elbow_L": 0.5,
-            "Wrist_Pitch_L": -0.3,
-            "Wrist_Roll_L": 0.0,
-            "Jaw_L": 0.0,
+            "robot0_joint1": 0.0,
+            "robot0_joint2": math.pi / 16.0 - 0.2,
+            "robot0_joint3": 0.0,
+            "robot0_joint4": -math.pi / 2.0 - math.pi / 3.0,
+            "robot0_joint5": 0.0,
+            "robot0_joint6": math.pi - 0.4,
+            "robot0_joint7": math.pi / 4.0,
+            "mobilebase0_joint_torso_height": 0.2,
+            "gripper0_right_finger_joint1": 0.04,
+            "gripper0_right_finger_joint2": -0.04,
         }
+        self._arm_hold = []
         for joint_name, value in arm_pose.items():
             joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
             if joint_id < 0:
                 continue
-            qadr = self.model.jnt_qposadr[joint_id]
+            qadr = int(self.model.jnt_qposadr[joint_id])
+            dadr = int(self.model.jnt_dofadr[joint_id])
             self.data.qpos[qadr] = value
-            actuator_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, joint_name)
-            if actuator_id >= 0:
-                self.data.ctrl[actuator_id] = value
+            self._arm_hold.append((qadr, dadr, float(value)))
+
+    def _hold_arm_pose(self):
+        """把臂/夹爪 qpos 钉回初始位姿、清零角速度(力矩臂否则重力下垂)。=运动学冻结,臂随底座刚性移动。"""
+        for qadr, dadr, value in self._arm_hold:
+            self.data.qpos[qadr] = value
+            self.data.qvel[dadr] = 0.0
 
     def _set_initial_objects(self):
         with open(GENERATED_META, "r", encoding="utf-8") as f:
@@ -219,10 +231,12 @@ class MujocoKitchenEnv:
             self.data.ctrl[:n] = action[:n]
         if self.grasped_object:
             self.set_object_pos(self.grasped_object, self.virtual_ee_pos)
+        self._hold_arm_pose()
         mujoco.mj_step(self.model, self.data)
+        self._hold_arm_pose()  # 力矩臂每步会下垂,step 后再钉回=保持初始姿态
         if self.grasped_object:
             self.set_object_pos(self.grasped_object, self.virtual_ee_pos)
-            self.sim.forward()
+        self.sim.forward()
 
     def _stabilize_base(self):
         """只锁 pitch/roll，不锁 z，让物理引擎自然处理轮子-地面接触"""
@@ -239,9 +253,11 @@ class MujocoKitchenEnv:
         self.sim.forward()
 
     def settle_base(self, steps=2000):
-        """启动时调用，让机器人自然沉降到地面"""
+        """启动时调用，让机器人自然沉降到地面。每步冻结臂,否则力矩臂在沉降中下垂塌掉。"""
         for _ in range(steps):
+            self._hold_arm_pose()
             mujoco.mj_step(self.model, self.data)
+            self._hold_arm_pose()
         self._stabilize_base()
 
     def _base_yaw_from_qpos(self, qadr):
