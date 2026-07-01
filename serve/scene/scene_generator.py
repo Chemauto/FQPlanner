@@ -161,7 +161,8 @@ def build_scene_xml(scene_dir, seed=42):
     _set_statistic(robot_root)                  # MuJoCo viewer 中心点
     _hide_eef_targets(robot_root)               # 藏 IK target 标记(left/right_eef_target)
     _hide_robot_sites(robot_root)               # 藏机器人调试 site(夹爪绿柱/中心红点)
-    _hide_collision_geoms(robot_root)           # 藏碰撞几何(绿臂/黄底座/红盒),保留 contype 物理
+    _hide_nonvisual_geoms(robot_root)           # 藏 RoboCasa 自己的碰撞子块/registry/backing(随机彩色半透明块)
+    _hide_collision_geoms(robot_root)           # 藏 PandaOmron 自身碰撞几何(绿臂/黄底座/红盒)
     _set_physics_options(robot_root)            # timestep/gravity/接触容量
 
     # ---- 6. 写出文件 ----

@@ -141,16 +141,23 @@ def run_drive_mode(floorplan: str):
     for label, x, y, yaw in waypoints:
         print(f"== {label} ==")
         try:
-            requests.post(f"{SERVE}/nav", json={"x": x, "y": y, "yaw": yaw}, timeout=180)
+            requests.post(f"{SERVE}/nav", json={"x": x, "y": y, "target_yaw": yaw}, timeout=180)
         except Exception as e:
             print(f"  nav 异常: {e}")
         tl.snap(label)
 
-    # 开一个高柜(门转开,四宫格里能看到门的变化)
+    # 开一个高柜(先导航过去,否则机器人还停在上一个工作点,机身相机拍不到门开的画面;
+    # 只有俯视 Top 能勉强看到,Head/腕相机会拍到无关方向)
     try:
         conts = requests.get(f"{SERVE}/containers", timeout=30).json().get("containers") or []
         if conts:
             cname = next((c["name"] for c in conts if "cab_1" in c["name"]), conts[0]["name"])
+            cpos = next(c["pos"] for c in conts if c["name"] == cname)
+            print(f"== 导航到 {cname} 附近 ==")
+            # 柜子在 y≈-0.2 的墙上,机器人站在 y=-1.125 面朝 +y(yaw=90)才能让 head_cam 对准柜门
+            # (用分割渲染验证过:yaw=-90 时 head_cam 对着相反方向的远墙,看不到任何柜子)
+            requests.post(f"{SERVE}/nav", json={"x": cpos[0], "y": -1.125, "target_yaw": 90}, timeout=180)
+            tl.snap(f"导航到 {cname} 附近")
             print(f"== 开柜 {cname} ==")
             requests.post(f"{SERVE}/open_container", json={"container": cname}, timeout=60)
             tl.snap(f"开柜 {cname}")
