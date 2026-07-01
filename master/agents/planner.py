@@ -1,10 +1,63 @@
+import os as _os
+import re as _re
 from typing import Any, Dict, Union
 
 import yaml
 from agents.prompts import MASTER_PLANNING_PLANNING
 from agent.collaboration import Collaborator
 from openai import AzureOpenAI, OpenAI
-from robot_api.client import get_objects
+from robot_api.client import get_objects, get_scene as _get_scene
+
+
+def _planner_memory_mode() -> bool:
+    """学习测试台开关(与 slaver/config.yaml use_realtime_coords 取反)。
+
+    True  = 记忆/部分可观测模式:给 LLM 喂 belief 符号位置(不喂精确坐标)。
+    False = 全可观测模式:喂实时精确坐标(原行为)。
+    """
+    try:
+        cfg_path = _os.path.normpath(_os.path.join(
+            _os.path.dirname(__file__), "..", "..", "slaver", "config.yaml"))
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return not bool(cfg.get("perception", {}).get("use_realtime_coords", True))
+    except Exception:
+        return False
+
+
+def _belief_obj_locations() -> dict:
+    """读 belief(scene_state.yaml),返回 {物体基名: 人类可读位置}。
+
+    直接读文件避免跨进程 import 路径问题;失败返回 {}(物体一律按"位置未知"处理,
+    navigate_to_target 会自动搜索,不影响正确性)。
+    """
+    try:
+        state_path = _os.path.normpath(_os.path.join(
+            _os.path.dirname(__file__), "..", "..",
+            "serve", "scene", "config", "scene_state.yaml"))
+        with open(state_path, encoding="utf-8") as f:
+            state = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+    def _b(n):
+        return _re.sub(r"\s*\d+$", "", str(n).strip().lower())
+
+    out = {}
+    for loc, info in (state.get("locations") or {}).items():
+        fixture = (info or {}).get("fixture")
+        for o in ((info or {}).get("objects") or []):
+            if loc == "robot_hand":
+                out[_b(o)] = "机器人手中(已抓取)"
+            elif loc == "unknown":
+                # 'unknown' 桶 = 尚未发现,别误标成"已发现"
+                out[_b(o)] = "位置未知(尚未发现,导航时系统会自动搜索)"
+            elif fixture:
+                out[_b(o)] = f"{fixture} 区域(位置记忆:已发现)"
+            else:
+                # 真实工作点但无 fixture 标注:露出 nav_NNN 对 LLM 无意义,给通用提示
+                out[_b(o)] = "已发现(位置记忆)"
+    return out
 
 
 class GlobalTaskPlanner:
@@ -72,34 +125,94 @@ class GlobalTaskPlanner:
         all_robots_info = self.collaborator.read_all_agents_info()
         all_environments_info = self.collaborator.read_environment(name=None)
 
-        # ===== 注入真实物体坐标 =====
+        # ===== 注入真实场景信息 =====
         try:
-            sim_objects = get_objects()
-            if isinstance(sim_objects, dict) and sim_objects.get("success") is False:
-                sim_objects = {}
-            if isinstance(sim_objects, dict) and isinstance(all_environments_info, dict):
-                for obj_name, obj_data in sim_objects.items():
-                    if obj_name in all_environments_info and isinstance(obj_data, dict):
-                        import json as _json
-                        info = _json.loads(all_environments_info[obj_name]) if isinstance(all_environments_info[obj_name], str) else all_environments_info[obj_name]
-                        pos = obj_data.get("pos", [])
-                        info["position"] = f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" if pos else "unknown"
-                        info["grasped"] = obj_data.get("grasped", False)
-                        all_environments_info[obj_name] = info
-        except Exception as e:
-            print(f"[Planner] Warning: could not fetch object positions: {e}")
+            scene_data = _get_scene()
+            if scene_data and scene_data.get("observation"):
+                # ALFWorld 模式：用实时 snapshot 替换静态 profile，忽略 MuJoCo 工作点
+                receptacles_list = list((scene_data.get("fixtures") or {}).keys())
 
-        # ===== 注入工作点信息 =====
-        try:
-            all_environments_info['_navigation_guide'] = {
-                '说明': '导航时使用以下简单名称，不要使用fixture原始名称',
-                'counter': {'工作点': 'counter_front', '可服务物体': ['apple', 'mug', 'pot', 'cup']},
-                'sink': {'工作点': 'island_north', '可服务物体': ['sink', 'sponge', 'bowl']},
-                'island': {'工作点': 'island_north', '可服务物体': ['island', 'bowl', 'sponge']},
-                'stove': {'工作点': 'stove_front', '可服务物体': ['stove']},
-            }
+                all_environments_info = {
+                    "backend": "alfworld",
+                    "game_objective": scene_data.get("task", ""),  # ALFWorld 内置目标（仅供参考）
+                    "observation": scene_data.get("observation", ""),
+                    "holding": scene_data.get("holding"),
+                    "receptacles": receptacles_list,
+                    "objects_visible": list((scene_data.get("objects") or {}).keys()),
+                    "admissible_commands": scene_data.get("admissible_commands", []),
+                    "_alfworld_rules": (
+                        "【ALFWorld规划规则】任务遵循固定骨架（对齐ALFRED gold plan），"
+                        "每个子任务对应一个动作，严禁把导航和操作合并到一个子任务。\n"
+                        f"可放置的目标位置/家具: {receptacles_list}。\n"
+                        "1) 【找并取物体】生成一个子任务：'搜索并抓取 [物体]'。"
+                        "系统会自动遍历所有位置、打开容器、找到即取走，你无需指定在哪找。\n"
+                        "   【严禁】生成'搜索 drawer 1''搜索 cabinet 2'这类逐个容器的子任务——"
+                        "一个物体只需一个'搜索并抓取'子任务。\n"
+                        "   【严禁】单独生成 take/抓取子任务——'搜索并抓取'已包含取走动作。\n"
+                        "2) 【处理物体】仅当任务要求时，按类型各生成'导航'+'操作'两个独立子任务：\n"
+                        "   - 清洗clean： '导航到 sinkbasin 1' → '执行raw_action: clean [物体] 1 with sinkbasin 1'\n"
+                        "   - 加热heat：  '导航到 microwave 1' → '执行raw_action: heat [物体] 1 with microwave 1'\n"
+                        "   - 冷却cool：  '导航到 fridge 1'    → '执行raw_action: cool [物体] 1 with fridge 1'\n"
+                        "   - 切片slice： '执行raw_action: slice [物体] 1 with knife 1'\n"
+                        "   - 照亮看look（task含look/examine ... in light）：'导航到 [台灯]' → '执行raw_action: toggle [台灯] 1'\n"
+                        "3) 【放置】'导航到 [目标]' → '执行raw_action: move [物体] 1 to [目标] 1'。\n"
+                        "   若目标是带门容器（safe/box/fridge/microwave/cabinet/drawer），"
+                        "放置前先加一个'执行raw_action: open [目标] 1'子任务。\n"
+                        "4) 实例号一律写 1，系统会自动校正成实际持有/存在的实例。\n"
+                        "5) 【两个物体】put two X in Y：完整重复两轮：\n"
+                        "   第1轮：搜索并抓取 X | 导航到 Y |（必要时 open Y）| 执行raw_action: move X 1 to Y 1\n"
+                        "   第2轮：搜索并抓取 X 排除 Y | 导航到 Y | 执行raw_action: move X 1 to Y 1\n"
+                        "   第2轮的搜索子任务必须写成'搜索并抓取 X 排除 Y'（Y是放置位置，如 shelf 1），"
+                        "否则会把刚放好的那个又取回来导致失败。\n"
+                        "示例 'put a hot mug in coffeemachine':\n"
+                        "  搜索并抓取 mug | 导航到 microwave 1 | 执行raw_action: heat mug 1 with microwave 1 | "
+                        "导航到 coffeemachine 1 | 执行raw_action: move mug 1 to coffeemachine 1\n"
+                        "示例 'put a cd in safe':\n"
+                        "  搜索并抓取 cd | 导航到 safe 1 | 执行raw_action: open safe 1 | "
+                        "执行raw_action: move cd 1 to safe 1"
+                    ),
+                }
+            else:
+                # MuJoCo 模式：在静态 profile 基础上注入位置信息。
+                #   memory_mode=True (use_realtime_coords=false): 喂 belief 符号位置,不喂坐标
+                #   memory_mode=False: 喂实时精确坐标(全可观测,原行为)
+                memory_mode = _planner_memory_mode()
+                belief = _belief_obj_locations() if memory_mode else {}
+                sim_objects = get_objects()
+                if isinstance(sim_objects, dict) and sim_objects.get("success") is not False:
+                    import json as _json
+                    for obj_name, obj_data in sim_objects.items():
+                        if obj_name in all_environments_info and isinstance(obj_data, dict):
+                            info = _json.loads(all_environments_info[obj_name]) if isinstance(all_environments_info[obj_name], str) else all_environments_info[obj_name]
+                            if memory_mode:
+                                # 只取物体名和持有状态(机器人知道自己拿了什么),位置一律来自 belief;
+                                # belief 没有 = 尚未探索发现 → "位置未知"
+                                base = _re.sub(r"\s*\d+$", "", obj_name.strip().lower())
+                                info["position"] = belief.get(base, "位置未知(尚未发现,导航时系统会自动搜索)")
+                            else:
+                                pos = obj_data.get("pos", [])
+                                info["position"] = f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})" if pos else "unknown"
+                            info["grasped"] = obj_data.get("grasped", False)
+                            all_environments_info[obj_name] = info
+                all_environments_info['_navigation_guide'] = {
+                    '说明': '导航时使用以下简单名称，不要使用fixture原始名称',
+                    'counter': {'工作点': 'counter_front', '可服务物体': ['apple', 'mug', 'pot', 'cup']},
+                    'sink': {'工作点': 'island_north', '可服务物体': ['sink', 'sponge', 'bowl']},
+                    'island': {'工作点': 'island_north', '可服务物体': ['island', 'bowl', 'sponge']},
+                    'stove': {'工作点': 'stove_front', '可服务物体': ['stove']},
+                }
+                if memory_mode:
+                    all_environments_info['_perception_note'] = (
+                        "【部分可观测】position 是机器人的位置记忆(belief),不是精确坐标,可能过期。"
+                        "取物体一律用 search_and_grasp([物体]):系统自动逐工作点搜索、发现后更新记忆、"
+                        "并**当场把物体抓起**,你无需指定去哪找。"
+                        "【严禁】用 navigate_to_target([物体]) 取物体——它只导航/发现、**绝不抓取**,"
+                        "误用会让后续 place 因'未持有'而失败(cup→cabinet 卡死的根因)。"
+                        "navigate_to_target 只用于去目标家具。"
+                        "放置骨架恒为:search_and_grasp([物体]) → navigate_to_target([目标家具]) → place_on_top。"
+                    )
         except Exception as e:
-            print(f"[Planner] Warning: could not load waypoints: {e}")
+            print(f"[Planner] Warning: could not fetch scene: {e}")
         # ===== 注入结束 =====
 
         content = MASTER_PLANNING_PLANNING.format(

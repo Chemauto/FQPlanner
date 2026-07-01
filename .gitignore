@@ -181,3 +181,12 @@ cython_debug/
 .claude
 .codex
 serve/videos/dump.rdb
+
+# macOS / 运行时垃圾 / 生成物(per-home 测试台)
+.DS_Store
+dump.rdb
+*.rdb
+MUJOCO_LOG.TXT
+**/MUJOCO_LOG.TXT
+deploy/task_timeline/
+master/memory/location_memory.json

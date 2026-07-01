@@ -1,29 +1,23 @@
-last_updated: '初始状态'
+last_updated: '2026-07-01 11:13:54'
 locations:
   nav_003:
     fixture: counter
-    objects:
-    - apple
-    - mug
-    - pot
+    objects: []
   nav_017:
     fixture: stove
     objects: []
   nav_032:
     fixture: sink
-    objects:
-    - sponge
+    objects: []
   nav_055:
     fixture: null
     objects: []
   nav_060:
     fixture: null
-    objects:
-    - bowl
+    objects: []
   nav_064:
     fixture: null
-    objects:
-    - cup
+    objects: []
   robot_hand:
     fixture: null
     objects: []

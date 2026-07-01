@@ -101,6 +101,34 @@ class MultiStepAgent:
             self.step_number = 1
             self._scene_context = None
             self._last_status = None
+            self.last_tool_result = None
+
+        # 检测未填充的中文占位符（如 [找到的位置]），直接失败，不进入 ReAct 循环
+        import re as _re_placeholder
+        if _re_placeholder.search(r'\[[^\]]*[一-鿿][^\]]*\]', task):
+            self._last_status = "failure"
+            self.last_tool_result = f"任务包含未填充占位符，无法执行: {task}"
+            return self.last_tool_result, False
+
+        # 搜索子任务兜底：如果 robot 已经持有目标物体，无需再搜，直接返回成功
+        # （防止 master early-skip 时序问题导致搜索任务仍被执行）
+        if "搜索" in task and "寻找" in task:
+            import re as _re_holding
+            _sm = _re_holding.search(r'寻找\s+(\S+)', task)
+            if _sm:
+                _wanted = _sm.group(1).strip().rstrip('.,，。').lower()
+                try:
+                    from robot_api.client import get_scene_state as _gss_h
+                    _state_h = _gss_h()
+                    _holding_h = str(_state_h.get("holding") or "").lower()
+                    if _holding_h and _wanted in _holding_h:
+                        self._last_status = "success"
+                        self.last_tool_result = (
+                            f"已持有目标 '{_wanted}'，搜索子任务直接跳过 (holding={_state_h.get('holding')})"
+                        )
+                        return self.last_tool_result, False
+                except Exception:
+                    pass
 
         self.logger.log_task(
             content=self.task.strip(),
@@ -178,6 +206,20 @@ class ToolCallingAgent(MultiStepAgent):
         self, tool_name: str, tool_arguments: dict, memory_step: ActionStep
     ) -> Union[str, None]:
 
+        # pick_two 第二轮：master 子任务为"搜索并抓取 X 排除 Y"。强制把 Y 注入 search_and_grasp
+        # 的 exclude_from，不依赖 LLM 主动传参（实测 LLM 常漏传 → 第二轮会从刚放置的目标位
+        # 把第一个又取回来，导致 put two 失败）。
+        if tool_name == "search_and_grasp" and "排除" in (self.task or ""):
+            import re as _re_exc
+            _m = _re_exc.search(r'排除\s+(.+?)\s*$', self.task)
+            if _m:
+                try:
+                    _a = json.loads(tool_arguments) if isinstance(tool_arguments, str) else dict(tool_arguments or {})
+                except Exception:
+                    _a = {}
+                _a["exclude_from"] = _m.group(1).strip().rstrip('.,，。')
+                tool_arguments = json.dumps(_a, ensure_ascii=False)
+
         self.logger.log(
             Panel(
                 Text(f"Calling tool: '{tool_name}' with arguments: {tool_arguments}")
@@ -217,6 +259,58 @@ class ToolCallingAgent(MultiStepAgent):
                     tool_status = state_updates.pop("_status", None)
             except (json.JSONDecodeError, ValueError) as e:
                 pass  # Not a JSON tuple, use as-is
+
+        # 导航中间状态：不终止，刷新场景上下文，继续 ReAct 循环
+        if tool_status == "navigated":
+            self._last_status = tool_status
+            self.last_tool_result = observation
+            # Invalidate scene context so next step gets fresh admissible_commands
+            self._scene_context = None
+            if state_updates:
+                if "_image" in state_updates:
+                    self._captured_images.append(state_updates.pop("_image"))
+                await self._update_robot_state(state_updates)
+
+            # ALFWorld search subtask auto-take: if the target is now in admissible_commands
+            # (i.e., the container was just opened and target is inside), take it immediately
+            # without waiting for the LLM — which might otherwise close the container first.
+            if "搜索" in self.task and "寻找" in self.task:
+                import re as _re
+                _sm = _re.search(r'寻找\s+(\S+)', self.task)
+                _loc_m2 = _re.search(r'搜索\s+(.+?)\s+寻找', self.task)
+                if _sm:
+                    _search_target = _sm.group(1).strip().rstrip('.,，。').lower()
+                    # Only accept take commands from the designated search location
+                    _search_loc = _loc_m2.group(1).strip().lower() if _loc_m2 else None
+                    try:
+                        from robot_api.client import get_scene_state as _gss
+                        _scene_state = _gss()
+                        _admissible = (
+                            _scene_state.get("admissible_commands", [])
+                            if isinstance(_scene_state, dict) else []
+                        )
+                        _take_cmd = next(
+                            (cmd for cmd in _admissible
+                             if cmd.lower().startswith("take ")
+                             and _search_target in cmd.lower()
+                             and (_search_loc is None or _search_loc in cmd.lower())),
+                            None,
+                        )
+                        if _take_cmd:
+                            from slaver.robot.module.raw import _raw_post
+                            _take_result = _raw_post(_take_cmd)
+                            _take_obs = _take_result.get("result", "")
+                            if _take_result.get("success") is not False:
+                                self.last_tool_result = (
+                                    f"{observation}\n"
+                                    f"[Auto-take] Found target — executed '{_take_cmd}': {_take_obs}"
+                                )
+                                self._last_status = "success"
+                                return "final_answer"
+                    except Exception:
+                        pass  # Fall through to normal ReAct loop
+
+            return observation  # Continue ReAct loop (not "final_answer")
 
         # 完成类状态（success/none）：直接停止
         if tool_status in ("success", "none"):
@@ -279,6 +373,10 @@ class ToolCallingAgent(MultiStepAgent):
         )
         # Log to file
         self.logger.log2file(f"Observations: {enhanced_observation}", level=LogLevel.INFO)
+
+        # ALFWorld: refresh admissible_commands after each raw_action (env state changes)
+        if tool_name == "raw_action":
+            self._scene_context = None
 
         return enhanced_observation
 
@@ -404,10 +502,9 @@ class ToolCallingAgent(MultiStepAgent):
         if fixtures:
             lines.append("\nFixtures:")
             for name, info in fixtures.items():
-                pos = info.get("pos", [])
-                size = info.get("size", [])
+                pos = info.get("pos") or []
+                size = info.get("size") or []
                 ftype = info.get("type", "")
-                # 计算表面高度 = 中心z + 半高
                 if len(pos) >= 3 and len(size) >= 3:
                     surface_z = pos[2] + size[2] / 2
                     lines.append(
@@ -423,10 +520,13 @@ class ToolCallingAgent(MultiStepAgent):
         if objects:
             lines.append("\nObjects:")
             for name, info in objects.items():
-                pos = info.get("pos", [])
+                pos = info.get("pos") or []
                 grasped = info.get("grasped", False)
                 status = "grasped" if grasped else "free"
-                lines.append(f"- {name}: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}] ({status})")
+                if len(pos) >= 3:
+                    lines.append(f"- {name}: [{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}] ({status})")
+                else:
+                    lines.append(f"- {name} ({status})")
 
         # 机器人
         robot = scene.get("robot", {})
@@ -437,6 +537,45 @@ class ToolCallingAgent(MultiStepAgent):
             lines.append("\nRobot:")
             lines.append(f"- base: [{bp[0]:.2f}, {bp[1]:.2f}, {bp[2]:.2f}], yaw={yaw:.1f}")
             lines.append(f"- end-effector: [{ep[0]:.2f}, {ep[1]:.2f}, {ep[2]:.2f}]")
+
+        # ALFWorld 专属字段
+        observation = scene.get("observation")
+        admissible = scene.get("admissible_commands")
+        holding = scene.get("holding")
+
+        if observation:
+            lines.append(f"\nObservation:\n{observation}")
+        if holding:
+            lines.append(f"\nCurrently holding: {holding}")
+        if admissible:
+            import re as _re_loc
+            # 按子任务类型分流：搜索类只提示 search_and_grasp（不列 admissible，避免诱导
+            # 把工具语法塞进 raw_action）；操作/导航类才列 admissible 供 raw_action 使用。
+            if "搜索" in self.task:
+                _m = (_re_loc.search(r'搜索并抓取\s+(\S+)', self.task)
+                      or _re_loc.search(r'寻找\s+(\S+)', self.task)
+                      or _re_loc.search(r'搜索\s+(\S+)', self.task))
+                _obj = _m.group(1).strip().rstrip('.,，。') if _m else "<目标物体>"
+                # put two 第二轮："搜索并抓取 X 排除 Y" → 传 exclude_from=Y，避免取回刚放的
+                _exc_m = _re_loc.search(r'排除\s+(.+?)\s*$', self.task)
+                _exc = _exc_m.group(1).strip().rstrip('.,，。') if _exc_m else ""
+                if _exc:
+                    _call = f'search_and_grasp(object_name="{_obj}", exclude_from="{_exc}")'
+                else:
+                    _call = f'search_and_grasp(object_name="{_obj}")'
+                lines.append(
+                    f"\n[搜索抓取子任务] 只需调用一次：{_call}。\n"
+                    "它会自动遍历所有位置、打开容器、找到目标并取走（手里若拿着别的会先放下）。\n"
+                    "不要用 raw_action，不要手动 go to / open，不要调 grasp_object。"
+                )
+            else:
+                lines.append("\nAdmissible actions (use these exact strings via raw_action):")
+                for cmd in admissible:
+                    lines.append(f"  - {cmd}")
+                lines.append(
+                    "\n[操作子任务] 用 raw_action 执行上面某条命令。"
+                    "物体实例号写 1 即可，系统会自动校正成你实际持有/现场存在的实例。"
+                )
 
         return "\n".join(lines)
 

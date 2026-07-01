@@ -111,6 +111,31 @@
             <div id="record-info" style="text-align:center;font-size:12px;color:#64748b;margin-top:6px"></div>
         </div>
 
+        <!-- 四宫格相机(head+左右腕+overhead)时间线回放 -->
+        <div class="card">
+            <h2>四宫格相机
+                <span style="font-size:12px;color:#64748b;font-weight:normal">(head + 左右腕 + overhead 拼图)</span>
+                <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="loadTimeline()">刷新时间线</button>
+            </h2>
+            <div class="btn-row" style="justify-content:center;margin-bottom:8px">
+                <button class="btn btn-sm" id="btn-quad-live" onclick="toggleQuadLive()">▶ 实时四宫格</button>
+            </div>
+            <div id="quad-meta" style="text-align:center;font-size:12px;color:#64748b;margin-bottom:6px"></div>
+            <div style="text-align:center">
+                <img id="quad-img" style="max-width:100%;border-radius:8px;background:#0f172a;min-height:120px" alt="四宫格">
+            </div>
+            <div id="timeline-controls" style="margin-top:10px;display:none">
+                <input type="range" id="timeline-slider" min="0" max="0" value="0" style="width:100%" oninput="showFrame(this.value)">
+                <div class="btn-row" style="justify-content:center;margin-top:6px">
+                    <button class="btn btn-sm btn-outline" onclick="stepFrame(-1)">◀ 上一帧</button>
+                    <button class="btn btn-sm" id="btn-play" onclick="playTimeline()">⏵ 播放</button>
+                    <button class="btn btn-sm btn-outline" onclick="stepFrame(1)">下一帧 ▶</button>
+                </div>
+                <div id="frame-label" style="text-align:center;font-size:13px;color:#e2e8f0;margin-top:6px"></div>
+            </div>
+            <div id="timeline-empty" style="text-align:center;font-size:12px;color:#64748b;margin-top:6px"></div>
+        </div>
+
         <!-- 任务发布 -->
         <div class="card">
             <h2>发布任务</h2>
@@ -247,9 +272,17 @@
             const anyFailed = data.failed || data.subtask_list.some(
                 t => t.done && t.status && t.status !== 'success'
             );
+            // ALFWorld ground-truth result (won=true/false) overrides subtask-level heuristic
+            const wonSignal = data.hasOwnProperty('won') ? data.won : null;
             let statusLabel, statusCls;
             if (data.all_done) {
-                if (anyFailed) {
+                if (wonSignal === true) {
+                    statusLabel = '✓ 任务成功 (ALFWorld verified)';
+                    statusCls = 'status-ok';
+                } else if (wonSignal === false) {
+                    statusLabel = '✕ 任务失败 (ALFWorld verified)';
+                    statusCls = 'status-fail';
+                } else if (anyFailed) {
                     statusLabel = '✕ 任务失败未完成';
                     statusCls = 'status-fail';
                 } else {
@@ -638,6 +671,91 @@
                 } catch (e) {}
             }, 1000);
         }
+
+        // ── 四宫格相机(head+左右腕+overhead)：实时 + 时间线回放 ──
+        let quadLiveTimer = null, tlFrames = [], tlPlayTimer = null;
+
+        function stopQuadLive() {
+            if (quadLiveTimer) { clearInterval(quadLiveTimer); quadLiveTimer = null; }
+            document.getElementById('btn-quad-live').textContent = '▶ 实时四宫格';
+        }
+        function stopPlay() {
+            if (tlPlayTimer) { clearInterval(tlPlayTimer); tlPlayTimer = null; }
+            const b = document.getElementById('btn-play'); if (b) b.textContent = '⏵ 播放';
+        }
+
+        function toggleQuadLive() {
+            const btn = document.getElementById('btn-quad-live');
+            if (quadLiveTimer) { stopQuadLive(); return; }
+            stopPlay();
+            document.getElementById('timeline-controls').style.display = 'none';
+            btn.textContent = '⏸ 停止实时';
+            const refresh = () => {
+                document.getElementById('quad-img').src = '/api/quad_latest?t=' + Date.now();
+                document.getElementById('quad-meta').textContent = '实时四宫格 · ' + new Date().toLocaleTimeString();
+            };
+            refresh();
+            quadLiveTimer = setInterval(refresh, 1500);
+        }
+
+        async function loadTimeline() {
+            stopQuadLive();
+            const empty = document.getElementById('timeline-empty');
+            try {
+                const resp = await fetch('/api/timeline');
+                const data = await resp.json();
+                if (!data.exists || !(data.frames || []).length) {
+                    empty.textContent = '暂无时间线。先跑 bench/capture_quad_timeline.py 采集。';
+                    document.getElementById('timeline-controls').style.display = 'none';
+                    return;
+                }
+                tlFrames = data.frames;
+                empty.textContent = '';
+                document.getElementById('timeline-controls').style.display = 'block';
+                const slider = document.getElementById('timeline-slider');
+                slider.max = tlFrames.length - 1;
+                slider.value = 0;
+                const wonTag = data.won === true ? ' · <span style="color:#4ade80">✓完成</span>'
+                             : data.won === false ? ' · <span style="color:#f87171">✗未完成</span>' : '';
+                document.getElementById('quad-meta').innerHTML =
+                    `任务: <b>${data.task || '?'}</b>${wonTag}` +
+                    `<br><span style="font-size:11px">采集于 ${data.created || ''} · 宫格: ${(data.cameras || []).join(' / ')}</span>`;
+                showFrame(0);
+            } catch (e) {
+                empty.textContent = '加载时间线失败: ' + e.message;
+            }
+        }
+
+        function showFrame(i) {
+            if (!tlFrames.length) return;
+            i = Math.max(0, Math.min(tlFrames.length - 1, parseInt(i)));
+            const f = tlFrames[i];
+            document.getElementById('quad-img').src = '/task_timeline/' + f.file + '?t=' + Date.now();
+            document.getElementById('timeline-slider').value = i;
+            document.getElementById('frame-label').textContent =
+                `时间点 ${i + 1}/${tlFrames.length} · ${f.label} · t=${f.t}s`;
+        }
+
+        function stepFrame(d) {
+            stopPlay();
+            showFrame(parseInt(document.getElementById('timeline-slider').value) + d);
+        }
+
+        function playTimeline() {
+            const btn = document.getElementById('btn-play');
+            if (tlPlayTimer) { stopPlay(); return; }
+            if (!tlFrames.length) return;
+            btn.textContent = '⏸ 暂停';
+            let i = parseInt(document.getElementById('timeline-slider').value);
+            if (i >= tlFrames.length - 1) i = -1;
+            tlPlayTimer = setInterval(() => {
+                i++;
+                if (i >= tlFrames.length) { stopPlay(); return; }
+                showFrame(i);
+            }, 900);
+        }
+
+        loadTimeline();
     </script>
 </body>
 </html>

@@ -77,4 +77,18 @@ robocasa:
   timeout: 120
 
 perception:
-  use_realtime_coords: true  # true=调实时API, false=只用记忆
+  # 学习测试台总开关:
+  #   true  = 全可观测(实时调 /objects 拿精确坐标, 无学习曲线)
+  #   false = 部分可观测(只用 belief=scene_state 当 location memory;
+  #           planner 喂符号位置、导航触发逐工作点发现、belief 起空、漂移可检测)
+  # server.py 也读这个值决定 reset_home 起空 belief / inject 不更新 belief。
+  use_realtime_coords: false
+  # 部分可观测下"机器人观测"用哪种感知后端(仅 use_realtime_coords:false 时生效):
+  #   geometric    = 坐标真值过滤(物体最近工作点==当前工作点),无视野限制 = baseline
+  #   segmentation = 渲染机器人相机分割图,只认视野里可见的物体(MuJoCo 自带,有视角/
+  #                  遮挡/距离限制、无识别噪声),调 serve /visible_objects
+  #   vlm          = 渲染 RGB 发 VLM(上面 camera.vlm=mimo-v2.5)识别 [待接,=原方案]
+  backend: segmentation
+  # segmentation/vlm 用哪个相机:head_cam(单视角=最强部分可观测)/all(head+两腕融合,真机导向减盲区)/
+  #   逗号分隔自定义(如 head_cam,overhead_cam)。overhead 俯视是仿真特权,真机没有=作弊。
+  camera: all

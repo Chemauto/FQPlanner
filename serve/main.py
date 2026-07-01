@@ -92,7 +92,9 @@ if __name__ == "__main__":
                 if not viewer.is_running():
                     break
                 viewer.sync()
-            time.sleep(0.01)
+                time.sleep(0.01)   # 有 viewer:节流到 ~100Hz 便于人眼观看
+            else:
+                time.sleep(0.0005)  # headless:几乎全速步进(nav 快 ~10x),仅让出 GIL 给 Flask 线程
     except KeyboardInterrupt:
         pass
     finally:

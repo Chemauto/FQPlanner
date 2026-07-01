@@ -39,6 +39,21 @@ def reset_to_initial():
     print("[SceneMemory] 场景状态已重置为初始状态")
 
 
+def reset_belief_unknown():
+    """学习模式:把 belief 清空——保留工作点→fixture 结构,但所有物体回到 unknown。
+
+    全可观测模式用 reset_to_initial()(belief 直接 = 真值,无需探索);
+    学习模式用这个:机器人开局不知道任何物体在哪,靠逐工作点导航+局部观测逐步填回
+    belief,从而产生 ALFWorld 那样的 memory_speedup 学习曲线。
+    """
+    with open(INITIAL_PATH) as f:
+        state = yaml.safe_load(f) or {}
+    for info in (state.get('locations') or {}).values():
+        info['objects'] = []
+    save_state(state)
+    print("[SceneMemory] 学习模式:belief 已清空(所有物体 → unknown)")
+
+
 def get_object_location(obj_name: str) -> str:
     """返回物体所在的工作点名，如 'nav_012'"""
     state = load_state()

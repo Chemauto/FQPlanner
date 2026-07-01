@@ -20,6 +20,9 @@ STATE_ENDPOINTS = {
     "arm_status": ("GET", "/status"),
     "map_data": ("GET", "/map_data"),
     "image": ("POST", "/screenshot"),
+    "success": ("GET", "/success"),
+    "scene_state": ("GET", "/scene_state"),
+    "reset": ("POST", "/reset"),
 }
 
 ACTION_ENDPOINTS = {

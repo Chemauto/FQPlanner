@@ -85,6 +85,23 @@ def is_object_grasped(object_name: str) -> bool:
     return False
 
 
+def check_success() -> dict:
+    """Query the backend for ground-truth task success (ALFWorld: won signal).
+    Returns {"won": True/False} or {"won": None} if backend doesn't support it.
+    """
+    return _RUNTIME.get_state("success")
+
+
+def get_scene_state() -> dict:
+    """Get the current symbolic scene state (ALFWorld snapshot or MuJoCo belief)."""
+    return _RUNTIME.get_state("scene_state")
+
+
+def reset_env() -> dict:
+    """Reset the simulation environment (ALFWorld: start a new episode, clear step counter)."""
+    return _RUNTIME.get_state("reset")
+
+
 def set_backend_url(url: str) -> None:
     """Compatibility helper for local development."""
     _RUNTIME.set_backend_url(url)

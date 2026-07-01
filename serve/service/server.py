@@ -19,7 +19,14 @@ from tools.arm import (
     open_gripper, close_gripper, is_grasped,
 )
 from tools.move import get_base_info, nav, move, stop_base, follow_path
-from scene.scene_memory import coords_to_waypoint, get_all_locations, move_object
+from scene.scene_memory import (
+    coords_to_waypoint,
+    get_all_locations,
+    load_state as _load_belief_state,
+    move_object,
+    reset_belief_unknown,
+    reset_to_initial,
+)
 
 import sys as _sys
 _sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'slaver', 'robot')))
@@ -298,6 +305,176 @@ def _np_to_list(obj):
     return obj
 
 
+# ============================================================
+# Phase 1 持续世界 (per-home) —— 对齐 serve_alfworld 的 per-home 学习基础设施
+# MuJoCo 全可观测：drift 恢复靠 grasp 重新查 /objects 拿新坐标，无需遍历搜索。
+# 这里补齐 reset_home / set_task / inject_move / success(几何裁判) / shadow_state，
+# 让同一套 bench(run_home_llm / eval_drift) 能直接跑 MuJoCo 后端。
+# ============================================================
+import re as _re
+
+_home = {"persistent": False, "task": "", "steps": 0}
+_container_contents = {}  # container → [objs] 藏进去的物体;open_container 时抬出来露到台面
+
+
+def _learning_mode():
+    """学习测试台开关 = slaver/config.yaml 的 perception.use_realtime_coords 取反。
+
+    True  → 部分可观测:reset_home 起空 belief、inject_move 不更新 belief(漂移可检测)。
+    False → 全可观测:belief 直接 = 真值(原行为不变)。
+    serve 与 slaver 是两个进程,但同仓库,这里直接读那份 yaml 保证单一真相源。
+    """
+    try:
+        import yaml as _yaml
+        cfg_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "slaver", "config.yaml")
+        )
+        with open(cfg_path) as f:
+            cfg = _yaml.safe_load(f) or {}
+        return not bool(cfg.get("perception", {}).get("use_realtime_coords", True))
+    except Exception:
+        return False
+
+# 任务里的家具基名(ALFWorld 词表) → RoboCasa 实际 fixture 名包含的片段。
+# 注意:RoboCasa 命名是 cab_main_main_group / shelves_main_group / stovetop_main_group,
+# 所以 cabinet→"cab"、shelf→"shelves"、stove→"stove"(stovetop 含 stove)。
+_FIXTURE_ALIAS = {
+    "countertop": "counter", "counter": "counter",
+    "sinkbasin": "sink", "sink": "sink",
+    "stoveburner": "stove", "stove": "stove", "stovetop": "stove",
+    "diningtable": "counter", "table": "counter",
+    "island": "island",
+    "shelf": "shelves", "shelves": "shelves",
+    "cabinet": "cab", "drawer": "cab", "cab": "cab",
+    "fridge": "fridge", "microwave": "microwave",
+}
+
+
+def _count_step():
+    """持续模式下记一步(对齐 ALFWorld 的步数指标:每个高层动作算一步)。"""
+    if _home["persistent"]:
+        _home["steps"] += 1
+
+
+def _match_object(base):
+    env = _get_env()
+    base = (base or "").lower()
+    for o in env.objects:
+        if base and base in o.lower():
+            return o
+    return None
+
+
+def _fixtures_for_base(base):
+    """目标家具基名 → 所有匹配的 MuJoCo fixture 实例名(可能多个 counter 实例)。
+
+    片段如 "cab" 会同时命中 cab_main_main_group 和 island_cab_right_*;按"名字以片段
+    开头"优先排序,让 inject 取 fixes[0] 时拿到正主(cab_main)而非 island 上的橱柜面板。
+    """
+    env = _get_env()
+    target = _FIXTURE_ALIAS.get((base or "").lower(), (base or "").lower())
+    if not target:
+        return []
+    matches = [f for f in env.fixtures if target in f.lower() or f.lower() in target]
+    matches.sort(key=lambda f: (not f.lower().startswith(target), len(f)))
+    return matches
+
+
+def _parse_put_task(task):
+    """'put mug in countertop' / 'put the mug on counter' → ('mug', 'countertop')。"""
+    m = _re.search(
+        r'put\s+(?:the\s+|a\s+|an\s+)?(\w+).*?\b(?:in|into|on|onto|to)\b\s+(?:the\s+)?(\w+)',
+        (task or "").lower(),
+    )
+    if m:
+        return m.group(1), m.group(2)
+    return None, None
+
+
+def _fixture_top_center(fix_name):
+    """目标 fixture 顶面中心坐标(放置/注入落点)。"""
+    fx = _get_env().fixtures[fix_name]
+    pos = np.asarray(fx.pos, dtype=float)
+    size = np.asarray(fx.size, dtype=float)
+    return [float(pos[0]), float(pos[1]), float(pos[2] + size[2] / 2.0 + 0.05)]
+
+
+def _on_fixture(opos, fix_name, margin=0.20):
+    """几何裁判:物体 XY 落在 fixture footprint(含 margin)内、且未掉到地面。"""
+    fx = _get_env().fixtures[fix_name]
+    cx, cy, cz = [float(v) for v in fx.pos]
+    sx, sy, sz = [float(v) for v in fx.size]
+    return (
+        abs(opos[0] - cx) <= sx / 2.0 + margin and
+        abs(opos[1] - cy) <= sy / 2.0 + margin and
+        opos[2] >= cz - 0.20  # 没掉到地面
+    )
+
+
+def _waypoint_serves_fixture(opos, fix_base):
+    """Q2 符号裁判:物体最近工作点(coords_to_waypoint,与 belief/发现同一映射)是否服务目标家具。
+
+    与几何裁判 OR 使用:几何=物理真值(footprint),这个=工作点符号判据,
+    让 MuJoCo 裁判与 ALFWorld 的"物体在 shelf"符号判定同构(对齐 Q2)。
+    """
+    try:
+        wp_name = coords_to_waypoint([float(opos[0]), float(opos[1])])
+        target = _FIXTURE_ALIAS.get((fix_base or "").lower(), (fix_base or "").lower())
+        info = (_load_belief_state().get("locations") or {}).get(wp_name) or {}
+        fx = (info.get("fixture") or "").lower()
+        return bool(fx) and (target in fx or fx in target)
+    except Exception:
+        return False
+
+
+def _judge_task(task):
+    """完成裁判,替代 ALFWorld 的 oracle won / shadow_judge。
+
+    won = 几何裁判(物体落在目标家具 footprint,物理真值) OR 工作点符号裁判(Q2)。
+    place/inject 都把物体放到家具顶面中心,两条判据在真实场景下一致;OR 只是让
+    边界情形更鲁棒,并让裁判可用工作点语义表达。
+    """
+    obj_base, fix_base = _parse_put_task(task)
+    if not obj_base or not fix_base:
+        return False
+    obj = _match_object(obj_base)
+    fixes = _fixtures_for_base(fix_base)
+    if not obj or not fixes:
+        return False
+    try:
+        with _env_lock:
+            opos = _get_env().get_object_pos(obj)
+        if any(_on_fixture(opos, f) for f in fixes):
+            return True
+        return _waypoint_serves_fixture(opos, fix_base)
+    except Exception:
+        return False
+
+
+def _shadow_at():
+    """belief 层:每个物体当前最近的家具名(held 优先),供 bench 调试/裁判对照。"""
+    env = _get_env()
+    held = getattr(env, "grasped_object", None)
+    at = {}
+    with _env_lock:
+        for o in env.objects:
+            if o == held:
+                at[o] = "held"
+                continue
+            try:
+                opos = env.get_object_pos(o)
+            except Exception:
+                continue
+            best = min(
+                env.fixtures,
+                key=lambda f: (opos[0] - env.fixtures[f].pos[0]) ** 2
+                + (opos[1] - env.fixtures[f].pos[1]) ** 2,
+                default=None,
+            )
+            at[o] = best or "unknown"
+    return at
+
+
 def submit_command(cmd_type, params):
     """
     提交命令到队列，等待执行结果
@@ -313,7 +490,7 @@ def submit_command(cmd_type, params):
     }
     with _queue_lock:
         _cmd_queue.append(cmd)
-    event.wait(timeout=120)  # 最多等 120 秒
+    event.wait(timeout=300)  # 最多等 300 秒(MuJoCo nav 单步慢,发现机制串多个 nav,留足余量)
     with _queue_lock:
         result = _results.pop(cmd_id, {"error": "超时"})
     return result
@@ -402,10 +579,16 @@ def _step_active_command(env):
                     yaw_done = abs(yaw_err) < state["yaw_threshold"]
                 if pos_err < state["pos_threshold"] and yaw_done:
                     final = get_base_info(env)
+                    print(f"[nav诊断] ✓到达 step={state['step']}/{state['max_steps']} "
+                          f"pos=[{final['pos'][0]:.2f},{final['pos'][1]:.2f}] 目标=[{state['x']:.2f},{state['y']:.2f}]",
+                          file=_sys.stderr, flush=True)
                     _finish_command(cmd, {"success": True, "pos": final["pos"], "yaw": final["yaw_deg"]})
                     return True
                 if state["step"] >= state["max_steps"]:
                     final = get_base_info(env)
+                    print(f"[nav诊断] ✗超时(跑满max_steps) step={state['step']} "
+                          f"pos=[{final['pos'][0]:.2f},{final['pos'][1]:.2f}] 目标=[{state['x']:.2f},{state['y']:.2f}] "
+                          f"残差={pos_err:.2f}m —— 说明到不了该点(卡住/绕障失败)", file=_sys.stderr, flush=True)
                     _finish_command(cmd, {"success": False, "pos": final["pos"], "yaw": final["yaw_deg"], "result": "导航超时"})
                     return True
                 if pos_err >= state["pos_threshold"]:
@@ -464,21 +647,50 @@ def _step_active_command(env):
                 _finish_command(cmd, {"success": False, "result": f"物体 {obj_name} 不存在"})
                 return True
             if state["phase"] == "move":
+                # 严格:必须真持有该物体才能放置。原先这里强行 set grasped_object=obj_name,
+                # 会在抓取失败时"假成功"地把物体瞬移到目标 → 污染裁判(没抓到也判 won)。
+                # 现在没真抓到就直接放置失败,让 won 反映真实物理结果。
                 if env.grasped_object != obj_name:
-                    env.grasped_object = obj_name
+                    _finish_command(cmd, {
+                        "success": False,
+                        "result": f"未持有 {obj_name}(当前持有: {env.grasped_object}),放置失败:请先成功抓取",
+                    })
+                    return True
                 if _move_virtual_ee(env, state["target_pos"]):
                     env.set_object_pos(obj_name, state["target_pos"])
+                    print(f"[place后端] {obj_name} 瞬移到 target_pos={np.asarray(state['target_pos']).tolist()}; "
+                          f"落点实读={np.asarray(env.get_object_pos(obj_name)).tolist()}", file=_sys.stderr, flush=True)
                     env.grasped_object = None
                     state["phase"] = "retreat"
                     state["retreat_target"] = state["target_pos"] + np.array([0.0, 0.0, 0.20])
                 return True
             if state["phase"] == "retreat":
                 if _move_virtual_ee(env, state["retreat_target"]):
+                    state["phase"] = "settle"
+                    state["settle_frames"] = 0
+                return True
+            if state["phase"] == "settle":
+                # 等物体物理静止(线速度 < 阈值)再上报成功。place 把物体瞬移到落点后,
+                # 主循环继续 env.step():薄/高 fixture 上物体仍会下落或微滑,若此刻就 finish,
+                # slaver 上报 all_done → bench 在物体未稳定时读 won → 假阴性(stovetop 案例)。
+                # 最多等 300 帧兜底,避免永不静止时卡死。
+                joint_id = env.obj_joint_id[obj_name]
+                dadr = env.model.jnt_dofadr[joint_id]
+                lin_vel = float(np.linalg.norm(env.data.qvel[dadr:dadr + 3]))
+                state["settle_frames"] = state.get("settle_frames", 0) + 1
+                # 要连续 10 帧静止才算真稳:物体瞬移到落点时速度被清零(=0),若只看单帧
+                # 会在它还没开始下落时就误判稳定。连续静止排除"下落初期瞬时低速"。300 帧兜底。
+                state["still_frames"] = (state.get("still_frames", 0) + 1) if lin_vel < 0.02 else 0
+                if state["still_frames"] >= 10 or state["settle_frames"] >= 300:
+                    final_pos = np.asarray(env.get_object_pos(obj_name))
                     try:
-                        waypoint_name = coords_to_waypoint(state["target_pos"].tolist())
-                        move_object(obj_name, waypoint_name)
+                        # belief 写物体**真实最终落点**的工作点(不是目标点),反映物理结果
+                        move_object(obj_name, coords_to_waypoint(final_pos.tolist()))
                     except Exception as e:
                         print(f"[SceneMemory] 更新失败: {e}", flush=True)
+                    print(f"[place后端] {obj_name} 已静止(vel={lin_vel:.4f}, "
+                          f"frames={state['settle_frames']}); 最终落点="
+                          f"{[round(float(x), 3) for x in final_pos]}", file=_sys.stderr, flush=True)
                     _finish_command(cmd, {"success": True, "result": f"成功放置 {obj_name}"})
                 return True
     except Exception as e:
@@ -617,6 +829,78 @@ def process_commands(env):
                             "width": int(w),
                             "height": int(h),
                         }
+                elif cmd_type == "visible_objects":
+                    # segmentation 感知:渲染相机分割图,返回视野里可见的物体集。
+                    # 部分可观测的真实来源=视角+遮挡+距离(非坐标过滤)。min_pixels 滤掉太小(太远/边缘)的。
+                    # 多相机融合:camera="all"=机器人身上相机(head+两腕,真机可复现,不含 overhead 作弊),
+                    # 或逗号分隔自定义。取并集=任一相机看到即算看到,减少单视角盲区。
+                    cam_param = params.get("camera_name") or "head_cam"
+                    if cam_param == "all":
+                        cams = ["head_cam", "right_arm_cam", "left_arm_cam"]
+                    else:
+                        cams = [c.strip() for c in cam_param.split(",") if c.strip()] or ["head_cam"]
+                    min_px = int(params.get("min_pixels", 1))
+                    scan = bool(params.get("scan", False))
+                    bid_to_obj = {int(bid): name for name, bid in env.obj_body_id.items()}
+                    seen = set()
+
+                    def _collect_visible():
+                        for cam in cams:
+                            seg = env.sim.render_segmentation(cam)
+                            seg_ids = seg[:, :, 0]
+                            for gid in np.unique(seg_ids):
+                                if gid < 0:
+                                    continue
+                                bid = int(env.model.geom_bodyid[int(gid)])
+                                if bid in bid_to_obj and int((seg_ids == gid).sum()) >= min_px:
+                                    seen.add(bid_to_obj[bid])
+
+                    if scan:
+                        # 转头扫描:绕机器人当前 yaw 转一圈(每 60°)渲染取并集,模拟原地转头/
+                        # head gimbal pan,绕开"到工作点后单一朝向看不到物体→误判漂移"。
+                        # 只改 quat + forward 渲染、扫完恢复(不 step,不影响物理)。
+                        qadr = env.model.jnt_qposadr[env.base_free_joint_id]
+                        orig_q = env.data.qpos[qadr + 3:qadr + 7].copy()
+                        yaw0 = 2.0 * float(np.arctan2(orig_q[3], orig_q[0]))
+                        for ddeg in range(0, 360, 60):
+                            yaw = yaw0 + math.radians(ddeg)
+                            env.data.qpos[qadr + 3:qadr + 7] = [math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)]
+                            env.sim.forward()
+                            _collect_visible()
+                        env.data.qpos[qadr + 3:qadr + 7] = orig_q
+                        env.sim.forward()
+                    else:
+                        _collect_visible()
+                    result = {"success": True, "cameras": cams, "scan": scan, "visible": sorted(seen)}
+                elif cmd_type == "inject_to_container":
+                    # 把物体藏进容器(set 到容器 fixture pos;高墙柜 z=1.85 机器人 head_cam 1.18
+                    # 够不到 → 自然看不到)。记归属,不写 belief(藏=belief unknown,靠开柜门发现)。
+                    obj = params["obj_name"]
+                    container = params["container"]
+                    fx = env.fixtures.get(container)
+                    if fx is None:
+                        result = {"success": False, "result": f"容器 {container} 不存在"}
+                    else:
+                        env.set_object_pos(obj, np.asarray(fx.pos, dtype=float))
+                        _container_contents.setdefault(container, [])
+                        if obj not in _container_contents[container]:
+                            _container_contents[container].append(obj)
+                        result = {"success": True, "container": container,
+                                  "result": f"已把 {obj} 藏进 {container}"}
+                elif cmd_type == "open_container":
+                    # 开柜门(转门 joint)+ 把里面物体取到机器人脚边台面(z=0.95 可见可抓)。
+                    # 模拟"开柜门把东西拿下来",绕开高柜机器人够不到的问题。
+                    container = params["container"]
+                    opened = env.open_container_door(container)
+                    chassis = env.get_body_pos("chassis")
+                    out = [float(chassis[0]) + 0.3, float(chassis[1]), 0.95]
+                    lifted = []
+                    for obj in list(_container_contents.get(container, [])):
+                        env.set_object_pos(obj, out)
+                        lifted.append(obj)
+                    _container_contents[container] = []
+                    result = {"success": bool(opened or lifted), "opened": opened,
+                              "lifted": lifted, "result": f"开 {container}: 门×{len(opened)} 取出 {lifted}"}
                 elif cmd_type == "camera_preview":
                     from io import BytesIO
                     import base64
@@ -643,6 +927,37 @@ def process_commands(env):
                         "image": base64.b64encode(buf.getvalue()).decode("utf-8"),
                         "camera": camera_name,
                     }
+                elif cmd_type == "reset_home":
+                    # 持续世界复位:全场回初始(物体布局+机械臂位姿+底盘沉降),清空手持。
+                    # 每轮 bench 只调一次,settle 几秒可接受,换跨 run 可复现。
+                    env.reset()
+                    env.grasped_object = None
+                    try:
+                        # 学习模式:belief 起空(物体未发现,靠探索填回 → 产生学习曲线);
+                        # 全可观测模式:belief 直接 = 初始真值。
+                        if _learning_mode():
+                            reset_belief_unknown()
+                        else:
+                            reset_to_initial()
+                    except Exception as _e:
+                        print(f"[reset_home] scene_memory 复位失败: {_e}", flush=True)
+                    result = {"success": True}
+                elif cmd_type == "inject_move":
+                    # 漂移注入:把物体瞬移到目标家具顶面(不计步)。
+                    obj = params["obj_name"]
+                    target_pos = np.asarray(params["target_pos"], dtype=float)
+                    env.set_object_pos(obj, target_pos)
+                    if getattr(env, "grasped_object", None) == obj:
+                        env.grasped_object = None
+                    # 学习模式:只动真值,故意不更新 belief —— 这样机器人的 belief 仍指向旧位置,
+                    # 下次导航过去扑空才能"检测到漂移"并触发重搜(这正是漂移恢复实验的核心)。
+                    # 全可观测模式:同步 belief 保持一致。
+                    if not _learning_mode():
+                        try:
+                            move_object(obj, coords_to_waypoint(target_pos.tolist()))
+                        except Exception as _e:
+                            print(f"[inject_move] scene_memory 更新失败: {_e}", flush=True)
+                    result = {"success": True, "result": f"moved {obj}"}
                 else:
                     result = {"error": f"未知命令: {cmd_type}"}
         except Exception as e:
@@ -762,6 +1077,127 @@ def api_scene_state():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# ============================================================
+# Phase 1 持续世界 (per-home) 端点 —— 对齐 serve_alfworld，bench 可直接复用
+# ============================================================
+
+@app.route("/homes", methods=["GET"])
+def api_homes():
+    """MuJoCo 单场景:只有一个 home(id=1)。保留接口形状以兼容 bench。"""
+    return jsonify({"split": "mujoco", "homes": {"1": [0]}, "count": 1})
+
+
+@app.route("/reset_home", methods=["POST"])
+def api_reset_home():
+    """载入/复位持续世界:物体回初始布局,置 persistent,清零步数。Body: {floorplan_id?}。"""
+    env = _get_env()
+    if env is None:
+        return jsonify({"success": False, "result": "仿真器未初始化"}), 503
+    r = submit_command("reset_home", {})
+    if not r.get("success"):
+        return jsonify({"success": False, "result": r})
+    _home["persistent"] = True
+    _home["steps"] = 0
+    _home["task"] = ""
+    return jsonify({"success": True, "result": {
+        "persistent": True,
+        "task": "",
+        "objects": list(env.objects),
+        "fixtures": list(env.fixtures.keys()),
+    }})
+
+
+@app.route("/set_task", methods=["POST"])
+def api_set_task():
+    """持续模式专用:切换当前任务文字(不复位世界/belief)。Body: {task}。"""
+    data = request.json or {}
+    task = (data.get("task") or "").strip()
+    if not task:
+        return jsonify({"success": False, "result": "missing task"})
+    if not _home["persistent"]:
+        return jsonify({"success": False, "result": "set_task 仅持续模式可用(先 POST /reset_home)"})
+    _home["task"] = task
+    return jsonify({"success": True, "task": task, "shadow_done_now": _judge_task(task)})
+
+
+@app.route("/inject_to_container", methods=["POST"])
+def api_inject_to_container():
+    """把物体藏进容器(测 speedup:藏起来→首次要开柜翻找)。Body: {obj, container}。"""
+    data = request.json or {}
+    obj = data.get("obj") or data.get("obj_name")
+    container = data.get("container")
+    if not obj or not container:
+        return jsonify({"success": False, "result": "missing obj or container"})
+    return jsonify(submit_command("inject_to_container", {"obj_name": obj, "container": container}))
+
+
+@app.route("/containers", methods=["GET"])
+def api_containers():
+    """列出可藏物的容器(有门 joint 的高柜)+ 坐标。slaver 逐柜翻找用。
+    Query: ?min_height=1.2(过滤矮柜)。"""
+    env = _get_env()
+    if env is None:
+        return jsonify({"error": "仿真器未初始化"}), 503
+    try:
+        min_h = float(request.args.get("min_height", 1.2))
+    except (TypeError, ValueError):
+        min_h = 1.2
+    with _env_lock:
+        containers = env.list_containers(min_height=min_h)
+    return jsonify({"success": True, "containers": containers})
+
+
+@app.route("/open_container", methods=["POST"])
+def api_open_container():
+    """开柜门(转门 joint)+ 取出里面物体到台面(露出可见可抓)。Body: {container}。
+    每次 open 计一步(持续模式)=逐柜翻找的搜索成本。"""
+    data = request.json or {}
+    container = data.get("container")
+    if not container:
+        return jsonify({"success": False, "result": "missing container"})
+    _count_step()  # 持续模式步数指标:每开一个柜 = 一步搜索成本
+    return jsonify(submit_command("open_container", {"container": container}))
+
+
+@app.route("/inject_move", methods=["POST"])
+def api_inject_move():
+    """测试注入:把物体瞬移到目标家具(模拟家里东西被挪了)。Body: {obj, to}。仅持续模式。"""
+    data = request.json or {}
+    obj = data.get("obj") or data.get("object_name") or data.get("obj_name")
+    to = data.get("to") or data.get("to_receptacle")
+    if not obj or not to:
+        return jsonify({"success": False, "result": "missing obj or to"})
+    if not _home["persistent"]:
+        return jsonify({"success": False, "result": "inject_move 仅持续模式可用"})
+    target_obj = _match_object(str(obj))
+    if not target_obj:
+        return jsonify({"success": False, "result": f"全场未找到 '{obj}'"})
+    fixes = _fixtures_for_base(str(to))
+    if not fixes:
+        return jsonify({"success": False, "result": f"未找到目标家具 '{to}'"})
+    target_pos = _fixture_top_center(fixes[0])
+    r = submit_command("inject_move", {"obj_name": target_obj, "target_pos": target_pos})
+    if r.get("success"):
+        return jsonify({"success": True, "result": f"You move the {target_obj} to the {fixes[0]}."})
+    return jsonify({"success": False, "result": r})
+
+
+@app.route("/success", methods=["GET"])
+def api_success():
+    """完成裁判:持续模式用几何裁判(物体落在目标家具上),替代 oracle won。"""
+    if _home["persistent"] and _home["task"]:
+        return jsonify({"won": _judge_task(_home["task"]), "steps": _home["steps"], "shadow_judge": True})
+    return jsonify({"won": False, "steps": _home["steps"], "shadow_judge": False})
+
+
+@app.route("/shadow_state", methods=["GET"])
+def api_shadow_state():
+    """belief 层视图:物体→最近家具(held 优先) + holding。供 bench 调试/对照。"""
+    env = _get_env()
+    held = getattr(env, "grasped_object", None) if env else None
+    return jsonify({"at": _shadow_at(), "holding": held})
+
 # ============================================================
 # 视频录制（工具函数内主动调用 record_hook.try_record_frame）
 # ============================================================
@@ -863,7 +1299,9 @@ def api_grasp():
         "obj_name": obj_name,
         "snap_threshold": data.get("snap_threshold", 0.15),
     }
-    return jsonify(submit_command("grasp", params))
+    res = submit_command("grasp", params)
+    _count_step()  # 持续模式步数指标
+    return jsonify(res)
 
 
 @app.route("/place", methods=["POST"])
@@ -881,7 +1319,9 @@ def api_place():
     }
     if data.get("snap_threshold") is not None:
         params["snap_threshold"] = data["snap_threshold"]
-    return jsonify(submit_command("place", params))
+    res = submit_command("place", params)
+    _count_step()  # 持续模式步数指标
+    return jsonify(res)
 
 
 @app.route("/move_to", methods=["POST"])
@@ -895,7 +1335,9 @@ def api_move_to():
         "max_steps": data.get("max_steps", 200),
         "pos_threshold": data.get("pos_threshold", 0.03),
     }
-    return jsonify(submit_command("move_to", params))
+    res = submit_command("move_to", params)
+    _count_step()  # 持续模式步数指标
+    return jsonify(res)
 
 
 @app.route("/move_duration", methods=["POST"])
@@ -927,7 +1369,9 @@ def api_nav():
     # 兼容旧参数名 w
     elif data.get("w") is not None:
         params["target_yaw"] = data["w"]
-    return jsonify(submit_command("nav", params))
+    res = submit_command("nav", params)
+    _count_step()  # 持续模式步数指标
+    return jsonify(res)
 
 
 @app.route("/cmd_vel", methods=["POST"])
@@ -1139,6 +1583,18 @@ def api_screenshot():
         "height": data.get("height") or defaults.get("height", 480),
     }
     return jsonify(submit_command("screenshot", params))
+
+
+@app.route("/visible_objects", methods=["GET"])
+def api_visible_objects():
+    """机器人相机视野里可见的物体集(segmentation 部分可观测感知)。
+    Query: ?camera=head_cam&min_pixels=1。走命令队列在主线程渲染。"""
+    params = {
+        "camera_name": request.args.get("camera", "head_cam"),
+        "min_pixels": int(request.args.get("min_pixels", 1)),
+        "scan": request.args.get("scan", "0") in ("1", "true", "True"),
+    }
+    return jsonify(submit_command("visible_objects", params))
 
 
 @app.route("/camera/status", methods=["GET"])

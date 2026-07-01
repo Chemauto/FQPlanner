@@ -1,0 +1,6 @@
+obj,t1_steps,t1_won,t2_nodrift_steps,t2_nodrift_won,t2_drift_steps,t2_drift_won
+mug,4,True,4,True,8,True
+cup,4,True,4,True,5,True
+bowl,4,True,4,True,8,True
+apple,3,True,4,True,12,False
+pot,4,False,4,True,4,True

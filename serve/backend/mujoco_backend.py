@@ -7,6 +7,10 @@ import numpy as np
 
 from scene.scene_generator import build_scene_xml, GENERATED_SCENE, GENERATED_META
 
+# 门 joint 命名后缀(RoboCasa 约定):有其一即视为"带门容器"。
+# open_container_door 转这些 joint,list_containers 用它判定哪些 fixture 是容器。
+_DOOR_JOINT_SUFFIXES = ("_doorhinge", "_leftdoorhinge", "_rightdoorhinge", "_door_joint", "_slidejoint")
+
 
 @dataclass
 class Fixture:
@@ -23,6 +27,7 @@ class MujocoSim:
         self.data = data
         self._renderer = None
         self._renderer_size = None
+        self._seg_renderer = None
         self._scene_option = mujoco.MjvOption()
         self._scene_option.geomgroup[:] = 0
         self._scene_option.geomgroup[0] = 1
@@ -50,10 +55,30 @@ class MujocoSim:
         )
         return self._renderer.render()
 
+    def render_segmentation(self, camera_name="head_cam"):
+        """渲染 segmentation mask → (H,W,2) int32:[...,0]=geom id, [...,1]=mjtObj type。
+        用独立低分辨率 seg renderer(懒加载),与 RGB renderer 分开;同进程双 renderer 在 macOS
+        已验证稳定。用于'机器人相机看到哪些物体'的部分可观测感知。"""
+        if self._seg_renderer is None:
+            self._seg_renderer = mujoco.Renderer(self.model, height=120, width=160)
+            self._seg_renderer.enable_segmentation_rendering()
+        camera_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
+        if camera_id < 0:
+            camera_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "head_cam")
+        self._seg_renderer.update_scene(
+            self.data,
+            camera=camera_id if camera_id >= 0 else None,
+            scene_option=self._scene_option,
+        )
+        return self._seg_renderer.render()
+
     def close(self):
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
+        if self._seg_renderer is not None:
+            self._seg_renderer.close()
+            self._seg_renderer = None
 
 
 class MujocoKitchenEnv:
@@ -250,4 +275,56 @@ class MujocoKitchenEnv:
         qadr = self.model.jnt_qposadr[joint_id]
         self.data.qpos[qadr:qadr + 3] = np.asarray(pos, dtype=float)
         self.data.qpos[qadr + 3:qadr + 7] = [1.0, 0.0, 0.0, 0.0]
+        # 清零该物体 6 个速度自由度(3 线+3 角):否则抓取跟随/瞬移的残留速度会让
+        # 物体放下后继续滑走(薄 fixture 如 stovetop 上尤其明显 → 滑出边缘致裁判假阴性)。
+        dadr = self.model.jnt_dofadr[joint_id]
+        self.data.qvel[dadr:dadr + 6] = 0.0
         self.sim.forward()
+
+    def _container_door_joint_ids(self, container):
+        """返回该 fixture 名下存在的门 joint id 列表(无门则空)= 判定是否容器。"""
+        jids = []
+        for suffix in _DOOR_JOINT_SUFFIXES:
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, container + suffix)
+            if jid >= 0:
+                jids.append(jid)
+        return jids
+
+    def open_container_door(self, container):
+        """转开容器的门 joint(doorhinge/door_joint/slidejoint),返回开的门名列表。
+        门 range abs 最大端=开;真转门 → 渲染正确 + 真机可复现。"""
+        opened = []
+        for jid in self._container_door_joint_ids(container):
+            qadr = self.model.jnt_qposadr[jid]
+            lo, hi = float(self.model.jnt_range[jid][0]), float(self.model.jnt_range[jid][1])
+            self.data.qpos[qadr] = hi if abs(hi) >= abs(lo) else lo
+            opened.append(mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, jid))
+        if opened:
+            self.sim.forward()
+        return opened
+
+    def list_containers(self, min_height=1.2):
+        """列出可藏物的容器:有门 joint 且足够高(head_cam≈1.18m 够不到,藏里面转头看不到)。
+
+        返回 [{name, pos}],按 x 排序(稳定遍历顺序)。min_height 滤掉矮柜/抽屉——
+        它们低到 head_cam 能扫到,藏不住,不构成"逐柜翻找"的搜索成本。真机=高墙柜。
+        """
+        out = []
+        for name, fx in self.fixtures.items():
+            if not self._container_door_joint_ids(name):
+                continue
+            pos = np.asarray(fx.pos, dtype=float)
+            if float(pos[2]) < float(min_height):
+                continue
+            out.append({"name": name, "pos": pos.tolist()})
+        out.sort(key=lambda c: (c["pos"][0], c["pos"][1]))
+        return out
+
+    def container_top(self, container):
+        """容器上方位置(开门后把里面物体抬出来露到这=可见可抓)。无此 body 返回 None。"""
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, container)
+        if bid < 0:
+            return None
+        pos = self.data.xpos[bid].copy()
+        pos[2] += 0.5
+        return pos

@@ -15,7 +15,7 @@ from pathlib import Path
 import redis
 import requests
 import yaml
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -28,6 +28,10 @@ app = Flask(__name__)
 MASTER_URL = os.getenv("MASTER_URL", "http://127.0.0.1:5000")
 SIM_URL = os.getenv("ROBOT_API_URL", load_robot_api_config().server_url)
 REDIS_CFG = {"host": "127.0.0.1", "port": 6379, "db": 0, "password": None}
+
+# 四宫格任务时间线:capture_quad_timeline.py 把每个时间点的四宫格拼图(overhead+head+左右腕)
+# 和 timeline.json 存到这里,网站按时间点回放。
+TIMELINE_DIR = PROJECT_ROOT / "deploy" / "task_timeline"
 
 
 def extract_tools_from_ast(source, filename):
@@ -383,6 +387,47 @@ def record_download(filename):
         return jsonify({"error": "下载失败"}), resp.status_code
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "仿真服务未启动"}), 503
+
+
+# ============================================================
+# 四宫格相机(真机3相机 head+左右腕 + overhead 拼图)
+# ============================================================
+
+@app.route("/api/quad_latest", methods=["GET"])
+def quad_latest():
+    """实时四宫格:代理仿真后端 /camera/latest(2x2 拼图 overhead+head+右腕+左腕,带标签)。"""
+    try:
+        resp = requests.get(f"{SIM_URL}/camera/latest", timeout=30, stream=True)
+        if resp.status_code == 200:
+            return send_file(io.BytesIO(resp.content), mimetype="image/jpeg")
+        return jsonify({"error": "渲染失败"}), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "仿真服务未启动"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/timeline", methods=["GET"])
+def timeline_manifest():
+    """返回已采集的四宫格任务时间线清单(deploy/task_timeline/timeline.json)。"""
+    manifest = TIMELINE_DIR / "timeline.json"
+    if not manifest.exists():
+        return jsonify({"exists": False, "frames": []})
+    try:
+        with open(manifest, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["exists"] = True
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"exists": False, "error": str(e), "frames": []}), 500
+
+
+@app.route("/task_timeline/<path:filename>", methods=["GET"])
+def timeline_frame(filename):
+    """按文件名返回时间线里某一帧四宫格图。"""
+    if not TIMELINE_DIR.exists():
+        return jsonify({"error": "无时间线目录"}), 404
+    return send_from_directory(str(TIMELINE_DIR), filename)
 
 
 if __name__ == "__main__":

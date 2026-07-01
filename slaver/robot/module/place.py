@@ -47,28 +47,23 @@ def register_tools(mcp):
         """
         print(f"[place] 将 '{obj_name}' 放在 '{target_name}' 上面...", file=sys.stderr)
 
+        # 优先用场景坐标解析(MuJoCo)，找不到则透传名称(ALFWorld等符号后端)
+        place_pos = None
         scene = get_scene()
-        if not scene or "error" in scene:
-            return json.dumps(["无法获取场景信息，请检查仿真状态", {"_status": "exception"}])
+        if scene and "error" not in scene:
+            objects = scene.get("objects", {})
+            if target_name in objects and objects[target_name].get("pos") is not None:
+                target_pos = objects[target_name]["pos"]
+                place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.05]
+            else:
+                fixtures = scene.get("fixtures", {})
+                matched = next((f for f in fixtures if target_name in f or f in target_name), None)
+                if matched and fixtures[matched].get("pos") is not None:
+                    place_pos = _place_position_for_fixture(target_name, fixtures[matched])
 
-        # 在 objects 中查找
-        objects = scene.get("objects", {})
-        if target_name in objects:
-            target_pos = objects[target_name]["pos"]
-            place_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.05]
-        else:
-            # 在 fixtures 中查找（支持模糊匹配）
-            fixtures = scene.get("fixtures", {})
-            matched = None
-            for fname in fixtures:
-                if target_name in fname or fname in target_name:
-                    matched = fname
-                    break
-            if not matched:
-                return json.dumps([f"未找到目标 '{target_name}'（不在物体或家具列表中）", {"_status": "failure"}])
-            place_pos = _place_position_for_fixture(target_name, fixtures[matched])
-
-        result = _place_object(obj_name, place_pos)
+        print(f"[place] 诊断: target_name={target_name!r} → 解析落点 place_pos={place_pos} "
+              f"(None 表示没匹配到 fixture,会透传名称)", file=sys.stderr)
+        result = _place_object(obj_name, place_pos if place_pos is not None else target_name)
 
         if result.get("success"):
             response = result.get("result", f"成功将 {obj_name} 放在 {target_name} 上面")
