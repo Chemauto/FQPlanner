@@ -10,6 +10,10 @@ import io
 import json
 import os
 import sys
+import threading
+import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 import redis
@@ -68,15 +72,80 @@ def index():
     return render_template("index.html")
 
 
+_QUAD_CAM_LABELS = ["Top(overhead)", "Head", "Right wrist", "Left wrist"]
+_capture_lock = threading.Lock()  # 一次只跑一个时间线采集
+
+
+def _capture_task_timeline(task_text, task_id, interval=6.0, timeout=300.0):
+    """为一个正在执行的任务采集四宫格时间线:开始/任务中(每 interval)/完成各截一张 /camera/latest,
+    写 deploy/task_timeline/。轮询 Master task_status 判断任务结束。网页发任务时后台自动调。"""
+    if not _capture_lock.acquire(blocking=False):
+        return  # 已有采集在跑,跳过(避免多任务互相覆盖)
+    try:
+        TIMELINE_DIR.mkdir(parents=True, exist_ok=True)
+        for f in os.listdir(TIMELINE_DIR):
+            if f.startswith("frame_") and f.endswith(".jpg"):
+                os.remove(os.path.join(TIMELINE_DIR, f))
+        frames, t0 = [], time.time()
+
+        def snap(label):
+            try:
+                r = requests.get(f"{SIM_URL}/camera/latest", timeout=30)
+                if r.status_code == 200 and r.content:
+                    fn = f"frame_{len(frames):02d}.jpg"
+                    with open(os.path.join(TIMELINE_DIR, fn), "wb") as fp:
+                        fp.write(r.content)
+                    frames.append({"file": fn, "label": label, "t": round(time.time() - t0, 1)})
+            except Exception:
+                pass
+
+        def write(won=None):
+            with open(os.path.join(TIMELINE_DIR, "timeline.json"), "w", encoding="utf-8") as fp:
+                json.dump({"task": task_text, "won": won,
+                           "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                           "cameras": _QUAD_CAM_LABELS, "frames": frames}, fp, ensure_ascii=False, indent=2)
+
+        snap("开始"); write()
+        mid, deadline = 0, time.time() + timeout
+        while time.time() < deadline:
+            try:
+                st = requests.get(f"{MASTER_URL}/api/task_status", timeout=10).json()
+                if st.get("task_id") == task_id and st.get("all_done"):
+                    break
+            except Exception:
+                pass
+            mid += 1
+            snap(f"任务中 {mid}"); write()
+            time.sleep(interval)
+        snap("完成")
+        won = None
+        try:
+            won = requests.get(f"{SIM_URL}/success", timeout=10).json().get("won")
+        except Exception:
+            pass
+        write(won=won)
+    finally:
+        _capture_lock.release()
+
+
 @app.route("/publish_task", methods=["POST"])
 def publish_task():
-    """转发任务到 Master"""
+    """转发任务到 Master,并为这个任务后台采集四宫格时间线(网页时间线随即变成该任务)。"""
     try:
         data = request.get_json()
         if not data or "task" not in data:
             return jsonify({"error": "缺少 task 字段"}), 400
+        # 生成 task_id 传给 Master,以便时间线采集能轮询该任务的完成状态
+        task_id = data.get("task_id") or uuid.uuid4().hex
+        data["task_id"] = task_id
+        data.setdefault("refresh", True)
+        task_text = data["task"]
         resp = requests.post(f"{MASTER_URL}/publish_task", json=data, timeout=120)
-        return jsonify(resp.json()), resp.status_code
+        result = resp.json()
+        if resp.status_code == 200 and result.get("status") == "success":
+            threading.Thread(target=_capture_task_timeline,
+                             args=(task_text, task_id), daemon=True).start()
+        return jsonify(result), resp.status_code
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "Master 服务未启动"}), 503
     except Exception as e:
