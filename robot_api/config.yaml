@@ -55,6 +55,7 @@ policy_services:
   act:
     enabled: 1
     url: "http://127.0.0.1:5003"
+    max_steps: 1000   # ACT 抓取主循环迭代上限（replay 轨迹 377 帧，默认 300 走不完）
     # launch_hint: "services/act_server.py --policy-path <checkpoint> --port 5003"
   diffusion_policy:
     enabled: 0

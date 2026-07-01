@@ -76,7 +76,8 @@ RECORD_CAMERAS = []
 _video_dir = os.path.join(os.path.dirname(__file__), "..", "videos")
 _camera_config_cache = None
 _act_config = {
-    "url": None,  # ACT inference service URL, e.g. http://localhost:5003
+    "url": None,        # ACT inference service URL, e.g. http://localhost:5003
+    "max_steps": 300,   # default grasp cap; overridden by config.yaml policy_services.act.max_steps
 }
 
 
@@ -177,19 +178,24 @@ def get_lock():
 
 
 def set_act_config(url: str | None):
-    """Set ACT inference service URL. Reads from robot_api/config.yaml if url is None."""
+    """Set ACT inference config. Reads url + max_steps from robot_api/config.yaml."""
+    try:
+        from robot_api.config import load_robot_api_config
+        cfg = load_robot_api_config()
+        svc = cfg.policy_service("act")
+    except Exception as exc:
+        print(f"[service] 读取 policy_services 配置失败: {exc}")
+        svc = None
     if url is None:
+        url = svc.url if svc else None
+    if svc is not None:
         try:
-            from robot_api.config import load_robot_api_config
-            cfg = load_robot_api_config()
-            svc = cfg.policy_service("act")
-            url = svc.url if svc else None
-        except Exception as exc:
-            print(f"[service] 读取 policy_services 配置失败: {exc}")
-            url = None
+            _act_config["max_steps"] = int((svc.raw or {}).get("max_steps", 300))
+        except (TypeError, ValueError):
+            _act_config["max_steps"] = 300
     _act_config["url"] = url.rstrip("/") if url else None
     if _act_config["url"]:
-        print(f"[service] 🔮 ACT 推理服务: {_act_config['url']}")
+        print(f"[service] 🔮 ACT 推理服务: {_act_config['url']} (max_steps={_act_config['max_steps']})")
     else:
         print("[service] ACT 推理服务: 未配置 (在 robot_api/config.yaml 中设置 policy_services.act.enabled: 1)")
 
@@ -471,7 +477,7 @@ def process_commands(env):
                             return
                         state = act_grasp_init(
                             env, act_url, params["obj_name"],
-                            max_steps=params.get("max_steps", 300),
+                            max_steps=params.get("max_steps", _act_config.get("max_steps", 300)),
                             policy_fps=params.get("policy_fps", 30.0),
                         )
                         _active_command = {
@@ -792,7 +798,9 @@ def api_grasp():
     if mode == "ik":
         params["snap_threshold"] = data.get("snap_threshold", 0.15)
     elif mode == "act":
-        params["max_steps"] = data.get("max_steps", 300)
+        # max_steps default flows from config (policy_services.act.max_steps) at dispatch time
+        if data.get("max_steps") is not None:
+            params["max_steps"] = data["max_steps"]
     return jsonify(submit_command("grasp", params))
 
 

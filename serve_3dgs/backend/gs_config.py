@@ -82,6 +82,12 @@ class GSConfig:
             self.mjcf_path = scene
             self._background_ply = None
 
+        # composite mesh overlay (Hunyuan3D objects). Default OFF via assets/config.yaml
+        # `composite_mesh` — it reloads meshes every frame (slow) and currently fails
+        # (hunyuan_bottle_body missing). Set composite_mesh: true to enable.
+        if not _global.get("composite_mesh", False):
+            self.composite_mesh_objects = []
+
     def _resolve_navigation_path(self, path: str | Path, base_dir: Path) -> Path:
         path = Path(path)
         return path if path.is_absolute() else base_dir / path

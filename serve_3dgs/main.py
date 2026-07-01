@@ -33,6 +33,8 @@ def main():
     parser.add_argument("--viewer_cameras", type=str,
                         default=os.environ.get("SERVE_3DGS_VIEWER_CAMERAS", ""))
     parser.add_argument("--no-gs-screens", action="store_true")
+    parser.add_argument("--no-composite", action="store_true",
+                        help="Disable Hunyuan3D composite mesh rendering (faster; avoids per-frame mesh reload/thrash)")
     parser.add_argument("--physics_steps_per_loop", type=int, default=10)
     parser.add_argument("--scene", type=str, default="",
                         help="Scene override: robot_nav (default), robot_only, path to MJCF/XML, or path to navigation JSON")
@@ -61,6 +63,10 @@ def main():
         scene_config=args.scene_config or None,
         robot_name=args.robot,
     )
+    if args.no_composite and gs_cfg.composite_mesh_objects:
+        print(f"Composite mesh rendering disabled (--no-composite): "
+              f"skipping {len(gs_cfg.composite_mesh_objects)} object(s)")
+        gs_cfg.composite_mesh_objects = []
     viewer_camera_names = (
         tuple(name.strip() for name in args.viewer_cameras.split(",") if name.strip())
         if args.viewer_cameras
