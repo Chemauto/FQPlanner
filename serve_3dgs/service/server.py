@@ -27,6 +27,7 @@ from tools.arm import (
     open_gripper, close_gripper, is_grasped,
 )
 from tools.act_grasp import act_grasp_init, act_grasp_step
+from tools.pi05_grasp import pi05_grasp_init, pi05_grasp_step
 from tools.move import (
     base_link_yaw_deg_from_chassis_yaw_deg,
     base_link_yaw_from_chassis_yaw,
@@ -79,6 +80,24 @@ _act_config = {
     "url": None,        # ACT inference service URL, e.g. http://localhost:5003
     "max_steps": 300,   # default grasp cap; overridden by config.yaml policy_services.act.max_steps
 }
+_pi05_config = {"url": None, "task": None, "loaded": False}
+
+
+def _ensure_pi05_config():
+    """Lazily load PI0.5 service url + default task from robot_api/config.yaml."""
+    if _pi05_config["loaded"]:
+        return
+    _pi05_config["loaded"] = True
+    try:
+        from robot_api.config import load_robot_api_config
+        svc = load_robot_api_config().policy_service("pi05")
+        if svc is not None:
+            _pi05_config["url"] = svc.url or None
+            _pi05_config["task"] = (svc.raw or {}).get("task") or "pick up the object and place it"
+            if _pi05_config["url"]:
+                print(f"[service] 🤖 PI0.5 推理服务: {_pi05_config['url']}")
+    except Exception as exc:
+        print(f"[service] 读取 pi05 配置失败: {exc}")
 
 
 def _camera_model_name(camera_name: str) -> str:
@@ -442,6 +461,17 @@ def _step_active_command(env):
                 else:
                     _finish_command(cmd, {"success": False, "result": f"ACT 抓取 {obj_name} 失败"})
             return True
+
+        if cmd_type == "pi05_grasp":
+            pi05_grasp_step(env, state)
+            if state["done"]:
+                obj_name = state["obj_name"]
+                if state["success"]:
+                    final = get_base_info(env)
+                    _finish_command(cmd, {"success": True, "result": f"PI0.5 抓取 {obj_name} 成功", **_np_to_list(final)})
+                else:
+                    _finish_command(cmd, {"success": False, "result": f"PI0.5 抓取 {obj_name} 失败"})
+            return True
     except Exception as e:
         _finish_command(cmd, {"success": False, "error": str(e)})
         return True
@@ -485,6 +515,23 @@ def process_commands(env):
                             "type": "act_grasp",
                             "state": state,
                         }
+                        return
+                    elif mode == "pi05":
+                        _ensure_pi05_config()
+                        pi05_url = _pi05_config.get("url")
+                        if not pi05_url:
+                            result = {"success": False, "result": "PI0.5 推理服务未配置 (config.yaml policy_services.pi05.url)"}
+                            with _queue_lock:
+                                _results[cmd_id] = result
+                            cmd["event"].set()
+                            return
+                        task = params.get("task") or _pi05_config.get("task") or "pick up the object"
+                        state = pi05_grasp_init(
+                            env, pi05_url, params["obj_name"], task=task,
+                            max_steps=params.get("max_steps", 1000),
+                            policy_fps=params.get("policy_fps", 30.0),
+                        )
+                        _active_command = {**cmd, "type": "pi05_grasp", "state": state}
                         return
                     _active_command = {
                         **cmd,
@@ -799,6 +846,11 @@ def api_grasp():
         params["snap_threshold"] = data.get("snap_threshold", 0.15)
     elif mode == "act":
         # max_steps default flows from config (policy_services.act.max_steps) at dispatch time
+        if data.get("max_steps") is not None:
+            params["max_steps"] = data["max_steps"]
+    elif mode == "pi05":
+        if data.get("task") is not None:
+            params["task"] = data["task"]
         if data.get("max_steps") is not None:
             params["max_steps"] = data["max_steps"]
     return jsonify(submit_command("grasp", params))
