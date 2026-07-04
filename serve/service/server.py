@@ -155,40 +155,7 @@ def _render_camera_preview(env, camera_names, width, height):
     return panels
 
 
-# ---- 实时四宫格缓存:同步命令(nav/grasp)执行时占住主循环,/camera/latest 走队列会卡到命令结束。
-#      让 nav/grasp 的步进钩子把四宫格渲进这个缓存,命令执行中 /camera/latest 直接返回缓存 → 画面实时。
-_live_quad = {"jpeg": None, "t": 0.0}
-_cmd_running = {"on": False}
-
-
-def _update_live_quad(env, min_interval=0.8):
-    """节流渲染四宫格进缓存(主线程调用,GL 安全)。渲染慢,所以最多每 min_interval 秒一次。
-
-    这个函数由 nav/grasp/place 的每步钩子调用 —— 命令是同步占主循环的,每渲一次 4 个 320×240
-    相机就占掉几百毫秒,若太频繁(旧值 0.25s)运动中大半墙钟时间耗在渲染上,一次 place 能拖到
-    30~90s 看着像卡死。0.8s 一次对"看直播"足够,又把命令耗时压下来几倍。"""
-    now = time.time()
-    if now - _live_quad["t"] < min_interval:
-        return
-    _live_quad["t"] = now
-    try:
-        from PIL import Image
-        from io import BytesIO
-        preview = _preview_config()
-        cams = preview.get("cameras", ["overhead_cam"])
-        w = int(preview.get("width", 160))
-        h = int(preview.get("height", 120))
-        panels = _render_camera_preview(env, cams, w, h)
-        while len(panels) < 4:
-            panels.append(Image.new("RGB", (w, h), (0, 0, 0)))
-        image = Image.new("RGB", (w * 2, h * 2))
-        for idx, panel in enumerate(panels[:4]):
-            image.paste(panel, ((idx % 2) * w, (idx // 2) * h))
-        buf = BytesIO()
-        image.save(buf, format="JPEG", quality=70)
-        _live_quad["jpeg"] = buf.getvalue()
-    except Exception:
-        pass
+# 实时四宫格已移除(见 start_server):命令改跑纯物理速度,时间线只在子任务边界按需渲染。
 
 
 def try_record_frame():
@@ -259,52 +226,6 @@ def get_base_action():
         action[0] = np.clip(_base_cmd["Vx"], -1.0, 1.0)   # forward
         action[1] = -np.clip(_base_cmd["Vw"], -1.0, 1.0)   # turn
         return action
-
-
-def apply_base_velocity(env):
-    """[robosuite Panda] 底盘无 freejoint,速度控制走 move()/nav()(env.step action)。
-    Nav2 连续速度注入路径(freejoint qvel)对 robosuite 不适用,直接停用;cmd_vel 命令走队列真 move()。"""
-    return False
-
-    base = get_base_action()
-    if base is None:
-        return False
-
-    if getattr(env, "base_free_joint_id", -1) < 0:
-        return False
-
-    dadr = env.raw_model.jnt_dofadr[env.base_free_joint_id]
-    # freejoint qvel layout: [vx, vy, vz, wx, wy, wz]
-    # dadr+0 = vx, dadr+1 = vy, dadr+2 = vz (up!)
-    # dadr+3 = wx (roll), dadr+4 = wy (pitch), dadr+5 = wz (yaw)
-
-    vx, vw = float(base[0]), float(base[1])
-
-    # qpos layout: [x, y, z, qw, qx, qy, qz]
-    # yaw is encoded in quaternion; get it from the helper
-    yaw = float(np.arctan2(
-        2 * (env.raw_data.qpos[dadr+3] * env.raw_data.qpos[dadr+6] + env.raw_data.qpos[dadr+4] * env.raw_data.qpos[dadr+5]),
-        1 - 2 * (env.raw_data.qpos[dadr+5] ** 2 + env.raw_data.qpos[dadr+6] ** 2),
-    ))
-
-    cos_y = math.cos(yaw)
-    sin_y = math.sin(yaw)
-    world_vx = vx * cos_y
-    world_vy = vx * sin_y
-
-    max_linear = 1.0
-    max_angular = 1.0
-    env.raw_data.qvel[dadr]     = world_vx * max_linear   # world x
-    env.raw_data.qvel[dadr + 1] = world_vy * max_linear   # world y
-    env.raw_data.qvel[dadr + 2] = 0.0                      # z: don't fly
-    env.raw_data.qvel[dadr + 3] = 0.0                      # roll: don't tip
-    env.raw_data.qvel[dadr + 4] = 0.0                      # pitch: don't tip
-    env.raw_data.qvel[dadr + 5] = -vw * max_angular        # yaw angular velocity
-
-    # 同时写 wheel ctrl 让 viewer 视觉同步
-    env.raw_data.ctrl[0] = vx
-    env.raw_data.ctrl[1] = vw
-    return True
 
 
 def _get_env():
@@ -804,8 +725,6 @@ def process_commands(env):
         cmd_id = cmd["id"]
         cmd_type = cmd["type"]
         params = cmd["params"]
-        # 标记命令执行中:期间 /camera/latest 返回实时缓存(由 nav/grasp 步进钩子刷新),避免画面冻结
-        _cmd_running["on"] = cmd_type in ("nav", "grasp", "place", "move_to", "move_duration", "cmd_vel")
         try:
             with _env_lock:
                 if cmd_type == "grasp":
@@ -1075,7 +994,6 @@ def process_commands(env):
             except Exception:
                 pass
 
-        _cmd_running["on"] = False
         with _queue_lock:
             _results[cmd_id] = result
         cmd["event"].set()

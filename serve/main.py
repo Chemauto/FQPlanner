@@ -23,7 +23,6 @@ from service.server import (
     process_commands,
     try_record_frame,
     get_lock,
-    _learning_mode,
 )
 
 

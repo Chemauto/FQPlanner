@@ -1,4 +1,4 @@
-last_updated: '2026-07-04 05:21:30'
+last_updated: '2026-07-04 05:38:22'
 locations:
   nav_001:
     fixture: counter
@@ -8,10 +8,13 @@ locations:
     objects: []
   nav_012:
     fixture: stove
-    objects: []
+    objects:
+    - cup
+    - apple
   nav_014:
     fixture: stove
-    objects: []
+    objects:
+    - mug
   nav_033:
     fixture: sink
     objects: []
@@ -19,13 +22,10 @@ locations:
     fixture: counter
     objects:
     - pot
-    - cup
     - bowl
-    - apple
   nav_055:
     fixture: sink
-    objects:
-    - mug
+    objects: []
   nav_088:
     fixture: island
     objects:
