@@ -10,6 +10,10 @@ import io
 import json
 import os
 import sys
+import threading
+import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 import redis
@@ -24,6 +28,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from robot_api.config import load_robot_api_config
 
 app = Flask(__name__)
+# 每次请求都重新读模板:改了 index.html 不用重启 deploy 也不会拿到旧缓存页面(debug=False 默认会缓存)。
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 MASTER_URL = os.getenv("MASTER_URL", "http://127.0.0.1:5000")
 SIM_URL = os.getenv("ROBOT_API_URL", load_robot_api_config().server_url)
@@ -68,15 +75,96 @@ def index():
     return render_template("index.html")
 
 
+_QUAD_CAM_LABELS = ["Top", "Front", "Wrist", "Agent"]
+_capture_lock = threading.Lock()
+
+
+def _capture_task_timeline(task_text, task_id, poll=2.0, timeout=600.0):
+    """为一个任务采集四宫格时间线:开始 1 张 + 每个子任务完成的边界各 1 张 + 全部完成 1 张。
+
+    不再实时/定时截图(实时渲染已移除)。改为盯 Master task_status 的 completed 计数,每当有一个
+    子任务完成(计数+1),就在那个边界截一帧——此刻 serve 空闲,/camera/latest 现渲很快很清晰。
+    这样时间线天然对齐"每步做完的样子",也不拖慢机器人执行。网页发任务时后台自动调。"""
+    if not _capture_lock.acquire(blocking=False):
+        return  # 已有采集在跑,跳过
+    try:
+        TIMELINE_DIR.mkdir(parents=True, exist_ok=True)
+        for f in os.listdir(TIMELINE_DIR):
+            if f.startswith("frame_") and f.endswith(".jpg"):
+                os.remove(os.path.join(TIMELINE_DIR, f))
+        frames, t0 = [], time.time()
+
+        def snap(label):
+            try:
+                r = requests.get(f"{SIM_URL}/camera/latest", timeout=90)
+                if r.status_code == 200 and r.content:
+                    fn = f"frame_{len(frames):02d}.jpg"
+                    with open(os.path.join(TIMELINE_DIR, fn), "wb") as fp:
+                        fp.write(r.content)
+                    frames.append({"file": fn, "label": label, "t": round(time.time() - t0, 1)})
+            except Exception:
+                pass
+
+        def write(won=None):
+            with open(os.path.join(TIMELINE_DIR, "timeline.json"), "w", encoding="utf-8") as fp:
+                json.dump({"task": task_text, "won": won,
+                           "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                           "cameras": _QUAD_CAM_LABELS, "frames": frames}, fp, ensure_ascii=False, indent=2)
+
+        snap("开始"); write()
+        seen_done, all_done = 0, False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(poll)
+            try:
+                st = requests.get(f"{MASTER_URL}/api/task_status", timeout=10).json()
+            except Exception:
+                continue
+            if st.get("task_id") != task_id:
+                continue
+            # 每完成一个子任务就在边界补一帧(serve 此刻空闲,现渲快)
+            done = int(st.get("completed", 0) or 0)
+            total = int(st.get("total", 0) or 0)
+            subs = st.get("subtask_list") or []
+            while seen_done < done:
+                label = f"第{seen_done + 1}步"
+                if seen_done < len(subs):
+                    sub = subs[seen_done]
+                    ok = (sub.get("status") == "success")
+                    label = f"第{seen_done + 1}步 {'✓' if ok else '✕'} {sub.get('subtask', '')}"
+                seen_done += 1
+                snap(label); write()
+            if st.get("all_done"):
+                all_done = True
+                break
+        snap("完成");
+        won = None
+        try:
+            won = requests.get(f"{SIM_URL}/success", timeout=10).json().get("won")
+        except Exception:
+            pass
+        write(won=won)
+    finally:
+        _capture_lock.release()
+
+
 @app.route("/publish_task", methods=["POST"])
 def publish_task():
-    """转发任务到 Master"""
+    """转发任务到 Master,并后台为该任务采集四宫格时间线(网页时间线随即变成这个任务)。"""
     try:
         data = request.get_json()
         if not data or "task" not in data:
             return jsonify({"error": "缺少 task 字段"}), 400
+        task_id = data.get("task_id") or uuid.uuid4().hex
+        data["task_id"] = task_id
+        data.setdefault("refresh", True)
+        task_text = data["task"]
         resp = requests.post(f"{MASTER_URL}/publish_task", json=data, timeout=120)
-        return jsonify(resp.json()), resp.status_code
+        result = resp.json()
+        if resp.status_code == 200 and result.get("status") == "success":
+            threading.Thread(target=_capture_task_timeline,
+                             args=(task_text, task_id), daemon=True).start()
+        return jsonify(result), resp.status_code
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "Master 服务未启动"}), 503
     except Exception as e:
@@ -258,6 +346,18 @@ def scene_state():
         return jsonify({"success": True, "data": result})
     except Exception as e:
         return jsonify({"success": False, "message": f"Redis 连接失败: {e}", "data": {}})
+
+
+@app.route("/api/belief", methods=["GET"])
+def belief():
+    """代理仿真后端的 belief 物体视角 {objects:{obj:{location}}, holding}。前端物体状态表用。"""
+    try:
+        resp = requests.get(f"{SIM_URL}/belief", timeout=5)
+        return jsonify(resp.json()), resp.status_code
+    except requests.exceptions.ConnectionError:
+        return jsonify({"objects": {}, "error": "仿真服务未启动"}), 503
+    except Exception as e:
+        return jsonify({"objects": {}, "error": str(e)}), 500
 
 
 @app.route("/api/update_scene", methods=["POST"])

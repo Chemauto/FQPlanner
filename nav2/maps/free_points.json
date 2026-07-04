@@ -1,5 +1,5 @@
 {
-  "map": "kitchen_map.yaml",
+  "map": "/Users/christinebi/FQPlanner/nav2/maps/kitchen_map.yaml",
   "spacing": 0.2,
   "clearance": 0.35,
   "points": [
@@ -715,7 +715,7 @@
       "name": "nav_118",
       "x": 0.525,
       "y": -3.925,
-      "clearance": 0.381
+      "clearance": 0.4
     },
     {
       "name": "nav_119",

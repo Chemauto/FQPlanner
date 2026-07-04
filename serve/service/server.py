@@ -15,13 +15,14 @@ from flask_cors import CORS
 
 from tools.arm import (
     get_arm_info, get_obj_pos,
-    move_arm,
+    move_arm, grasp, place,
     open_gripper, close_gripper, is_grasped,
 )
-from tools.move import get_base_info, nav, move, stop_base, follow_path
+from tools.move import get_base_info, nav, move, follow_path
 from scene.scene_memory import (
     coords_to_waypoint,
     get_all_locations,
+    get_belief_by_object,
     load_state as _load_belief_state,
     move_object,
     reset_belief_unknown,
@@ -71,10 +72,10 @@ _recording = {
 }
 
 RECORD_CAMERAS = [
-    ("overhead_cam",   "Top",         False),
-    ("head_cam",       "Head",        False),
-    ("right_arm_cam",  "Right wrist", False),
-    ("left_arm_cam",   "Left wrist",  False),
+    ("overhead_cam",             "Top",   True),
+    ("robot0_frontview",         "Front", True),
+    ("robot0_eye_in_hand",       "Wrist", True),
+    ("robot0_agentview_center",  "Agent", True),
 ]
 
 _video_dir = os.path.join(os.path.dirname(__file__), "..", "videos")
@@ -87,7 +88,7 @@ def _camera_config():
         scene_dir = "scene"
         env = _get_env()
         if env is not None:
-            scene_dir = env.scene_dir
+            scene_dir = getattr(env, "scene_dir", None) or getattr(env, "_scene_dir", "scene")
         path = os.path.join(os.path.abspath(scene_dir), "config", "camera.yaml")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -142,15 +143,52 @@ def _render_camera_preview(env, camera_names, width, height):
     for name in camera_names:
         try:
             img = env.sim.render(width, height, camera_name=name)
+            img = np.flipud(img)  # robosuite sim.render 是上下翻的(OpenGL 约定),翻正
         except Exception:
             img = np.zeros((height, width, 3), dtype=np.uint8)
-        panel = Image.fromarray(img)
+        panel = Image.fromarray(np.ascontiguousarray(img))
         label = labels.get(name, name)
         draw = ImageDraw.Draw(panel)
         draw.rectangle([0, 0, len(label) * 8 + 12, 20], fill=(0, 0, 0))
         draw.text((5, 3), label, fill=(255, 255, 255))
         panels.append(panel)
     return panels
+
+
+# ---- 实时四宫格缓存:同步命令(nav/grasp)执行时占住主循环,/camera/latest 走队列会卡到命令结束。
+#      让 nav/grasp 的步进钩子把四宫格渲进这个缓存,命令执行中 /camera/latest 直接返回缓存 → 画面实时。
+_live_quad = {"jpeg": None, "t": 0.0}
+_cmd_running = {"on": False}
+
+
+def _update_live_quad(env, min_interval=0.8):
+    """节流渲染四宫格进缓存(主线程调用,GL 安全)。渲染慢,所以最多每 min_interval 秒一次。
+
+    这个函数由 nav/grasp/place 的每步钩子调用 —— 命令是同步占主循环的,每渲一次 4 个 320×240
+    相机就占掉几百毫秒,若太频繁(旧值 0.25s)运动中大半墙钟时间耗在渲染上,一次 place 能拖到
+    30~90s 看着像卡死。0.8s 一次对"看直播"足够,又把命令耗时压下来几倍。"""
+    now = time.time()
+    if now - _live_quad["t"] < min_interval:
+        return
+    _live_quad["t"] = now
+    try:
+        from PIL import Image
+        from io import BytesIO
+        preview = _preview_config()
+        cams = preview.get("cameras", ["overhead_cam"])
+        w = int(preview.get("width", 160))
+        h = int(preview.get("height", 120))
+        panels = _render_camera_preview(env, cams, w, h)
+        while len(panels) < 4:
+            panels.append(Image.new("RGB", (w, h), (0, 0, 0)))
+        image = Image.new("RGB", (w * 2, h * 2))
+        for idx, panel in enumerate(panels[:4]):
+            image.paste(panel, ((idx % 2) * w, (idx // 2) * h))
+        buf = BytesIO()
+        image.save(buf, format="JPEG", quality=70)
+        _live_quad["jpeg"] = buf.getvalue()
+    except Exception:
+        pass
 
 
 def try_record_frame():
@@ -224,19 +262,18 @@ def get_base_action():
 
 
 def apply_base_velocity(env):
-    """cmd_vel 模式下直接设置底盘 freejoint 速度，bypass 轮子物理。
+    """[robosuite Panda] 底盘无 freejoint,速度控制走 move()/nav()(env.step action)。
+    Nav2 连续速度注入路径(freejoint qvel)对 robosuite 不适用,直接停用;cmd_vel 命令走队列真 move()。"""
+    return False
 
-    Nav2 发送的速度命令是期望速度，不是电机力。
-    直接写 freejoint 的 qvel 使底盘立即响应。
-    """
     base = get_base_action()
     if base is None:
         return False
 
-    if env.base_free_joint_id < 0:
+    if getattr(env, "base_free_joint_id", -1) < 0:
         return False
 
-    dadr = env.model.jnt_dofadr[env.base_free_joint_id]
+    dadr = env.raw_model.jnt_dofadr[env.base_free_joint_id]
     # freejoint qvel layout: [vx, vy, vz, wx, wy, wz]
     # dadr+0 = vx, dadr+1 = vy, dadr+2 = vz (up!)
     # dadr+3 = wx (roll), dadr+4 = wy (pitch), dadr+5 = wz (yaw)
@@ -246,8 +283,8 @@ def apply_base_velocity(env):
     # qpos layout: [x, y, z, qw, qx, qy, qz]
     # yaw is encoded in quaternion; get it from the helper
     yaw = float(np.arctan2(
-        2 * (env.data.qpos[dadr+3] * env.data.qpos[dadr+6] + env.data.qpos[dadr+4] * env.data.qpos[dadr+5]),
-        1 - 2 * (env.data.qpos[dadr+5] ** 2 + env.data.qpos[dadr+6] ** 2),
+        2 * (env.raw_data.qpos[dadr+3] * env.raw_data.qpos[dadr+6] + env.raw_data.qpos[dadr+4] * env.raw_data.qpos[dadr+5]),
+        1 - 2 * (env.raw_data.qpos[dadr+5] ** 2 + env.raw_data.qpos[dadr+6] ** 2),
     ))
 
     cos_y = math.cos(yaw)
@@ -257,16 +294,16 @@ def apply_base_velocity(env):
 
     max_linear = 1.0
     max_angular = 1.0
-    env.data.qvel[dadr]     = world_vx * max_linear   # world x
-    env.data.qvel[dadr + 1] = world_vy * max_linear   # world y
-    env.data.qvel[dadr + 2] = 0.0                      # z: don't fly
-    env.data.qvel[dadr + 3] = 0.0                      # roll: don't tip
-    env.data.qvel[dadr + 4] = 0.0                      # pitch: don't tip
-    env.data.qvel[dadr + 5] = -vw * max_angular        # yaw angular velocity
+    env.raw_data.qvel[dadr]     = world_vx * max_linear   # world x
+    env.raw_data.qvel[dadr + 1] = world_vy * max_linear   # world y
+    env.raw_data.qvel[dadr + 2] = 0.0                      # z: don't fly
+    env.raw_data.qvel[dadr + 3] = 0.0                      # roll: don't tip
+    env.raw_data.qvel[dadr + 4] = 0.0                      # pitch: don't tip
+    env.raw_data.qvel[dadr + 5] = -vw * max_angular        # yaw angular velocity
 
     # 同时写 wheel ctrl 让 viewer 视觉同步
-    env.data.ctrl[0] = vx
-    env.data.ctrl[1] = vw
+    env.raw_data.ctrl[0] = vx
+    env.raw_data.ctrl[1] = vw
     return True
 
 
@@ -516,6 +553,9 @@ def _normalize_angle_deg(angle):
 
 
 def _step_active_command(env):
+    # PandaOmron/robosuite:nav/grasp/place 改为在 process_commands 里同步调真工具执行,
+    # 不再用分帧 active-command(那是自定义 freejoint env 的机制)。这里恒空转。
+    return False
     cmd = _active_command
     if cmd is None:
         return False
@@ -675,8 +715,8 @@ def _step_active_command(env):
                 # slaver 上报 all_done → bench 在物体未稳定时读 won → 假阴性(stovetop 案例)。
                 # 最多等 300 帧兜底,避免永不静止时卡死。
                 joint_id = env.obj_joint_id[obj_name]
-                dadr = env.model.jnt_dofadr[joint_id]
-                lin_vel = float(np.linalg.norm(env.data.qvel[dadr:dadr + 3]))
+                dadr = env.raw_model.jnt_dofadr[joint_id]
+                lin_vel = float(np.linalg.norm(env.raw_data.qvel[dadr:dadr + 3]))
                 state["settle_frames"] = state.get("settle_frames", 0) + 1
                 # 要连续 10 帧静止才算真稳:物体瞬移到落点时速度被清零(=0),若只看单帧
                 # 会在它还没开始下落时就误判稳定。连续静止排除"下落初期瞬时低速"。300 帧兜底。
@@ -714,6 +754,37 @@ def _move_virtual_ee(env, target):
     return False
 
 
+# 底盘在目标这个距离内就只原地转向、不再重导航。
+# 真臂 reach ~0.8m + 吸附 0.65m ⇒ 底盘离目标 ~1.4m 内伸臂即可够到;取 1.15m 留余量。
+# navigate_to_target / discover 通常已把底盘停在 ~1m 处 → 抓放不再多走一段冗余导航(省 ~20s)。
+_ARM_STAND_REACH = 1.15
+
+
+def _nav_within_reach(env, tx, ty, reach=0.6):
+    """确保底座在目标 xy 的臂可达范围内并朝向它,让真臂/吸附够得到。
+
+    - 底盘已在 _ARM_STAND_REACH 内(常见:上一步导航已到位):只原地转向目标,不重导航 → 快。
+    - 太远才真的挪近:退到目标 reach 米外的接近点(沿目标→底盘方向,落在机器人这侧地面,可站立)。
+    """
+    info = get_base_info(env)
+    bx, by = float(info["pos"][0]), float(info["pos"][1])
+    dist = float(np.hypot(tx - bx, ty - by))
+    if dist <= _ARM_STAND_REACH:
+        yaw = math.degrees(math.atan2(ty - by, tx - bx))
+        nav(env, bx, by, target_yaw=yaw, pos_threshold=0.2, max_steps=120)
+        return True
+    ax = tx + (bx - tx) / dist * reach
+    ay = ty + (by - ty) / dist * reach
+    yaw = math.degrees(math.atan2(ty - ay, tx - ax))
+    # 接近点就在 <1m 外,PD 直线 300 步足够;收窄可让"钻不进去"的坏位姿更快放弃(不空转 500 步)。
+    nav(env, ax, ay, target_yaw=yaw, pos_threshold=0.15, max_steps=300)
+    # 判"到位"不看是否精确压在接近点上,而看底盘最终离目标够不够近(臂/吸附够得着即可)。
+    # 否则接近点差 0.3m 没压到就误报失败,而其实底盘已到目标 0.9m 处完全能抓(cup 案例)。
+    fin = get_base_info(env)
+    final_dist = float(np.hypot(tx - fin["pos"][0], ty - fin["pos"][1]))
+    return final_dist <= _ARM_STAND_REACH
+
+
 def process_commands(env):
     """
     主循环调用：处理队列中的所有命令
@@ -733,24 +804,52 @@ def process_commands(env):
         cmd_id = cmd["id"]
         cmd_type = cmd["type"]
         params = cmd["params"]
+        # 标记命令执行中:期间 /camera/latest 返回实时缓存(由 nav/grasp 步进钩子刷新),避免画面冻结
+        _cmd_running["on"] = cmd_type in ("nav", "grasp", "place", "move_to", "move_duration", "cmd_vel")
         try:
             with _env_lock:
                 if cmd_type == "grasp":
-                    _active_command = {
-                        **cmd,
-                        "state": {"obj_name": params["obj_name"], "phase": "approach"},
-                    }
-                    return
+                    # 先把底座导航到物体臂可达范围内(接近位姿=物体沿→底座方向退,可站立),
+                    # 再真臂 OSC 移过去 → 吸附 → 关夹爪 → 提起。
+                    # 底盘没能到位(被障碍卡住)就直接失败,不硬抓 —— 否则"卡住却报成功"。
+                    obj = params["obj_name"]
+                    near = True
+                    if obj in env.obj_body_id:
+                        op = env.get_object_pos(obj)
+                        near = _nav_within_reach(env, float(op[0]), float(op[1]))
+                    if not near:
+                        result = {"success": False,
+                                  "result": f"底盘没能到达 {obj} 附近(被障碍卡住/导航失败),抓取失败"}
+                    else:
+                        ok = grasp(env, obj, snap_threshold=float(params.get("snap_threshold", 0.15)))
+                        if ok:
+                            env.grasped_object = obj  # 跟踪持有物(供 /status、place 校验)
+                        result = {"success": bool(ok),
+                                  "result": (f"成功抓取 {obj}" if ok
+                                             else f"未能抓取 {obj}(已到位但吸附范围内没够到)")}
                 elif cmd_type == "place":
-                    _active_command = {
-                        **cmd,
-                        "state": {
-                            "obj_name": params["obj_name"],
-                            "target_pos": np.asarray(params["target_pos"], dtype=float),
-                            "phase": "move",
-                        },
-                    }
-                    return
+                    obj = params["obj_name"]
+                    # 严格:必须真持有该物体才能放置。抓取失败时 grasped_object 不会被设,
+                    # 若这里不拦,place() 会无条件把物体瞬移到目标 → 没抓到却"放置成功"。
+                    held = getattr(env, "grasped_object", None)
+                    if held != obj:
+                        result = {"success": False,
+                                  "result": f"未持有 {obj}(当前持有: {held}),放置失败:请先成功抓取该物体"}
+                    else:
+                        tp = np.asarray(params["target_pos"], dtype=float)
+                        # 底盘必须真到落点臂可达范围内才放;被障碍卡住没到位就失败,
+                        # 绝不"瞬移物体到目标坐标"假装放好了(这正是"卡住却放置成功"的根源)。
+                        near = _nav_within_reach(env, float(tp[0]), float(tp[1]))
+                        if not near:
+                            result = {"success": False,
+                                      "result": f"底盘没能到达落点附近(被障碍卡住/导航失败),放置失败:{obj} 仍在手上"}
+                        else:
+                            ok = place(env, obj, tp,
+                                       snap_threshold=float(params.get("snap_threshold", 0.15)))
+                            if ok:
+                                env.grasped_object = None
+                            result = {"success": bool(ok),
+                                      "result": (f"成功放置 {obj}" if ok else "放置失败")}
                 elif cmd_type == "move_to":
                     reached = move_arm(env, **params)
                     info = get_arm_info(env)
@@ -762,46 +861,48 @@ def process_commands(env):
                     close_gripper(env, **params)
                     result = {"success": True}
                 elif cmd_type == "nav":
-                    gx = float(params["x"])
-                    gy = float(params["y"])
-                    astar_path = None
+                    # 差速底盘导航:直线可达就直行 PD;被家具挡住就用 A* 规划绕障路径再跟踪。
+                    # (以前只走直线 PD,穿过岛台/柜子就顶着障碍空转到超时 → "卡住";
+                    #  现在直线不通先绕行。reached/success 如实反映是否真到位,不再假成功。)
+                    gx, gy = float(params["x"]), float(params["y"])
+                    tyaw = params.get("target_yaw")
+                    yth = float(params.get("yaw_threshold", 5.0))
+                    pth = float(params.get("pos_threshold", 0.15))
+                    mx = int(params.get("max_steps", 500))
+                    path = None
                     if _ASTAR_AVAILABLE:
                         try:
-                            cur = get_base_info(env)
-                            sx, sy = cur["pos"][0], cur["pos"][1]
-                            if np.hypot(gx - sx, gy - sy) > 0.5 and not _astar_line_clear(sx, sy, gx, gy):
-                                astar_path = _astar_plan(sx, sy, gx, gy)
-                                if astar_path:
-                                    print(f"[nav] A* 路径: {len(astar_path)} 节点", file=_sys.stderr)
-                        except Exception as _ae:
-                            print(f"[nav] A* 检查失败，回落直线导航: {_ae}", file=_sys.stderr)
-                    _active_command = {
-                        **cmd,
-                        "state": {
-                            "x": gx,
-                            "y": gy,
-                            "target_yaw": params.get("target_yaw"),
-                            "kp": float(params.get("Kp", 1.5)),
-                            "pos_threshold": float(params.get("pos_threshold", 0.20)),
-                            "yaw_threshold": float(params.get("yaw_threshold", 10.0)),
-                            "max_steps": int(params.get("max_steps", 6000)),
-                            "step": 0,
-                            "path": astar_path,
-                            "path_index": 0,
-                            "waypoint_threshold": 0.18,
-                        },
-                    }
-                    return
+                            b = get_base_info(env)
+                            sx, sy = float(b["pos"][0]), float(b["pos"][1])
+                            if not _astar_line_clear(sx, sy, gx, gy):
+                                path = _astar_plan(sx, sy, gx, gy)  # 直线被挡才规划绕行
+                        except Exception as _e:
+                            print(f"[nav] A* 规划失败,退回直线: {_e}", file=_sys.stderr, flush=True)
+                            path = None
+                    if path and len(path) >= 2:
+                        # 用可靠的 PD nav() 走 A* 路径(follow_path 的跟踪器不收敛会空转到超时)。
+                        # 中间路点 best-effort 走(某段没精确到位不算失败——机器人仍在朝目标推进),
+                        # 最后一段直奔目标做精确对准,只有这一段的 reached 才决定成功 → 更鲁棒,
+                        # 不会因中间点小偏差就误报导航失败。A* 保证相邻点之间无碰撞。
+                        for wp in path[1:-1]:
+                            nav(env, float(wp["x"]), float(wp["y"]), target_yaw=None,
+                                pos_threshold=0.2, max_steps=200)
+                        info = nav(env, gx, gy, target_yaw=tyaw,
+                                   pos_threshold=pth, yaw_threshold=yth, max_steps=mx)
+                        result = {"success": info.get("reached", False),
+                                  "pos": info["pos"], "yaw": info["yaw_deg"]}
+                    else:
+                        info = nav(env, gx, gy, target_yaw=tyaw,
+                                   pos_threshold=pth, yaw_threshold=yth, max_steps=mx)
+                        result = {"success": info.get("reached", False),
+                                  "pos": info["pos"], "yaw": info["yaw_deg"]}
                 elif cmd_type == "move_duration":
-                    _active_command = {
-                        **cmd,
-                        "state": {
-                            "vx": float(params.get("vx", 0.0)),
-                            "vw": float(params.get("vw", 0.0)),
-                            "end_time": time.time() + float(params["duration"]),
-                        },
-                    }
-                    return
+                    # 定时速度:按 control_freq 估算步数,连发 move()
+                    n = max(1, int(float(params.get("duration", 1.0)) * 20))
+                    for _ in range(n):
+                        move(env, Vx=float(params.get("vx", 0.0)), Vw=float(params.get("vw", 0.0)))
+                    info = get_base_info(env)
+                    result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
                 elif cmd_type == "cmd_vel":
                     info = move(env, **params)
                     result = {"success": True, "pos": info["pos"], "yaw": info["yaw_deg"]}
@@ -818,7 +919,8 @@ def process_commands(env):
                     if img is None:
                         result = {"success": False, "result": f"相机 '{cam}' 渲染失败"}
                     else:
-                        pil_img = PILImage.fromarray(img)
+                        img = np.flipud(img)  # robosuite render 上下翻,翻正
+                        pil_img = PILImage.fromarray(np.ascontiguousarray(img))
                         buf = BytesIO()
                         pil_img.save(buf, format="JPEG", quality=quality)
                         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -834,11 +936,16 @@ def process_commands(env):
                     # 部分可观测的真实来源=视角+遮挡+距离(非坐标过滤)。min_pixels 滤掉太小(太远/边缘)的。
                     # 多相机融合:camera="all"=机器人身上相机(head+两腕,真机可复现,不含 overhead 作弊),
                     # 或逗号分隔自定义。取并集=任一相机看到即算看到,减少单视角盲区。
+                    # robosuite Panda 自带相机(机器人身上,真机导向):frontview=前视工作区,
+                    # eye_in_hand=腕部手眼;agentview_center 备用。"all"=机身相机并集,不含 overhead 作弊。
+                    _PERC_CAMS = {"head_cam": "robot0_frontview", "right_arm_cam": "robot0_eye_in_hand",
+                                  "left_arm_cam": "robot0_agentview_center"}
                     cam_param = params.get("camera_name") or "head_cam"
                     if cam_param == "all":
-                        cams = ["head_cam", "right_arm_cam", "left_arm_cam"]
+                        cams = ["robot0_frontview", "robot0_eye_in_hand", "robot0_agentview_center"]
                     else:
-                        cams = [c.strip() for c in cam_param.split(",") if c.strip()] or ["head_cam"]
+                        cams = [_PERC_CAMS.get(c.strip(), c.strip())
+                                for c in cam_param.split(",") if c.strip()] or ["robot0_frontview"]
                     min_px = int(params.get("min_pixels", 1))
                     scan = bool(params.get("scan", False))
                     bid_to_obj = {int(bid): name for name, bid in env.obj_body_id.items()}
@@ -846,28 +953,27 @@ def process_commands(env):
 
                     def _collect_visible():
                         for cam in cams:
-                            seg = env.sim.render_segmentation(cam)
+                            seg = env.render_segmentation(cam)
                             seg_ids = seg[:, :, 0]
                             for gid in np.unique(seg_ids):
                                 if gid < 0:
                                     continue
-                                bid = int(env.model.geom_bodyid[int(gid)])
+                                bid = int(env.raw_model.geom_bodyid[int(gid)])
                                 if bid in bid_to_obj and int((seg_ids == gid).sum()) >= min_px:
                                     seen.add(bid_to_obj[bid])
 
-                    if scan:
-                        # 转头扫描:绕机器人当前 yaw 转一圈(每 60°)渲染取并集,模拟原地转头/
-                        # head gimbal pan,绕开"到工作点后单一朝向看不到物体→误判漂移"。
-                        # 只改 quat + forward 渲染、扫完恢复(不 step,不影响物理)。
-                        qadr = env.model.jnt_qposadr[env.base_free_joint_id]
-                        orig_q = env.data.qpos[qadr + 3:qadr + 7].copy()
-                        yaw0 = 2.0 * float(np.arctan2(orig_q[3], orig_q[0]))
+                    yaw_jid = mujoco.mj_name2id(env.raw_model, mujoco.mjtObj.mjOBJ_JOINT,
+                                               "mobilebase0_joint_mobile_yaw")
+                    if scan and yaw_jid >= 0:
+                        # 转头扫描(robosuite):转移动底座 yaw 关节一圈(每 60°)渲染取并集,扫完恢复。
+                        # 只改 qpos + forward 渲染、不 step、不影响物理(等价原地转头 pan)。
+                        qadr = int(env.raw_model.jnt_qposadr[yaw_jid])
+                        orig = float(env.raw_data.qpos[qadr])
                         for ddeg in range(0, 360, 60):
-                            yaw = yaw0 + math.radians(ddeg)
-                            env.data.qpos[qadr + 3:qadr + 7] = [math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)]
+                            env.raw_data.qpos[qadr] = orig + math.radians(ddeg)
                             env.sim.forward()
                             _collect_visible()
-                        env.data.qpos[qadr + 3:qadr + 7] = orig_q
+                        env.raw_data.qpos[qadr] = orig
                         env.sim.forward()
                     else:
                         _collect_visible()
@@ -892,7 +998,7 @@ def process_commands(env):
                     # 模拟"开柜门把东西拿下来",绕开高柜机器人够不到的问题。
                     container = params["container"]
                     opened = env.open_container_door(container)
-                    chassis = env.get_body_pos("robot0_base")
+                    chassis = env.get_body_pos("mobilebase0_base")
                     out = [float(chassis[0]) + 0.3, float(chassis[1]), 0.95]
                     lifted = []
                     for obj in list(_container_contents.get(container, [])):
@@ -969,6 +1075,7 @@ def process_commands(env):
             except Exception:
                 pass
 
+        _cmd_running["on"] = False
         with _queue_lock:
             _results[cmd_id] = result
         cmd["event"].set()
@@ -1024,9 +1131,9 @@ def api_fixtures():
     result = {}
     for name, fixture in env.fixtures.items():
         result[name] = {
-            "pos": list(fixture.pos),
-            "size": list(fixture.size),
-            "type": fixture.type,
+            "pos": list(np.asarray(fixture.pos, dtype=float)),
+            "size": list(np.asarray(fixture.size, dtype=float)),
+            "type": type(fixture).__name__,
         }
     return jsonify(result)
 
@@ -1051,7 +1158,7 @@ def api_scene():
             fixtures[name] = {
                 "pos": np.asarray(fxtr.pos, dtype=float).tolist(),
                 "size": np.asarray(fxtr.size, dtype=float).tolist(),
-                "type": fxtr.type,
+                "type": type(fxtr).__name__,
             }
 
         # 机器人
@@ -1076,6 +1183,26 @@ def api_scene_state():
         return jsonify(get_all_locations())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/belief", methods=["GET"])
+def api_belief():
+    """belief 物体视角: {objects: {obj: {location}}, holding}。前端「物体状态(belief)」表用。
+
+    location = 机器人当前对该物体位置的记忆(家具名/robot_hand/工作点/unknown),
+    学习模式下起始多为 unknown,随探索逐步填回;不是物理真值(那是 /objects)。
+    """
+    try:
+        env = _get_env()
+        all_objs = list(env.obj_body_id.keys()) if env else None
+        held = getattr(env, "grasped_object", None) if env else None
+        belief = get_belief_by_object(all_objs)
+        # 手上持有物以物理事实为准(belief 若还没写 robot_hand 就纠正)
+        if held and held in belief:
+            belief[held] = {"location": "robot_hand"}
+        return jsonify({"objects": belief, "holding": held})
+    except Exception as e:
+        return jsonify({"error": str(e), "objects": {}}), 500
 
 
 # ============================================================
@@ -1420,8 +1547,10 @@ def _build_occupancy_grid(env, resolution, x_min, x_max, y_min, y_max):
     height = int((y_max - y_min) / resolution)
 
     with _env_lock:
-        model = env.sim.model
-        data = env.sim.data
+        # 必须用原始 MjModel/MjData:mujoco.mj_name2id / mj_id2name 只接受原始句柄,
+        # 传 robosuite 的 env.sim.model 包装会 TypeError(incompatible function arguments)→ /map_data 500。
+        model = env.raw_model
+        data = env.raw_data
 
         # 排除机器人 body(PandaOmron:robot0_* / mobilebase0_* / gripper0_*),
         # 从底座根 robot0_base 子树排除,避免地图把机器人自身投影成静态障碍物。
@@ -1605,7 +1734,8 @@ def api_camera_status():
 
 @app.route("/camera/latest", methods=["GET"])
 def api_camera_latest():
-    """按需渲染相机图片；默认四宫格，?camera=name 返回单路相机"""
+    """按需渲染相机图片；默认四宫格，?camera=name 返回单路相机。走命令队列渲染(serve 空闲时很快;
+    正巧命令执行中会排队等它结束再渲——时间线因此天然落在子任务边界,正是我们要的效果)。"""
     result = submit_command("camera_preview", {
         "camera_name": request.args.get("camera"),
         "width": request.args.get("width"),
@@ -1624,6 +1754,8 @@ def api_camera_latest():
 def start_server(env, port=5001):
     _env_holder["env"] = env
 
+    # 不再挂步进钩子:实时四宫格已移除。以前每步渲染 4 路相机(占主循环、并发抢渲染)会把 nav/grasp/place
+    # 拖慢一倍甚至卡死;现在命令跑纯物理速度,时间线只在子任务边界(serve 空闲)按需渲一帧。
     def run():
         app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
 

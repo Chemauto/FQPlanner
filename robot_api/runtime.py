@@ -232,15 +232,27 @@ class RobotRuntime:
         required_failed = [
             r for r in handled if r.get("_required") and r.get("success") is False
         ]
-        first_success = next((r for r in handled if r.get("success") is not False), handled[0])
         if required_failed:
             return {
                 "success": False,
                 "result": "；".join(r.get("result", "动作失败") for r in required_failed),
                 "backends": summary,
             }
-        return {
-            "success": True,
-            "result": first_success.get("result", "动作完成"),
-            "backends": summary,
-        }
+
+        # 选代表后端:优先第一个真正成功的;若都失败,用第一个(要如实反映失败)。
+        rep = next((r for r in handled if r.get("success") is not False), None)
+        real_success = rep is not None
+        if rep is None:
+            rep = handled[0]
+
+        # 透传代表后端的完整结果(pos/yaw/result 等都保留),而不是只回 success/result 三件套。
+        # 关键修复:以前这里对非必需后端一律 success=True,把 serve 端真实的失败
+        # (nav 没到位 reached=False、grasp 够不到、place 未持有/底盘没到)全抹成成功 →
+        # "导航被卡住却报成功放置成功"。现在 success 如实反映代表后端的成功与否。
+        merged = {k: v for k, v in rep.items()
+                  if k not in ("_backend", "_required", "skipped")}
+        merged["success"] = bool(real_success)
+        if not real_success and not merged.get("result"):
+            merged["result"] = "所有后端均未成功"
+        merged["backends"] = summary
+        return merged

@@ -112,6 +112,30 @@ def get_all_locations() -> dict:
             for loc, info in state['locations'].items()}
 
 
+def get_belief_by_object(all_objects=None) -> dict:
+    """belief 的物体视角：{obj: {'location': <家具名 / robot_hand / 工作点 / unknown>}}。
+
+    location 优先用工作点绑定的家具名（可读，如 counter / sink / stove），没有就退回工作点名。
+    传入 all_objects 时，belief 里没出现的物体补 'unknown'（学习模式起始 / 尚未发现）。
+    这是前端「物体状态(belief)」表的数据源，对齐用户要的 {mug:{location:...}} 格式。
+    """
+    state = load_state()
+    result = {}
+    for loc, info in (state.get('locations') or {}).items():
+        objs = info.get('objects') or []
+        if not objs:
+            continue
+        if loc == 'robot_hand':
+            label = 'robot_hand'
+        else:
+            label = info.get('fixture') or loc
+        for o in objs:
+            result[o] = {'location': label}
+    for o in (all_objects or []):
+        result.setdefault(o, {'location': 'unknown'})
+    return result
+
+
 def build_initial_state(env) -> dict:
     """
     根据仿真中物体的实际位置自动生成初始场景状态。
