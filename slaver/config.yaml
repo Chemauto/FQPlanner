@@ -56,9 +56,15 @@ camera:
     - "right_arm_cam"
     - "left_arm_cam"
   vlm:
-    model: "mimo-v2.5"
-    api_base: "https://api.xiaomimimo.com/v1"
-    max_tokens: 1000
+    # 阿里百炼 Qwen-VL-Max(国际/新加坡版端点);key 用 .env 的 VLM_API_KEY(与 master 规划的 deepseek 分开)。
+    # 实测:国内端点 401、国际端点通;qwen-vl-max ~1-2s、无 429、非推理模型(不必关思考)。
+    model: "qwen-vl-max"
+    api_base: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    max_tokens: 400
+    # 想换回免费智谱 GLM-4.6V-Flash(会 429 限流,且它是推理模型必须关思考,否则 ~28s 空回):
+    #   model: "glm-4.6v-flash"
+    #   api_base: "https://open.bigmodel.cn/api/paas/v4"
+    #   extra_body: {thinking: {type: disabled}}
 
 # Robot 
 robot:
@@ -88,7 +94,14 @@ perception:
   #   segmentation = 渲染机器人相机分割图,只认视野里可见的物体(MuJoCo 自带,有视角/
   #                  遮挡/距离限制、无识别噪声),调 serve /visible_objects
   #   vlm          = 渲染 RGB 发 VLM(上面 camera.vlm=mimo-v2.5)识别 [待接,=原方案]
-  backend: segmentation
+  backend: vlm
   # segmentation/vlm 用哪个相机:head_cam(单视角=最强部分可观测)/all(head+两腕融合,真机导向减盲区)/
   #   逗号分隔自定义(如 head_cam,overhead_cam)。overhead 俯视是仿真特权,真机没有=作弊。
   camera: all
+  # scan 转头扫描【已停用】:robosuite 的 offscreen render 不反映"非物理 set_joint_qpos+forward"的临时
+  #   改动——实测同一次调用内 4 个角度渲染结果完全相同、只跨调用因物理沉降才变(见 scan_rgb 命令注释)。
+  #   物理转底盘(step)又慢又扰动机器人。故改回单姿态多相机:cam=all → frontview+eye_in_hand+agentview
+  #   三个固定机身相机各拍一张、一次 VLM 调用(可靠)。召回不足由 belief/真值兜底保底(_discover 第⑤步)。
+  #   想重开先解决 render 不反映非物理 qpos 的问题,再设 true。
+  scan: false
+  scan_angles: [0, 90, 180, 270]

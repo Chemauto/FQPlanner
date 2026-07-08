@@ -98,6 +98,31 @@ def _camera_config():
     return _camera_config_cache
 
 
+_nongraspable_cache = None
+
+
+def _nongraspable_objects():
+    """从 objects.yaml 读出 graspable:false 的物体名集合(如 plate)。grasp 命令据此拒绝抓取,
+    避免 planner 误规划'抓盘子'把不可抓的容器抓起来搞乱状态。"""
+    global _nongraspable_cache
+    if _nongraspable_cache is None:
+        _nongraspable_cache = set()
+        scene_dir = "scene"
+        env = _get_env()
+        if env is not None:
+            scene_dir = getattr(env, "scene_dir", None) or getattr(env, "_scene_dir", "scene")
+        path = os.path.join(os.path.abspath(scene_dir), "config", "objects.yaml")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            for o in cfg.get("objects", []):
+                if o.get("graspable") is False:
+                    _nongraspable_cache.add(o.get("name"))
+        except Exception as e:
+            print(f"[grasp] 读 objects.yaml 判不可抓失败(非致命): {e}", flush=True)
+    return _nongraspable_cache
+
+
 def _screenshot_defaults():
     return (_camera_config().get("screenshot", {}) or {})
 
@@ -385,13 +410,56 @@ def _waypoint_serves_fixture(opos, fix_base):
         return False
 
 
+# 简餐/长任务食材集(gather these onto the plate)
+_GATHER_INGREDIENTS = ("bread", "cheese", "ketchup")
+# 食材算"凑到盘子上"的水平半径:盘子小 + 圆瓶/法棍放上去会物理滚动,取 0.6m 捕捉盘子及紧邻小簇。
+# (食材起始离盘 0.7~1.8m,凑齐后进到 0.6m 内,足以区分"已凑齐 vs 没凑";要更干净可改用带壁的碗做容器。)
+_GATHER_RADIUS = 0.6
+
+
+def _is_gather_task(task):
+    """任务是否是'把多样食材凑到盘子上'的长任务(靠关键词判断)。"""
+    t = (task or "").lower()
+    hit_plate = ("plate" in t or "盘" in t)
+    hit_gather = any(k in t for k in ("gather", "凑", "食材", "简餐", "ingredient", "hot dog", "热狗")) \
+        or sum(1 for g in _GATHER_INGREDIENTS if g in t) >= 2
+    return hit_plate and hit_gather
+
+
+def _judge_gather_on_plate(task=None):
+    """组合裁判:bread/cheese/ketchup 都落在 plate 水平 _GATHER_RADIUS 内 = 凑齐成功。
+
+    长任务(gather ingredients onto the plate)的完成判据。食材在盘子上会有物理滚动,
+    用水平距离阈值捕捉'都凑到盘子这一小片'即可,不苛求精确堆叠。
+    """
+    env = _get_env()
+    if env is None or "plate" not in env.obj_body_id:
+        return False
+    ings = [g for g in _GATHER_INGREDIENTS if g in env.obj_body_id]
+    if not ings:
+        return False
+    try:
+        with _env_lock:
+            ppos = env.get_object_pos("plate")
+            for n in ings:
+                q = env.get_object_pos(n)
+                if float(np.hypot(q[0] - ppos[0], q[1] - ppos[1])) > _GATHER_RADIUS:
+                    return False
+                if float(q[2]) < float(ppos[2]) - 0.15:   # 掉到盘子/台面以下不算
+                    return False
+        return True
+    except Exception:
+        return False
+
+
 def _judge_task(task):
     """完成裁判,替代 ALFWorld 的 oracle won / shadow_judge。
 
+    先看是不是'凑食材到盘子'的长任务 → 组合裁判;否则走原'put X on Y'单物体裁判:
     won = 几何裁判(物体落在目标家具 footprint,物理真值) OR 工作点符号裁判(Q2)。
-    place/inject 都把物体放到家具顶面中心,两条判据在真实场景下一致;OR 只是让
-    边界情形更鲁棒,并让裁判可用工作点语义表达。
     """
+    if _is_gather_task(task):
+        return _judge_gather_on_plate(task)
     obj_base, fix_base = _parse_put_task(task)
     if not obj_base or not fix_base:
         return False
@@ -706,6 +774,37 @@ def _nav_within_reach(env, tx, ty, reach=0.6):
     return final_dist <= _ARM_STAND_REACH
 
 
+def _avoid_stack(env, obj, tp, clear=0.13, step=0.14, ring=3):
+    """放置避让:目标点已被别的物体占着就小幅螺旋偏移到最近空位。
+
+    多样食材都放"同一个盘子中心"时,直接叠一起会互相撞飞/滚下台;偏移开就自然铺成一小簇,
+    既不叠飞又都留在盘子附近(组合裁判照样过)。只动 xy,z 不变。"""
+    tp = np.asarray(tp, dtype=float)
+    others = []
+    for o in getattr(env, "objects", []):
+        if o == obj:
+            continue
+        try:
+            others.append(env.get_object_pos(o)[:2])
+        except Exception:
+            pass
+
+    def _free(x, y):
+        return all(float(np.hypot(x - ox, y - oy)) > clear for ox, oy in others)
+
+    if _free(tp[0], tp[1]):
+        return tp
+    for r in range(1, ring + 1):
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                if max(abs(dx), abs(dy)) != r:
+                    continue
+                x, y = tp[0] + dx * step, tp[1] + dy * step
+                if _free(x, y):
+                    return np.array([x, y, tp[2]])
+    return tp
+
+
 def process_commands(env):
     """
     主循环调用：处理队列中的所有命令
@@ -732,20 +831,25 @@ def process_commands(env):
                     # 再真臂 OSC 移过去 → 吸附 → 关夹爪 → 提起。
                     # 底盘没能到位(被障碍卡住)就直接失败,不硬抓 —— 否则"卡住却报成功"。
                     obj = params["obj_name"]
-                    near = True
-                    if obj in env.obj_body_id:
-                        op = env.get_object_pos(obj)
-                        near = _nav_within_reach(env, float(op[0]), float(op[1]))
-                    if not near:
+                    if obj in _nongraspable_objects():
+                        # 不可抓物体(如 plate 盘子容器):拒绝抓取,免得 planner 误规划"抓盘子"搞乱状态
                         result = {"success": False,
-                                  "result": f"底盘没能到达 {obj} 附近(被障碍卡住/导航失败),抓取失败"}
+                                  "result": f"{obj} 是不可抓取的容器/固定物,不能抓取(它已在场景里就位,只能把东西放到它上面)"}
                     else:
-                        ok = grasp(env, obj, snap_threshold=float(params.get("snap_threshold", 0.15)))
-                        if ok:
-                            env.grasped_object = obj  # 跟踪持有物(供 /status、place 校验)
-                        result = {"success": bool(ok),
-                                  "result": (f"成功抓取 {obj}" if ok
-                                             else f"未能抓取 {obj}(已到位但吸附范围内没够到)")}
+                        near = True
+                        if obj in env.obj_body_id:
+                            op = env.get_object_pos(obj)
+                            near = _nav_within_reach(env, float(op[0]), float(op[1]))
+                        if not near:
+                            result = {"success": False,
+                                      "result": f"底盘没能到达 {obj} 附近(被障碍卡住/导航失败),抓取失败"}
+                        else:
+                            ok = grasp(env, obj, snap_threshold=float(params.get("snap_threshold", 0.15)))
+                            if ok:
+                                env.grasped_object = obj  # 跟踪持有物(供 /status、place 校验)
+                            result = {"success": bool(ok),
+                                      "result": (f"成功抓取 {obj}" if ok
+                                                 else f"未能抓取 {obj}(已到位但吸附范围内没够到)")}
                 elif cmd_type == "place":
                     obj = params["obj_name"]
                     # 严格:必须真持有该物体才能放置。抓取失败时 grasped_object 不会被设,
@@ -756,6 +860,8 @@ def process_commands(env):
                                   "result": f"未持有 {obj}(当前持有: {held}),放置失败:请先成功抓取该物体"}
                     else:
                         tp = np.asarray(params["target_pos"], dtype=float)
+                        # 落点已被别的物体占着就小幅偏移(避免多样食材叠同一盘子中心互相撞飞)
+                        tp = _avoid_stack(env, obj, tp)
                         # 底盘必须真到落点臂可达范围内才放;被障碍卡住没到位就失败,
                         # 绝不"瞬移物体到目标坐标"假装放好了(这正是"卡住却放置成功"的根源)。
                         near = _nav_within_reach(env, float(tp[0]), float(tp[1]))
@@ -850,6 +956,54 @@ def process_commands(env):
                             "width": int(w),
                             "height": int(h),
                         }
+                elif cmd_type == "scan_rgb":
+                    # 转头扫描版 RGB(给 vlm 感知用):非物理地转底盘 base_freejoint yaw 到多个角度,
+                    # 每个角度渲一张 RGB,多张一起发 VLM = 一次调用覆盖多视角(提高召回、省 API 次数)。
+                    # 只改 base_freejoint 四元数 + forward 渲染、不 step、扫完恢复,不影响物理(等价原地 pan)。
+                    # 注意①:PandaOmron 底座是 Option F freejoint,没有 mobilebase yaw 关节 → 转 freejoint quat。
+                    # 注意②:写 qpos 必须走 sim.data.set_joint_qpos(robosuite wrapper,同 set_object_pos);
+                    #        直接改 raw_data.qpos[...] 渲染不生效(被 wrapper 缓存盖掉)→ 4 帧全同的坑,已踩。
+                    from PIL import Image as PILImage
+                    from io import BytesIO
+                    import base64
+                    defaults = _screenshot_defaults()
+                    cam = params.get("camera_name") or "robot0_frontview"
+                    w = int(params.get("width") or defaults.get("width", 640))
+                    h = int(params.get("height") or defaults.get("height", 480))
+                    quality = int(defaults.get("jpeg_quality", 80))
+                    angles = params.get("angles") or [0, 90, 180, 270]
+                    jid = mujoco.mj_name2id(env.raw_model, mujoco.mjtObj.mjOBJ_JOINT, "base_freejoint")
+                    qadr = int(env.raw_model.jnt_qposadr[jid]) if jid >= 0 else -1
+                    base_qpos = env.raw_data.qpos[qadr: qadr + 7].copy() if qadr >= 0 else None  # 读=view,可靠
+                    orig_quat = base_qpos[3:7].copy() if base_qpos is not None else None
+                    frames, used_angles = [], []
+                    try:
+                        for ddeg in angles:
+                            if base_qpos is not None:
+                                rot = np.zeros(4)
+                                mujoco.mju_axisAngle2Quat(rot, np.array([0.0, 0.0, 1.0]),
+                                                          math.radians(float(ddeg)))
+                                newq = np.zeros(4)
+                                mujoco.mju_mulQuat(newq, rot, orig_quat)  # 世界系绕 Z 旋转:rot ⊗ orig
+                                q = base_qpos.copy()
+                                q[3:7] = newq
+                                env.sim.data.set_joint_qpos("base_freejoint", q)  # wrapper 写,渲染才生效
+                                env.sim.forward()
+                            img = env.sim.render(w, h, camera_name=cam)
+                            if img is None:
+                                continue
+                            img = np.flipud(img)  # robosuite render 上下翻,翻正
+                            pil_img = PILImage.fromarray(np.ascontiguousarray(img))
+                            buf = BytesIO()
+                            pil_img.save(buf, format="JPEG", quality=quality)
+                            frames.append(base64.b64encode(buf.getvalue()).decode("utf-8"))
+                            used_angles.append(float(ddeg))
+                    finally:
+                        if base_qpos is not None:
+                            env.sim.data.set_joint_qpos("base_freejoint", base_qpos)  # 恢复原朝向
+                            env.sim.forward()
+                    result = {"success": bool(frames), "camera": cam, "frames": frames,
+                              "angles": used_angles, "width": w, "height": h}
                 elif cmd_type == "visible_objects":
                     # segmentation 感知:渲染相机分割图,返回视野里可见的物体集。
                     # 部分可观测的真实来源=视角+遮挡+距离(非坐标过滤)。min_pixels 滤掉太小(太远/边缘)的。
@@ -1629,6 +1783,22 @@ def api_screenshot():
     return jsonify(submit_command("screenshot", params))
 
 
+@app.route("/scan_rgb", methods=["POST"])
+def api_scan_rgb():
+    """转头扫描:非物理转底盘 yaw 到多个角度,每个角度渲一张 RGB,返回 base64 帧列表。
+    给 vlm 感知用——多角度一次发 VLM,提高目标召回。走命令队列在主线程渲染。
+    Body: {camera_name, width, height, angles:[deg,...]}"""
+    data = request.json or {}
+    defaults = _screenshot_defaults()
+    params = {
+        "camera_name": data.get("camera_name") or "robot0_frontview",
+        "width": data.get("width") or defaults.get("width", 640),
+        "height": data.get("height") or defaults.get("height", 480),
+        "angles": data.get("angles") or [0, 90, 180, 270],
+    }
+    return jsonify(submit_command("scan_rgb", params))
+
+
 @app.route("/visible_objects", methods=["GET"])
 def api_visible_objects():
     """机器人相机视野里可见的物体集(segmentation 部分可观测感知)。
@@ -1663,6 +1833,28 @@ def api_camera_latest():
         return jsonify(result), 500
     import base64
     return Response(base64.b64decode(result["image"]), mimetype="image/jpeg")
+
+
+@app.route("/live", methods=["GET"])
+def api_live():
+    """极简"边跑边看"页:浏览器轮询 /camera/latest 自动刷新——离屏渲染,不需原生窗口/主线程,
+    绕开 macOS mjpython viewer 抢主线程崩溃的坑。任务执行中渲染排在命令后面 → 按子任务边界更新
+    (每步做完刷一帧);空闲时刷新很快。默认四宫格;?camera=overhead_cam 看单路俯视。"""
+    cam = request.args.get("camera", "")
+    html = """<!doctype html><html><head><meta charset="utf-8"><title>FQPlanner Live</title>
+<style>html,body{margin:0;background:#0f172a;color:#cbd5e1;font-family:system-ui;text-align:center}
+img{max-width:100vw;max-height:92vh;border-radius:6px}#s{padding:6px;font-size:13px}</style></head>
+<body><div id="s">连接中…</div><img id="v" alt="live"><script>
+var cam=%s, img=document.getElementById('v'), s=document.getElementById('s'), n=0;
+function load(){var i=new Image();
+ i.onload=function(){img.src=i.src;n++;
+   s.textContent='● 实时观看 · '+(cam||'四宫格')+' · 已刷新 '+n+' 帧 · 任务执行中按子任务边界更新';
+   setTimeout(load,500);};
+ i.onerror=function(){s.textContent='等待 serve…';setTimeout(load,1500);};
+ i.src='/camera/latest?'+(cam?('camera='+encodeURIComponent(cam)+'&'):'')+'t='+Date.now();}
+load();
+</script></body></html>""" % (repr(cam),)
+    return Response(html, mimetype="text/html")
 
 
 # ============================================================

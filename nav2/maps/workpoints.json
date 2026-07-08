@@ -1,29 +1,17 @@
 {
   "waypoints": [
     {
-      "name": "nav_044",
+      "name": "nav_002",
       "pos": [
-        5.325,
-        -1.325
-      ],
-      "yaw_deg": 180.0,
-      "serves": [
-        "apple",
-        "bowl",
-        "cup",
-        "mug",
-        "pot"
-      ]
-    },
-    {
-      "name": "nav_001",
-      "pos": [
-        1.125,
+        1.325,
         -1.125
       ],
       "yaw_deg": -90.0,
       "serves": [
-        "counter"
+        "counter",
+        "ketchup",
+        "plate",
+        "sponge"
       ]
     },
     {
@@ -34,7 +22,34 @@
       ],
       "yaw_deg": -90.0,
       "serves": [
+        "bowl",
+        "bread",
+        "cheese",
         "stove"
+      ]
+    },
+    {
+      "name": "nav_019",
+      "pos": [
+        4.725,
+        -1.125
+      ],
+      "yaw_deg": -180.0,
+      "serves": [
+        "apple",
+        "cup",
+        "pot"
+      ]
+    },
+    {
+      "name": "nav_022",
+      "pos": [
+        5.325,
+        -1.125
+      ],
+      "yaw_deg": 180.0,
+      "serves": [
+        "mug"
       ]
     },
     {
@@ -46,17 +61,6 @@
       "yaw_deg": 90.0,
       "serves": [
         "sink"
-      ]
-    },
-    {
-      "name": "nav_088",
-      "pos": [
-        1.525,
-        -2.325
-      ],
-      "yaw_deg": 180.0,
-      "serves": [
-        "sponge"
       ]
     },
     {

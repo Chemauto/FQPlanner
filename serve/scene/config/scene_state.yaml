@@ -1,35 +1,42 @@
-last_updated: '2026-07-04 05:38:22'
+last_updated: '2026-07-08 04:24:25'
 locations:
-  nav_001:
+  nav_002:
     fixture: counter
-    objects: []
+    objects:
+    - sponge
   nav_004:
     fixture: counter
-    objects: []
+    objects:
+    - plate
+    - bread
+    - cheese
+    - ketchup
   nav_012:
     fixture: stove
     objects:
-    - cup
-    - apple
+    - bowl
   nav_014:
     fixture: stove
+    objects: []
+  nav_019:
+    fixture: counter
     objects:
+    - pot
+    - cup
+  nav_022:
+    fixture: counter
+    objects:
+    - apple
     - mug
   nav_033:
     fixture: sink
     objects: []
-  nav_044:
-    fixture: counter
-    objects:
-    - pot
-    - bowl
   nav_055:
     fixture: sink
     objects: []
-  nav_088:
-    fixture: island
-    objects:
-    - sponge
   robot_hand:
+    fixture: null
+    objects: []
+  unknown:
     fixture: null
     objects: []

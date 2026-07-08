@@ -66,3 +66,28 @@ scene:
     type: object
     description: 海绵
     graspable: true
+
+  # ====== 简餐长任务:食材 + 盘子(组装目标)======
+  - name: plate
+    category: plate
+    type: object
+    description: 盘子(组装简餐的目标容器,把食材放到它上面)
+    graspable: false
+
+  - name: bread
+    category: baguette
+    type: object
+    description: 面包
+    graspable: true
+
+  - name: cheese
+    category: cheese
+    type: object
+    description: 奶酪
+    graspable: true
+
+  - name: ketchup
+    category: ketchup
+    type: object
+    description: 番茄酱
+    graspable: true

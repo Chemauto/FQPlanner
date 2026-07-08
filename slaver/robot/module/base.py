@@ -88,9 +88,13 @@ def _observe_at_waypoint(wp_name: str) -> set:
     按 perception.backend 分发(都不依赖判定层,切换不影响 won 裁判):
       geometric    = 坐标真值过滤(最近工作点==当前工作点),无视野限制 = 接相机前 baseline。
       segmentation = 渲染机器人相机分割图,只认视野里可见的物体(真实视角/遮挡/距离)。
+      vlm          = 渲染 RGB 发 VLM,让视觉大模型认出视野里的物体(最贴现实,不靠特权 ID)。
     """
-    if _perception_cfg('backend', 'geometric') == 'segmentation':
+    backend = _perception_cfg('backend', 'geometric')
+    if backend == 'segmentation':
         return _segmentation_observe()
+    if backend == 'vlm':
+        return _vlm_observe()
     return _geometric_observe(wp_name)
 
 
@@ -133,6 +137,154 @@ def _segmentation_observe() -> set:
         return seen
     except Exception as e:
         print(f"[base] segmentation 观测失败: {e}(视作未观测到)", file=sys.stderr)
+        return set()
+
+
+# perception 相机名 → serve 相机名(和 serve /visible_objects 里的映射保持一致)
+_PERC_CAM_MAP = {
+    "head_cam": "robot0_frontview",
+    "right_arm_cam": "robot0_eye_in_hand",
+    "left_arm_cam": "robot0_agentview_center",
+}
+
+# VLM 认物别名:模型常按 mesh 真实叫法或近义词回答(bread 的 mesh 其实是 baguette 法棍,
+# GLM/mimo 都只说 baguette 从不说 bread → 漏检)。把这些叫法映回我们的物体基名。
+# 保守收录,避免误报;词边界匹配已挡住 dish→dishwasher 之类。key 是物体基名,value 是额外接受的叫法。
+_VLM_ALIASES = {
+    "bread": ["baguette", "french bread", "loaf"],
+    # ketchup 是小瓶,VLM 常叫 bottle/condiment/sauce(我们物体集里没别的瓶子,不会误伤)
+    "ketchup": ["tomato sauce", "ketchup bottle", "sauce bottle", "bottle", "condiment", "sauce"],
+    "cheese": ["cheese block", "cheese wedge"],
+    "mug": ["coffee mug"],
+    "cup": ["glass cup"],
+    "pot": ["cooking pot", "saucepan"],
+    "plate": ["dish"],
+}
+
+
+def _vlm_candidate_objects() -> list:
+    """问 VLM"看到哪些"的候选清单 = serve 当前所有物体名(机器人知道场景有哪些物体,靠视觉认哪些可见)。"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(_backend_url() + '/objects', timeout=15) as r:
+            resp = json.loads(r.read().decode())
+        objs = resp.get('objects', resp)
+        return sorted([n for n, v in objs.items() if isinstance(v, dict)])
+    except Exception:
+        return []
+
+
+def _vlm_observe() -> set:
+    """渲染机器人相机 RGB 发 VLM,让视觉大模型认出视野里有哪些已知物体(比 segmentation 更贴现实:
+    看 RGB 图、不靠 MuJoCo 特权 segmentation ID)。返回可见物体基名集。
+
+    VLM 配置(model/api_base)读 slaver/config.yaml 的 camera.vlm;key 用 VLM_API_KEY(见 .env,
+    与 master 规划用的 deepseek CLOUD_API_KEY 分开)。渲染/识别失败视作"未观测到"(返回空)。
+    """
+    import urllib.request
+    import re as _re
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env')))
+    except Exception:
+        pass
+    cam = _perception_cfg('camera', 'head_cam')
+    cams = list(_PERC_CAM_MAP.values()) if cam == 'all' else [_PERC_CAM_MAP.get(cam, 'robot0_frontview')]
+    candidates = _vlm_candidate_objects()
+    if not candidates:
+        print("[base] vlm 观测:拿不到候选物体(视作未观测到)", file=sys.stderr)
+        return set()
+    # 渲染 RGB。默认转头扫描(perception.scan):serve 非物理转底盘 yaw 到多个角度各渲一张,
+    # 多帧一次性发 VLM = 一次调用覆盖多视角,提高目标召回(单视角常漏认目标致假阴性→搜索失败)。
+    images = {}
+    scan = _perception_cfg('scan', True)
+    if scan:
+        scan_cam = _PERC_CAM_MAP.get('head_cam', 'robot0_frontview')  # 转头扫描用朝工作区的机身前视相机
+        angles = _perception_cfg('scan_angles', [0, 90, 180, 270])
+        try:
+            req = urllib.request.Request(
+                _backend_url() + '/scan_rgb',
+                data=json.dumps({'camera_name': scan_cam, 'width': 640, 'height': 480,
+                                 'angles': angles}).encode(),
+                headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=90) as r:
+                resp = json.loads(r.read().decode())
+            for i, fr in enumerate(resp.get('frames') or []):
+                images[f'view{i}'] = fr
+        except Exception as e:
+            print(f"[base] vlm 扫描截图失败: {e}(回退单帧)", file=sys.stderr)
+    if not images:
+        # 非扫描 / 扫描失败:退回当前朝向单帧(cam=='all' 用机身多相机)
+        for c in cams:
+            try:
+                req = urllib.request.Request(
+                    _backend_url() + '/screenshot',
+                    data=json.dumps({'camera_name': c, 'width': 640, 'height': 480}).encode(),
+                    headers={'Content-Type': 'application/json'}, method='POST')
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    resp = json.loads(r.read().decode())
+                if resp.get('success') and resp.get('image'):
+                    images[c] = resp['image']
+            except Exception:
+                pass
+    if not images:
+        print("[base] vlm 观测:截图失败(视作未观测到)", file=sys.stderr)
+        return set()
+    # 调 VLM 识别可见物体
+    try:
+        import yaml
+        from openai import OpenAI
+        cfg_path = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'config.yaml'))
+        with open(cfg_path, encoding='utf-8') as f:
+            vcfg = ((yaml.safe_load(f) or {}).get('camera') or {}).get('vlm') or {}
+        model = vcfg.get('model', 'mimo-v2.5')
+        api_base = vcfg.get('api_base', 'https://api.xiaomimimo.com/v1')
+        max_tokens = int(vcfg.get('max_tokens', 800))
+        extra_body = vcfg.get('extra_body') or {}   # GLM 关思考 {thinking:{type:disabled}};原样透传
+        key = os.environ.get('VLM_API_KEY') or os.environ.get('CLOUD_API_KEY', '')
+        # 用英文 prompt(mimo 对中文常思考到 token 耗尽返回空);清单里选可见项,逗号分隔
+        prompt = (
+            "These are photos from a robot camera looking around a kitchen from several angles. "
+            "Look carefully across ALL the photos, including SMALL items like bottles, sponges and produce. "
+            "From the candidate object list below, reply with ONLY the object names you can actually SEE "
+            "(comma-separated, use the exact english names; if you see none, reply 'none').\n"
+            "Candidates: " + ", ".join(candidates)
+        )
+        content = [{"type": "text", "text": prompt}]
+        for _c, b64 in images.items():
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        client = OpenAI(api_key=key, base_url=api_base)
+        # 推理模型(mimo/GLM-4.6V)要么关思考(extra_body.thinking.disabled,~5s),要么留足 max_tokens。
+        create_kw = dict(model=model, messages=[{"role": "user", "content": content}],
+                         max_tokens=max_tokens, temperature=0)
+        if extra_body:
+            create_kw['extra_body'] = extra_body
+        # 免费 Flash 档偶发 429 限流("访问量过大"):退避重试,别让限流被当成"没看到"→ 误判漂移。
+        import time as _time
+        resp = None
+        for _try in range(3):
+            try:
+                resp = client.chat.completions.create(**create_kw)
+                break
+            except Exception as _e:
+                em = str(_e)
+                if ('429' in em or '1305' in em) and _try < 2:
+                    print(f"[base] vlm 限流,{_try + 1}/3 退避重试...", file=sys.stderr)
+                    _time.sleep(5)
+                    continue
+                raise
+        raw = (resp.choices[0].message.content or "").lower()
+        # 用词边界匹配候选名(+别名),避免 pot 命中 teapot 之类的误报;别名解决 bread=baguette 这种漏检
+        seen = set()
+        for cand in candidates:
+            base = _obj_base(cand)
+            terms = [cand.lower()] + _VLM_ALIASES.get(base.lower(), [])
+            if any(_re.search(r'(?<![a-z])' + _re.escape(t) + r'(?![a-z])', raw) for t in terms):
+                seen.add(base)
+        print(f"[base] 👁 vlm({cam}) 看到: {sorted(seen)}  (VLM原始: {raw[:80]!r})", file=sys.stderr)
+        return seen
+    except Exception as e:
+        print(f"[base] vlm 观测失败: {e}(视作未观测到)", file=sys.stderr)
         return set()
 
 
@@ -195,6 +347,7 @@ def _discover_object_waypoint(obj_name: str):
         belief_loc = sm.get_object_location(obj_name)
     except Exception:
         belief_loc = None
+    orig_belief = belief_loc  # 记住最初 belief(reset 时上帝真值播种的已知位置),供 VLM 全程漏认时兜底
 
     # 已在手中:物体随机器人移动,无需也无法"导航过去",直接成功
     if belief_loc == 'robot_hand':
@@ -257,6 +410,35 @@ def _discover_object_waypoint(obj_name: str):
             tag = "(漂移恢复)" if drift else ""
             return True, f"逐柜翻找:开 {c['name']} 发现 {obj_name}{tag},已更新位置记忆(容器)"
 
+    # ⑤ VLM 全程没认出(小物体/渲染难认)→ 回退信任位置,别让弱感知致整任务失败。
+    #    优先用最初 belief(reset 上帝真值播种);若 belief 已丢(上一轮搜索失败被漂移清成 unknown,
+    #    兜底就失灵了——正是 ketchup 的坑),退一步用 god's-eye 真值坐标的最近工作点兜底
+    #    (和 belief 同源=上帝真值,只是这次直接查实时坐标)。抓到后顺便把 belief 修回,下轮自愈。
+    fallback_wp = None
+    if orig_belief and orig_belief not in ('unknown', 'robot_hand') and orig_belief not in container_names:
+        fallback_wp = orig_belief
+    else:
+        try:
+            objs = _get_objects()
+            if isinstance(objs, dict) and 'objects' in objs:
+                objs = objs['objects']
+            data = (objs.get(obj_name) or objs.get(base)) if isinstance(objs, dict) else None
+            if isinstance(data, dict) and data.get('pos'):
+                fallback_wp = sm.coords_to_waypoint(data['pos'])
+        except Exception:
+            pass
+    if fallback_wp and fallback_wp not in ('unknown', 'robot_hand'):
+        wp = next((w for w in waypoints if w['name'] == fallback_wp), None)
+        if wp:
+            _navigate_to(wp['pos'][:2], yaw=wp.get('yaw_deg'))
+            try:
+                sm.move_object(obj_name, fallback_wp)  # belief 自愈:下轮不再是 unknown
+            except Exception:
+                pass
+            src = "belief" if fallback_wp == orig_belief else "真值坐标"
+            print(f"[base] ⚠ VLM 全程未识别 '{obj_name}',回退信任位置({src}:{fallback_wp}) → 导航交抓取",
+                  file=sys.stderr)
+            return True, f"VLM 未识别但回退信任位置({src}):{obj_name} 在 {fallback_wp}(已导航,交抓取)"
     return False, f"全场逐工作点 + 逐柜翻找仍未发现 '{obj_name}'"
 
 
@@ -346,6 +528,9 @@ def register_tools(mcp):
             return json.dumps([msg, {"_status": "failure"}])
 
     async def _do_navigate(x, y, yaw_deg):
+        if x is None or y is None:
+            # 坐标没解析出来就别发 /nav(会 400),直接如实失败,交 Master 决策
+            return json.dumps([f"导航目标坐标无法解析(x={x}, y={y}),无法导航", {"_status": "failure"}])
         result = _navigate_to([x, y], yaw=yaw_deg)
 
         if result.get("success"):

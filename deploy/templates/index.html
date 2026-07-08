@@ -229,21 +229,16 @@
             const anyFailed = data.failed || data.subtask_list.some(
                 t => t.done && t.status && t.status !== 'success'
             );
-            // ALFWorld ground-truth result (won=true/false) overrides subtask-level heuristic
+            // MuJoCo 判定:任务成功 = 所有子任务都成功(不再用 ALFWorld 的 won 覆盖)。
+            // won===true 时额外标"落点已验证"徽章;won===false 是 MuJoCo 非持续模式默认值,不代表失败,忽略。
             const wonSignal = data.hasOwnProperty('won') ? data.won : null;
             let statusLabel, statusCls;
             if (data.all_done) {
-                if (wonSignal === true) {
-                    statusLabel = '✓ 任务成功 (ALFWorld verified)';
-                    statusCls = 'status-ok';
-                } else if (wonSignal === false) {
-                    statusLabel = '✕ 任务失败 (ALFWorld verified)';
-                    statusCls = 'status-fail';
-                } else if (anyFailed) {
-                    statusLabel = '✕ 任务失败未完成';
+                if (anyFailed) {
+                    statusLabel = '✕ 任务失败(有子任务失败)';
                     statusCls = 'status-fail';
                 } else {
-                    statusLabel = '✓ 全部完成';
+                    statusLabel = wonSignal === true ? '✓ 任务成功(落点已验证)' : '✓ 任务成功';
                     statusCls = 'status-ok';
                 }
             } else {
@@ -550,8 +545,8 @@
                 document.getElementById('timeline-controls').style.display = 'block';
                 const slider = document.getElementById('timeline-slider');
                 slider.max = tlFrames.length - 1;
-                const wonTag = data.won === true ? ' · <span style="color:#4ade80">✓完成</span>'
-                             : data.won === false ? ' · <span style="color:#f87171">✗未完成</span>' : '';
+                // MuJoCo:won===true 才标"落点已验证";won===false 是非持续模式默认值,不当失败
+                const wonTag = data.won === true ? ' · <span style="color:#4ade80">✓落点已验证</span>' : '';
                 document.getElementById('quad-meta').innerHTML =
                     `任务: <b>${data.task || '?'}</b>${wonTag}` +
                     `<br><span style="font-size:11px">采集于 ${data.created || ''} · 宫格: ${(data.cameras || []).join(' / ')}</span>`;
