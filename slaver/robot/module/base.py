@@ -336,6 +336,25 @@ def _discover_object_waypoint(obj_name: str):
     物体在开放表面时 ③ 一眼扫到(便宜);藏进柜时要走完 ③ 再 ④ 逐柜开(贵)→ speedup<1。
     """
     base = _obj_base(obj_name)
+
+    # 全可观测 / 无 belief 后端(如 motrixsim/3dgs:serve /scene_state=503)→ 降级(方案 Y):
+    # 不走 belief/逐工作点遍历/漂移(那套依赖 scene_memory);直接用 /objects 真值坐标定位目标、
+    # 导航过去交抓取。开关 = use_realtime_coords:true(_mem_mode()=False)。robocasa 记忆模式不受影响。
+    if not _mem_mode():
+        try:
+            objs = _get_objects()
+            if isinstance(objs, dict) and 'objects' in objs:
+                objs = objs['objects']
+            data = (objs.get(obj_name) or objs.get(base)) if isinstance(objs, dict) else None
+            if isinstance(data, dict) and data.get('pos'):
+                pos = data['pos']
+                _navigate_to(pos[:2])  # 导航到目标真值坐标附近(不依赖工作点/belief)
+                return True, (f"(全可观测)按 /objects 真值坐标定位 {obj_name} @ "
+                              f"{[round(float(v), 2) for v in pos[:2]]},已导航交抓取")
+            return False, f"(全可观测){obj_name} 不在 /objects 里"
+        except Exception as e:
+            return False, f"(全可观测)真值定位失败: {e}"
+
     try:
         sm = _scene_mem()
         from waypoint_manager import load_waypoints
