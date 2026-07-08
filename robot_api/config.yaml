@@ -1,4 +1,6 @@
-active_backend: "mujoco_3dgs"
+# 本地 Mac 测试用 robocasa(mujoco@5001,CPU 可跑,含完整学习);
+# 联调 3dgs 时改回 "mujoco_3dgs" 并把该后端 url 指到 GPU 机器 IP:5002
+active_backend: "mujoco"
 
 # Robot selection: "xlerobot" (default) or "BlueThink"
 robot: "xlerobot"

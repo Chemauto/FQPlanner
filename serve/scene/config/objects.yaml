@@ -100,6 +100,35 @@ objects:
       fixture: island
       size: [0.20, 0.20]
 
+  # ===== 简餐长任务食材(gather ingredients onto the plate)=====
+  # 方案A:这里只保证"能生成不崩",真实落点由 main.py 的 _place_demo_objects 显式覆盖到可达坐标
+  # (robocasa layout 7 随机 placement 会甩到够不到的南岛台,所以绕开)。
+  # plate 在 objaverse 里 graspable=False(平盘子),bread/cheese/ketchup 用 objaverse 类别。
+  - name: plate
+    obj_groups: plate
+    graspable: false
+    placement:
+      fixture: counter
+      size: [0.30, 1.00]
+  - name: bread
+    obj_groups: baguette
+    graspable: true
+    placement:
+      fixture: counter
+      size: [0.30, 1.00]
+  - name: cheese
+    obj_groups: cheese
+    graspable: true
+    placement:
+      fixture: counter
+      size: [0.30, 1.00]
+  - name: ketchup
+    obj_groups: ketchup
+    graspable: true
+    placement:
+      fixture: counter
+      size: [0.30, 1.00]
+
   # # 在台面上放一个罐头
   # - name: canned_food
   #   obj_groups: canned_food

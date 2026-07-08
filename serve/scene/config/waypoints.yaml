@@ -1,50 +1,51 @@
 waypoints:
-- name: nav_017
+- name: nav_002
   pos:
-  - 4.325
+  - 1.325
   - -1.125
   serves:
-  - apple
+  - counter
+  - ketchup
+  - plate
+  - sponge
   yaw_deg: 90.0
-- name: nav_022
+- name: nav_012
   pos:
-  - 5.325
+  - 3.325
   - -1.125
   serves:
   - bowl
+  - bread
+  - cheese
+  - stove
   yaw_deg: 90.0
 - name: nav_019
   pos:
   - 4.725
   - -1.125
   serves:
+  - apple
   - cup
+  - pot
   yaw_deg: 90.0
-- name: nav_011
+- name: nav_022
   pos:
-  - 3.125
+  - 5.325
   - -1.125
   serves:
   - mug
   yaw_deg: 90.0
-- name: nav_015
+- name: nav_033
   pos:
-  - 3.925
-  - -1.125
+  - 3.125
+  - -1.325
   serves:
-  - pot
+  - sink
   yaw_deg: 90.0
-- name: nav_105
-  pos:
-  - 4.925
-  - -2.925
-  serves:
-  - sponge
-  yaw_deg: -180.0
-- name: nav_000
+- name: nav_004
   pos:
   - 1.725
-  - -0.925
+  - -1.125
   serves:
   - counter
   yaw_deg: 90.0
@@ -61,4 +62,4 @@ waypoints:
   - -1.525
   serves:
   - sink
-  yaw_deg: -90.0
+  yaw_deg: 90.0

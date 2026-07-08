@@ -1,29 +1,39 @@
-last_updated: '初始状态'
+last_updated: 初始状态
 locations:
-  nav_003:
+  nav_002:
+    fixture: counter
+    objects:
+    - sponge
+    - ketchup
+  nav_004:
+    fixture: counter
+    objects:
+    - plate
+  nav_012:
+    fixture: stove
+    objects:
+    - bowl
+    - bread
+  nav_014:
+    fixture: stove
+    objects:
+    - cheese
+  nav_019:
+    fixture: counter
+    objects:
+    - pot
+    - cup
+  nav_022:
     fixture: counter
     objects:
     - apple
     - mug
-    - pot
-  nav_017:
-    fixture: stove
-    objects: []
-  nav_032:
+  nav_033:
     fixture: sink
-    objects:
-    - sponge
-  nav_055:
-    fixture: null
     objects: []
-  nav_060:
-    fixture: null
-    objects:
-    - bowl
-  nav_064:
-    fixture: null
-    objects:
-    - cup
+  nav_055:
+    fixture: sink
+    objects: []
   robot_hand:
     fixture: null
     objects: []

@@ -39,6 +39,21 @@ def reset_to_initial():
     print("[SceneMemory] 场景状态已重置为初始状态")
 
 
+def reset_belief_unknown():
+    """学习模式:把 belief 清空——保留工作点→fixture 结构,但所有物体回到 unknown。
+
+    全可观测模式用 reset_to_initial()(belief 直接 = 真值,无需探索);
+    学习模式用这个:机器人开局不知道任何物体在哪,靠逐工作点导航+局部观测逐步填回
+    belief,从而产生 ALFWorld 那样的 memory_speedup 学习曲线。
+    """
+    with open(INITIAL_PATH) as f:
+        state = yaml.safe_load(f) or {}
+    for info in (state.get('locations') or {}).values():
+        info['objects'] = []
+    save_state(state)
+    print("[SceneMemory] 学习模式:belief 已清空(所有物体 → unknown)")
+
+
 def get_object_location(obj_name: str) -> str:
     """返回物体所在的工作点名，如 'nav_012'"""
     state = load_state()
@@ -95,6 +110,30 @@ def get_all_locations() -> dict:
     state = load_state()
     return {loc: info.get('objects') or []
             for loc, info in state['locations'].items()}
+
+
+def get_belief_by_object(all_objects=None) -> dict:
+    """belief 的物体视角：{obj: {'location': <家具名 / robot_hand / 工作点 / unknown>}}。
+
+    location 优先用工作点绑定的家具名（可读，如 counter / sink / stove），没有就退回工作点名。
+    传入 all_objects 时，belief 里没出现的物体补 'unknown'（学习模式起始 / 尚未发现）。
+    这是前端「物体状态(belief)」表的数据源，对齐用户要的 {mug:{location:...}} 格式。
+    """
+    state = load_state()
+    result = {}
+    for loc, info in (state.get('locations') or {}).items():
+        objs = info.get('objects') or []
+        if not objs:
+            continue
+        if loc == 'robot_hand':
+            label = 'robot_hand'
+        else:
+            label = info.get('fixture') or loc
+        for o in objs:
+            result[o] = {'location': label}
+    for o in (all_objects or []):
+        result.setdefault(o, {'location': 'unknown'})
+    return result
 
 
 def build_initial_state(env) -> dict:
