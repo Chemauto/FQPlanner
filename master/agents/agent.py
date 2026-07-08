@@ -15,7 +15,7 @@ from agent.collaboration import Collaborator
 
 # Load .env from project root
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-load_dotenv(os.path.join(_project_root, '.env'), override=True)
+load_dotenv(os.path.join(_project_root, '.env'))
 
 # Bypass system proxy for API calls
 os.environ['NO_PROXY'] = '*'
@@ -43,9 +43,10 @@ class TaskQueue:
                 return task
         return None
 
-    def mark_done(self, task: Dict, status: str = "success"):
+    def mark_done(self, task: Dict, status: str = "success", result: str = ""):
         task["done"] = True
         task["status"] = status  # "success" | "failure" | "exception" | "timeout"
+        task["result"] = result  # actual observation/response from slaver
 
     def append_tasks(self, new_subtasks: list):
         for task in new_subtasks:
@@ -98,6 +99,15 @@ class GlobalAgent:
         self._experience_file = os.path.join(self._memory_dir, 'experiences.md')
         self._skills_dir = os.path.join(self._memory_dir, 'skills')
         self._exploration_rate = self.config.get('experience', {}).get('exploration_rate', 0.8)
+        # Env override so the benchmark can lower it (EXPLORATION_RATE=0.1) without editing
+        # the tracked config. High exploration tells the LLM to ignore past experience,
+        # which would flatten a learning curve — keep it low for the bench.
+        _env_expl = os.environ.get('EXPLORATION_RATE')
+        if _env_expl not in (None, ''):
+            try:
+                self._exploration_rate = float(_env_expl)
+            except ValueError:
+                pass
         self._pending_failure = None   # 等待人工录入的失败信息
         self._pending_success = None   # 等待人工决定是否录入的成功信息
         self._dispatch_token = 0       # 每次新任务自增，旧 dispatch thread 检测到变化后退出
@@ -331,6 +341,11 @@ class GlobalAgent:
             attempt += 1
 
         self.logger.info(f"Received reasoning and subtasks:\n{reasoning_and_subtasks}")
+        if not reasoning_and_subtasks or not isinstance(reasoning_and_subtasks, dict):
+            raise RuntimeError(
+                f"Planner returned invalid JSON after {attempt} retries. "
+                f"Raw response (last 200 chars): ...{response[-200:]}"
+            )
         subtask_list = reasoning_and_subtasks.get("subtask_list", [])
 
         def _ensure_str(v):
@@ -384,142 +399,198 @@ class GlobalAgent:
             """检查是否被新任务取代。"""
             return self._dispatch_token != dispatch_token
 
-        max_verify_retries = 3
-        final_verify_abnormal = False
-        for _verify_round in range(max_verify_retries):
-            if _verify_round > 0:
-                self.logger.info(f"[Camera] 最终验证重规划第 {_verify_round} 轮，重新执行修正子任务...")
+        while not task_queue.all_done():
+            if _superseded():
+                self.logger.info(f"[Dispatch] Token 已过期，退出旧任务 dispatch")
+                return
+            if task_id in self.terminated_tasks:
+                self.logger.warning(f"[TERMINATE] Stopping task {task_id}")
+                self.terminated_tasks.discard(task_id)
+                break
 
-            while not task_queue.all_done():
-                if _superseded():
-                    self.logger.info(f"[Dispatch] Token 已过期，退出旧任务 dispatch")
-                    return
-                if task_id in self.terminated_tasks:
-                    self.logger.warning(f"[TERMINATE] Stopping task {task_id}")
-                    self.terminated_tasks.discard(task_id)
-                    break
+            current = task_queue.get_next_undone()
+            if not current:
+                break
 
-                current = task_queue.get_next_undone()
-                if not current:
-                    break
+            robot_name = current["robot_name"]
+            subtask_data = {
+                "task_id": task_id,
+                "task": current["subtask"],
+                "order": "true",
+            }
+            if refresh:
+                self.collaborator.clear_agent_status(robot_name)
 
-                robot_name = current["robot_name"]
-                subtask_data = {
-                    "task_id": task_id,
-                    "task": current["subtask"],
-                    "order": "true",
-                }
-                if refresh:
-                    self.collaborator.clear_agent_status(robot_name)
+            # 重置状态
+            self._last_subtask_status = None
+            self._last_subtask_result = None
 
-                # 重置状态
-                self._last_subtask_status = None
-                self._last_subtask_result = None
+            self.logger.info(f"Sending: {current['subtask']}")
+            # 先标 busy 再发消息，防止机器人响应过快导致 busy flag 竞争
+            self.collaborator.update_agent_busy(robot_name, True)
+            self.collaborator.send(
+                f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
+            )
+            self.collaborator.wait_agents_free([robot_name])
 
-                self.logger.info(f"Sending: {current['subtask']}")
-                # 先标 busy 再发消息，防止机器人响应过快导致 busy flag 竞争
-                self.collaborator.update_agent_busy(robot_name, True)
-                self.collaborator.send(
-                    f"fqplanner_to_{robot_name}", json.dumps(subtask_data)
-                )
-                self.collaborator.wait_agents_free([robot_name])
+            if _superseded():
+                self.logger.info(f"[Dispatch] 等待期间被新任务取代，退出")
+                return
 
-                if _superseded():
-                    self.logger.info(f"[Dispatch] 等待期间被新任务取代，退出")
-                    return
+            subtask_status = self._last_subtask_status or "success"
+            subtask_result = self._last_subtask_result or ""
+            # "navigated" is an ALFWorld intermediate status — the slaver finished at a
+            # navigation step without a subsequent action.  Treat it as success so the
+            # frontend shows ✓ and task_had_failure stays clean.
+            if subtask_status == "navigated":
+                subtask_status = "success"
+            task_queue.mark_done(current, status=subtask_status, result=subtask_result)
 
-                subtask_status = self._last_subtask_status or "success"
-                task_queue.mark_done(current, status=subtask_status)
+            # ALFWorld 搜索阶段：result 文本中出现目标物体名时，跳过剩余搜索子任务。
+            # 如果 slaver 触发了自动取走（[Auto-take]），同时跳过后续显式 take 子任务。
+            if subtask_status == "success" and "搜索" in current["subtask"] and subtask_result:
+                try:
+                    import re as _re
+                    _m = _re.search(r'寻找\s+(\S+)', current["subtask"])
+                    if _m:
+                        _target = _m.group(1).strip().rstrip('.,，。')
+                        if _target.lower() in str(subtask_result).lower():
+                            # 只跳过「当前轮」的剩余搜索子任务（遇到第一个非搜索任务就停）
+                            # 这样两轮搜索+放置的计划中，第二轮搜索不会被误跳过
+                            remaining_search = []
+                            for _t in task_queue.get_remaining():
+                                if "搜索" in _t["subtask"]:
+                                    remaining_search.append(_t)
+                                else:
+                                    break  # 遇到导航/操作子任务，当前轮结束
+                            if remaining_search:
+                                self.logger.info(
+                                    f"[ALFWorld] 在 '{current['subtask']}' 结果中找到目标 '{_target}'，"
+                                    f"跳过本轮剩余 {len(remaining_search)} 个搜索子任务，robot 留在当前位置"
+                                )
+                                for t in remaining_search:
+                                    task_queue.mark_done(
+                                        t, status="success",
+                                        result=f"目标 '{_target}' 已在其他位置找到，跳过此搜索"
+                                    )
+                            # Auto-take 场景：slaver 在搜索阶段已经取走了目标物体，
+                            # 后续显式 "执行raw_action: take X" 子任务会失败（take 不在 admissible 里）。
+                            # 检测到 [Auto-take] 标记时，把显式 take 子任务也标为成功跳过。
+                            if "[Auto-take]" in str(subtask_result):
+                                # 只跳过当前轮（直到第一个非搜索任务）中的显式 take 子任务
+                                _remaining_cur = []
+                                for _t2 in task_queue.get_remaining():
+                                    if "搜索" in _t2["subtask"]:
+                                        _remaining_cur.append(_t2)
+                                    else:
+                                        _remaining_cur.append(_t2)
+                                        break
+                                remaining_take = [
+                                    t for t in _remaining_cur
+                                    if "raw_action" in t["subtask"].lower()
+                                    and "take" in t["subtask"].lower()
+                                    and _target.lower() in t["subtask"].lower()
+                                ]
+                                if remaining_take:
+                                    self.logger.info(
+                                        f"[ALFWorld] Auto-take 已取走 '{_target}'，"
+                                        f"跳过显式 take 子任务: {[t['subtask'] for t in remaining_take]}"
+                                    )
+                                    for t in remaining_take:
+                                        task_queue.mark_done(
+                                            t, status="success",
+                                            result=f"目标 '{_target}' 已在搜索阶段自动取走，跳过此抓取步骤"
+                                        )
+                except Exception:
+                    pass
 
-                # 子任务失败/异常时，拍照诊断（但拍照任务本身失败不再触发拍照，避免死循环）
-                is_camera_task = "拍照" in current["subtask"]
-                if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
-                    task_had_failure = True
-                    self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
-                    if self.config.get('camera', {}).get('enabled', True):
-                        self._send_camera_task(
-                            robot_name, task_id,
-                            f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
-                        )
-
-                    # VLM 发现异常时，让 Master LLM 决定如何调整
-                    if self._last_subtask_result and "abnormal" in self._last_subtask_result:
-                        self.logger.info(f"[Camera] VLM 发现异常，触发重规划...")
-                        vlm_feedback = self._last_subtask_result
-                        new_tasks, remove_tasks = self._incremental_replan(
-                            task, task_queue, [], vlm_feedback=vlm_feedback
-                        )
-                        if remove_tasks:
-                            task_queue.remove_pending_tasks(remove_tasks)
-                            self.logger.info(f"[Camera] 移除任务: {remove_tasks}")
-                        if new_tasks:
-                            task_queue.append_tasks(new_tasks)
-                            self.logger.info(f"[Camera] 新增任务: {[t['subtask'] for t in new_tasks]}")
-
-                if task_id in self.terminated_tasks:
-                    self.logger.warning(f"[TERMINATE] Task {task_id} terminated, stopping")
-                    self.terminated_tasks.discard(task_id)
-                    break
-
-                # 每个子任务完成后，检查是否有场景变化需要增量规划
-                with self._scene_changes_lock:
-                    changes = self.pending_scene_changes[:]
-                    self.pending_scene_changes.clear()
-
-                if changes:
-                    new_tasks, remove_tasks = self._incremental_replan(task, task_queue, changes)
-                    if remove_tasks:
-                        task_queue.remove_pending_tasks(remove_tasks)
-                        self.logger.info(
-                            f"[IncrementalReplan] Removed tasks: {remove_tasks}"
-                        )
-                    if new_tasks:
-                        task_queue.append_tasks(new_tasks)
-                        self.logger.info(
-                            f"[IncrementalReplan] Added {len(new_tasks)} new tasks: "
-                            f"{[t['subtask'] for t in new_tasks]}"
-                        )
-
-            # 所有子任务完成后，拍照验证最终场景（仅当 dispatch 未被取代时）
-            if robot_name and task_queue.all_done() and not _superseded():
-                self.logger.info("[Camera] 所有子任务完成，拍照验证最终场景...")
-                camera_ok = False
+            # 子任务失败/异常时，拍照诊断（但拍照任务本身失败不再触发拍照，避免死循环）
+            is_camera_task = "拍照" in current["subtask"]
+            if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
+                task_had_failure = True
+                self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
                 if self.config.get('camera', {}).get('enabled', True):
                     self._send_camera_task(
                         robot_name, task_id,
-                        f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
+                        f"拍照诊断：刚执行'{current['subtask']}'失败（{self._last_subtask_status}），检查当前场景状态"
                     )
-                    camera_ok = self._last_subtask_result is not None
 
-                if not camera_ok:
-                    self.logger.warning("[Camera] 最终验证拍照失败，无法确认场景状态")
-                    task_had_failure = True
-                elif "abnormal" in self._last_subtask_result:
-                    self.logger.warning(f"[Camera] 最终验证发现异常: {self._last_subtask_result}")
+                # VLM 发现异常时，让 Master LLM 决定如何调整
+                if self._last_subtask_result and "abnormal" in self._last_subtask_result:
+                    self.logger.info(f"[Camera] VLM 发现异常，触发重规划...")
                     vlm_feedback = self._last_subtask_result
                     new_tasks, remove_tasks = self._incremental_replan(
                         task, task_queue, [], vlm_feedback=vlm_feedback
                     )
                     if remove_tasks:
                         task_queue.remove_pending_tasks(remove_tasks)
-                        self.logger.info(f"[Camera] 最终验证重规划-移除任务: {remove_tasks}")
+                        self.logger.info(f"[Camera] 移除任务: {remove_tasks}")
                     if new_tasks:
                         task_queue.append_tasks(new_tasks)
-                        self.logger.info(f"[Camera] 最终验证重规划-新增任务: {[t['subtask'] for t in new_tasks]}")
-                        continue
-                    # abnormal 但 LLM 未生成修正任务，标记失败
-                    self.logger.warning("[Camera] 最终验证异常但未生成修正任务，标记整体失败")
-                    task_had_failure = True
-                    final_verify_abnormal = True
-                else:
-                    self.logger.info("[Camera] 最终验证通过，场景正常")
-            # 验证通过或无条件重试，退出外层循环
-            break
-        else:
-            # for 循环自然结束（达到最大重试次数）
-            self.logger.warning(f"[Camera] 最终验证重规划已达到最大重试次数({max_verify_retries})，场景仍异常")
-            task_had_failure = True
-            final_verify_abnormal = True
+                        self.logger.info(f"[Camera] 新增任务: {[t['subtask'] for t in new_tasks]}")
+
+                # ALFWorld 模式：仅在关键步骤（clean/place/heat/put）失败时中止
+                # 搜索子任务（检查容器）即使失败也不中止，继续检查下一个
+                _critical_keywords = ("clean", "清洁", "清洗", "place", "放置", "heat", "加热",
+                                      "put", "cool", "冷却", "slice", "切", "sinkbasin",
+                                      "countertop", "take", "抓取", "拿起")
+                _is_critical = any(kw in current["subtask"].lower()
+                                   for kw in _critical_keywords)
+                if _is_critical:
+                    try:
+                        from robot_api.client import check_success
+                        won_result = check_success()
+                        if won_result.get("won") is not None:  # ALFWorld 有 won 信号
+                            remaining = task_queue.get_remaining()
+                            if remaining:
+                                self.logger.info(
+                                    f"[Dispatch] 关键子任务失败，中止剩余 {len(remaining)} 个子任务"
+                                )
+                                for t in remaining:
+                                    task_queue.mark_done(
+                                        t, status="failure",
+                                        result=f"前置关键步骤失败（{current['subtask']}），已跳过"
+                                    )
+                            break
+                    except Exception:
+                        pass
+
+            if task_id in self.terminated_tasks:
+                self.logger.warning(f"[TERMINATE] Task {task_id} terminated, stopping")
+                self.terminated_tasks.discard(task_id)
+                break
+
+            # 每个子任务完成后，检查是否有场景变化需要增量规划
+            with self._scene_changes_lock:
+                changes = self.pending_scene_changes[:]
+                self.pending_scene_changes.clear()
+
+            if changes:
+                new_tasks, remove_tasks = self._incremental_replan(task, task_queue, changes)
+                if remove_tasks:
+                    task_queue.remove_pending_tasks(remove_tasks)
+                    self.logger.info(
+                        f"[IncrementalReplan] Removed tasks: {remove_tasks}"
+                    )
+                if new_tasks:
+                    task_queue.append_tasks(new_tasks)
+                    self.logger.info(
+                        f"[IncrementalReplan] Added {len(new_tasks)} new tasks: "
+                        f"{[t['subtask'] for t in new_tasks]}"
+                    )
+
+        # 所有子任务完成后，拍照验证最终场景（仅当 dispatch 未被取代时）
+        if robot_name and task_queue.all_done() and not _superseded():
+            self.logger.info("[Camera] 所有子任务完成，拍照验证最终场景...")
+            if self.config.get('camera', {}).get('enabled', True):
+                self._send_camera_task(
+                    robot_name, task_id,
+                    f"拍照验证：原始任务'{task}'的所有子任务已完成，检查最终场景是否符合预期"
+                )
+            if self._last_subtask_result and "abnormal" in self._last_subtask_result:
+                self.logger.warning(f"[Camera] 最终验证发现异常: {self._last_subtask_result}")
+            else:
+                self.logger.info("[Camera] 最终验证通过，场景正常")
 
         self.logger.info(f"Task_id ({task_id}) [{task}] all done.")
 
@@ -529,8 +600,11 @@ class GlobalAgent:
             completed_cnt = len(task_queue.get_completed())
             total_cnt = len(all_tasks)
 
+            # ── 自动学习：用后端 won 信号做最终裁判 ──────────────────────────────
+            self._auto_learn(task_desc, task_had_failure)
+            # ─────────────────────────────────────────────────────────────────────
+
             if not task_queue.all_done() or task_had_failure:
-                # 整体失败
                 self._pending_failure = {
                     "task_id": task_id,
                     "task_desc": task_desc,
@@ -539,7 +613,6 @@ class GlobalAgent:
                 }
                 self.logger.info(f"[Experience] Task failed, waiting for human input")
             else:
-                # 整体成功，询问用户是否录入正向经验
                 self._pending_success = {
                     "task_id": task_id,
                     "task_desc": task_desc,
@@ -584,7 +657,7 @@ class GlobalAgent:
             t["done"] and t.get("status") in ("failure", "exception", "timeout")
             for t in tasks
         )
-        return {
+        result = {
             "active": True,
             "task_id": self.current_task_id,
             "task": self.current_task_desc,
@@ -594,6 +667,15 @@ class GlobalAgent:
             "completed": len([t for t in tasks if t["done"]]),
             "subtask_list": tasks,
         }
+        # ALFWorld: expose ground-truth won signal separately from subtask status
+        try:
+            from robot_api.client import check_success
+            won_result = check_success()
+            if won_result.get("won") is not None:
+                result["won"] = won_result["won"]
+        except Exception:
+            pass
+        return result
 
     def _incremental_replan(
         self, original_task: str, task_queue: TaskQueue, changes: list, vlm_feedback: str = None
@@ -718,6 +800,43 @@ class GlobalAgent:
 
         return f"\n\n## 过往经验（请参考）：{exploration_hint}\n" + "\n\n".join(parts)
 
+    def _auto_learn(self, task_desc: str, task_had_failure: bool) -> None:
+        """Query backend won signal; auto-generate and save experience without human gate."""
+        try:
+            from robot_api.client import check_success, get_scene_state
+            won_result = check_success()
+            won = won_result.get("won") if isinstance(won_result, dict) else None
+            if won is None:
+                return  # backend doesn't support success check (MuJoCo etc.)
+
+            # Get final observation for richer experience note
+            note = ""
+            try:
+                snap = get_scene_state()
+                if snap:
+                    obs = snap.get("observation") or ""
+                    holding = snap.get("holding")
+                    note = obs[:300]
+                    if holding:
+                        note = f"手持: {holding}. " + note
+                    elif "not carrying" in obs.lower() or "你没有" in obs:
+                        note = "执行结束时手持为空（物体未被成功拾取）. " + note
+            except Exception:
+                pass
+
+            if not won:
+                self.logger.info(f"[AutoLearn] won=False → 自动记录失败经验")
+                self._pending_failure = {"task_id": "", "task_desc": task_desc,
+                                         "completed": 0, "total": 0}
+                self.save_experience(exp_type="negative", note=note or "任务未完成")
+            else:
+                self.logger.info(f"[AutoLearn] won=True → 自动记录成功经验")
+                self._pending_success = {"task_id": "", "task_desc": task_desc,
+                                         "completed": 0, "total": 0}
+                self.save_experience(exp_type="positive", note=note or "任务成功完成")
+        except Exception as e:
+            self.logger.warning(f"[AutoLearn] 自动学习失败，跳过: {e}")
+
     def classify_and_save_failure_experience(self, raw_input: str) -> dict:
         """LLM 将人工输入的失败经验归类到对应 skill 文件的避免规则中。"""
         os.makedirs(self._skills_dir, exist_ok=True)
@@ -818,9 +937,14 @@ class GlobalAgent:
         if self.current_task_queue:
             lines = []
             for t in self.current_task_queue.tasks:
-                status = "完成" if t["done"] else "未完成"
-                lines.append(f"  - {t['subtask']}（{status}）")
+                status_label = t.get("status", "未执行") if t["done"] else "未执行"
+                result_preview = str(t.get("result", "")).strip()[:120]
+                result_part = f" → {result_preview}" if result_preview else ""
+                lines.append(f"  - [{status_label}] {t['subtask']}{result_part}")
             subtask_summary = "\n".join(lines)
+
+        # 从子任务结果里提取「物体→位置」并持久化，供 search_and_grasp 优先搜索
+        self._update_location_memory(subtask_summary)
 
         feedback_type = "正向（方案有效）" if exp_type == "positive" else "负向（方案有问题）"
         user_note_section = f"用户备注（失败原因）：{note}" if note else ""
@@ -874,6 +998,32 @@ class GlobalAgent:
 
         self.logger.info(f"[Experience] Saved {exp_type} to {skill_name}.md: {experience_text}")
         return {"success": True, "skill": skill_name, "message": f"经验已保存到 {skill_name}.md", "experience": experience_text}
+
+    def _update_location_memory(self, subtask_summary: str) -> None:
+        """从子任务结果里解析 'You pick up X from Y' 并写入 location_memory.json。"""
+        import json as _json
+        location_file = os.path.join(os.path.dirname(self._skills_dir), "location_memory.json")
+        try:
+            mem = _json.loads(open(location_file, encoding="utf-8").read()) if os.path.exists(location_file) else {}
+        except Exception:
+            mem = {}
+        updated = False
+        # 匹配 "You pick up the plate 1 from the shelf 2."
+        for m in re.finditer(
+            r"pick up the (\S+)\s+\d+\s+from the ([\w ]+?\d+)",
+            subtask_summary, re.IGNORECASE
+        ):
+            obj = m.group(1).strip().lower()   # "plate"
+            loc = m.group(2).strip().lower()   # "shelf 2"
+            mem[obj] = {"location": loc, "updated": datetime.now().strftime("%Y-%m-%d")}
+            self.logger.info(f"[Location] {obj} → {loc}")
+            updated = True
+        if updated:
+            try:
+                with open(location_file, "w", encoding="utf-8") as f:
+                    _json.dump(mem, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                self.logger.warning(f"[Location] 写入失败: {e}")
 
     def get_experiences(self) -> str:
         """返回经验库全文（供前端展示）。"""

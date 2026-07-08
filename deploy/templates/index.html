@@ -63,16 +63,6 @@
         .subtask-item.done.fail .subtask-text { color: #f87171; font-weight: 500; }
         .subtask-item .subtask-robot { color: #64748b; font-size: 12px; }
         .no-task { color: #64748b; font-size: 13px; margin-top: 10px; }
-        .exp-card { display: none; margin-top: 16px; padding: 16px; background: #1a2744; border: 1px solid #38bdf8; border-radius: 10px; }
-        .exp-card h3 { font-size: 14px; color: #38bdf8; margin-bottom: 10px; }
-        .exp-card p { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
-        .exp-card textarea { width: 100%; padding: 10px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 13px; resize: vertical; min-height: 60px; outline: none; margin-bottom: 10px; }
-        .exp-card textarea:focus { border-color: #38bdf8; }
-        .exp-btns { display: flex; gap: 8px; }
-        .btn-success { background: #16a34a; color: #fff; }
-        .btn-success:hover { background: #15803d; }
-        .btn-danger { background: #dc2626; color: #fff; }
-        .btn-danger:hover { background: #b91c1c; }
         .robot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         .robot-info-box { background: #0f172a; border-radius: 8px; padding: 12px; }
         .robot-info-box h3 { font-size: 13px; color: #94a3b8; margin-bottom: 8px; }
@@ -111,6 +101,28 @@
             <div id="record-info" style="text-align:center;font-size:12px;color:#64748b;margin-top:6px"></div>
         </div>
 
+        <!-- 四宫格相机(head+左右腕+overhead)时间线回放 -->
+        <div class="card">
+            <h2>四宫格相机时间线
+                <span style="font-size:12px;color:#64748b;font-weight:normal">(Top + Front + Wrist + Agent，任务每步做完各截一帧)</span>
+                <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="loadTimeline()">刷新时间线</button>
+            </h2>
+            <div id="quad-meta" style="text-align:center;font-size:12px;color:#64748b;margin-bottom:6px"></div>
+            <div style="text-align:center">
+                <img id="quad-img" style="max-width:100%;border-radius:8px;background:#0f172a;min-height:120px" alt="四宫格">
+            </div>
+            <div id="timeline-controls" style="margin-top:10px;display:none">
+                <input type="range" id="timeline-slider" min="0" max="0" value="0" style="width:100%" oninput="showFrame(this.value)">
+                <div class="btn-row" style="justify-content:center;margin-top:6px">
+                    <button class="btn btn-sm btn-outline" onclick="stepFrame(-1)">◀ 上一帧</button>
+                    <button class="btn btn-sm" id="btn-play" onclick="playTimeline()">⏵ 播放</button>
+                    <button class="btn btn-sm btn-outline" onclick="stepFrame(1)">下一帧 ▶</button>
+                </div>
+                <div id="frame-label" style="text-align:center;font-size:13px;color:#e2e8f0;margin-top:6px"></div>
+            </div>
+            <div id="timeline-empty" style="text-align:center;font-size:12px;color:#64748b;margin-top:6px"></div>
+        </div>
+
         <!-- 任务发布 -->
         <div class="card">
             <h2>发布任务</h2>
@@ -122,26 +134,6 @@
             <div class="task-progress" id="task-progress"></div>
             <div class="btn-row" style="margin-top:10px">
                 <button class="btn btn-outline btn-sm" onclick="refreshTaskStatus()">刷新任务进度</button>
-            </div>
-            <!-- 失败经验弹窗 -->
-            <div class="exp-card" id="exp-card-fail" style="border-color:#ef4444">
-                <h3 style="color:#f87171">⚠ 任务失败 — 请描述失败原因或经验教训</h3>
-                <p id="exp-fail-info" style="color:#64748b;margin-bottom:10px"></p>
-                <textarea id="exp-fail-note" placeholder="例如：移动时若手上有物体，应将手臂举高，避免撞到其他物体。&#10;LLM 会自动判断归入哪个技能文件（navigate / grasp / place / multi_step）。"></textarea>
-                <div class="exp-btns">
-                    <button class="btn btn-sm btn-danger" id="btn-fail-submit" onclick="submitFailureExp()">提交经验</button>
-                    <button class="btn btn-sm btn-outline" onclick="dismissFailExp()">跳过</button>
-                </div>
-            </div>
-            <!-- 成功经验弹窗 -->
-            <div class="exp-card" id="exp-card-ok" style="border-color:#22c55e">
-                <h3 style="color:#4ade80">✓ 任务完成 — 是否总结一条经验？（可选）</h3>
-                <p id="exp-ok-info" style="color:#64748b;margin-bottom:10px"></p>
-                <textarea id="exp-ok-note" placeholder="可选：描述这次任务中有效的操作策略，LLM 会自动归入相应技能文件。&#10;直接点「跳过」也可以。"></textarea>
-                <div class="exp-btns">
-                    <button class="btn btn-sm btn-success" id="btn-ok-submit" onclick="submitSuccessExp()">提交经验</button>
-                    <button class="btn btn-sm btn-outline" onclick="dismissOkExp()">跳过</button>
-                </div>
             </div>
         </div>
 
@@ -159,23 +151,15 @@
             <div class="tools-list" id="tools-list"></div>
         </div>
 
-        <!-- 场景状态 -->
+        <!-- 物体状态 (belief) -->
         <div class="card">
-            <h2>场景状态</h2>
-            <div class="btn-row">
-                <button class="btn btn-outline btn-sm" onclick="loadScene()">刷新</button>
-            </div>
-            <div class="scene-grid" id="scene-grid"></div>
-            <div class="update-row">
-                <select id="scene-location"><option value="">选择位置</option></select>
-                <select id="scene-action">
-                    <option value="add_object">添加物体</option>
-                    <option value="remove_object">移除物体</option>
-                </select>
-                <input type="text" id="scene-object" placeholder="物体名称" style="width:140px">
-                <button class="btn btn-primary btn-sm" onclick="updateScene()">更新</button>
-            </div>
-            <div class="msg" id="scene-msg"></div>
+            <h2>物体状态 (belief)
+                <span style="font-size:12px;color:#64748b;font-weight:normal">机器人记忆里每个物体在哪(非真值,随探索更新)</span>
+                <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="loadBelief()">刷新</button>
+            </h2>
+            <div id="belief-updated" style="font-size:11px;color:#64748b;margin-bottom:8px"></div>
+            <div id="belief-table"></div>
+            <pre id="belief-json" style="margin-top:10px;padding:12px;background:#0f172a;border-radius:8px;font-size:12px;color:#a78bfa;overflow-x:auto;white-space:pre-wrap"></pre>
         </div>
     </div>
 
@@ -219,9 +203,7 @@
                 result.textContent = JSON.stringify(data, null, 2);
                 // 发送成功后立即开始轮询任务进度
                 if (data.status === 'success') {
-                    failDismissed = false; okDismissed = false;
-                    document.getElementById('exp-card-fail').style.display = 'none';
-                    document.getElementById('exp-card-ok').style.display = 'none';
+                    _prevAllDone = false;   // 新任务:重置"任务完成"belief 快照标志
                     startTaskPolling();
                 }
             } catch (e) {
@@ -247,13 +229,16 @@
             const anyFailed = data.failed || data.subtask_list.some(
                 t => t.done && t.status && t.status !== 'success'
             );
+            // MuJoCo 判定:任务成功 = 所有子任务都成功(不再用 ALFWorld 的 won 覆盖)。
+            // won===true 时额外标"落点已验证"徽章;won===false 是 MuJoCo 非持续模式默认值,不代表失败,忽略。
+            const wonSignal = data.hasOwnProperty('won') ? data.won : null;
             let statusLabel, statusCls;
             if (data.all_done) {
                 if (anyFailed) {
-                    statusLabel = '✕ 任务失败未完成';
+                    statusLabel = '✕ 任务失败(有子任务失败)';
                     statusCls = 'status-fail';
                 } else {
-                    statusLabel = '✓ 全部完成';
+                    statusLabel = wonSignal === true ? '✓ 任务成功(落点已验证)' : '✓ 任务成功';
                     statusCls = 'status-ok';
                 }
             } else {
@@ -288,14 +273,19 @@
                 </div>`;
             }
             el.innerHTML = html;
-            if (data.all_done) { failDismissed = false; okDismissed = false; }
         }
 
+        let _prevAllDone = false;   // 上一次轮询时任务是否已完成(用于只在"刚完成"那一刻快照 belief)
         async function refreshTaskStatus() {
             try {
                 const resp = await fetch('/api/task_status');
                 const data = await resp.json();
                 renderTaskProgress(data);
+                // 任务从「进行中」→「完成」的那一刻,给 belief 打一次快照(用户要的"任务结束标记当前状态")
+                if (data.active && data.all_done && !_prevAllDone) {
+                    loadBelief('任务结束');
+                }
+                _prevAllDone = !!(data.active && data.all_done);
                 if (data.active && !data.all_done) {
                     // 只在没启动轮询时才启动（手动刷新按钮触发时需要）
                     if (!taskPollingTimer) startTaskPolling();
@@ -310,7 +300,8 @@
         function startTaskPolling() {
             stopTaskPolling();
             refreshTaskStatus();
-            taskPollingTimer = setInterval(refreshTaskStatus, 3000);
+            taskPollingTimer = setInterval(refreshTaskStatus, 1000);
+            startTimelineRefresh();  // 任务执行时四宫格时间线随之采集/更新为该任务
         }
 
         function stopTaskPolling() {
@@ -318,94 +309,22 @@
                 clearInterval(taskPollingTimer);
                 taskPollingTimer = null;
             }
+            stopTimelineRefresh();
         }
 
-        // ── 经验弹窗 ──────────────────────────────────────────────────────
-        let failDismissed = false, okDismissed = false;
-
-        // 失败弹窗
-        async function pollFailurePending() {
-            try {
-                const resp = await fetch('/api/failure_pending');
-                const data = await resp.json();
-                if (data.pending && !failDismissed) showFailureCard(data);
-            } catch (e) {}
+        // 任务执行期间定时刷新时间线(后端在为该任务采集 → 时间线随即变成该任务,显示最新帧像直播)
+        let timelineRefreshTimer = null;
+        function startTimelineRefresh() {
+            stopTimelineRefresh();
+            loadTimeline(true);
+            timelineRefreshTimer = setInterval(() => loadTimeline(true), 5000);
         }
-        function showFailureCard(data) {
-            if (document.getElementById('exp-card-fail').style.display === 'block') return;
-            document.getElementById('exp-fail-info').textContent =
-                `任务：${data.task_desc || ''}（${data.completed}/${data.total} 步完成后终止）`;
-            document.getElementById('exp-fail-note').value = '';
-            document.getElementById('exp-card-fail').style.display = 'block';
-        }
-        function dismissFailExp() {
-            failDismissed = true;
-            document.getElementById('exp-card-fail').style.display = 'none';
-            fetch('/api/save_failure_experience', {method:'POST',
-                headers:{'Content-Type':'application/json'},body:JSON.stringify({note:''})}).catch(()=>{});
-        }
-        async function submitFailureExp() {
-            const note = document.getElementById('exp-fail-note').value.trim();
-            const btn = document.getElementById('btn-fail-submit');
-            btn.disabled = true; btn.textContent = '提交中…';
-            try {
-                const r = await fetch('/api/save_failure_experience', {method:'POST',
-                    headers:{'Content-Type':'application/json'},body:JSON.stringify({note})});
-                const res = await r.json();
-                if (res.success && res.skill) {
-                    btn.textContent = `已存入 ${res.skill}.md`;
-                    setTimeout(() => { document.getElementById('exp-card-fail').style.display='none';
-                        failDismissed=false; btn.disabled=false; btn.textContent='提交经验'; }, 1500);
-                    return;
-                }
-            } catch(e) {}
-            document.getElementById('exp-card-fail').style.display = 'none';
-            failDismissed = false; btn.disabled = false; btn.textContent = '提交经验';
+        function stopTimelineRefresh() {
+            if (timelineRefreshTimer) { clearInterval(timelineRefreshTimer); timelineRefreshTimer = null; }
+            setTimeout(() => loadTimeline(true), 4000);  // 任务结束后补拉一次,带上"完成"帧
         }
 
-        // 成功弹窗
-        async function pollSuccessPending() {
-            try {
-                const resp = await fetch('/api/success_pending');
-                const data = await resp.json();
-                if (data.pending && !okDismissed) showSuccessCard(data);
-            } catch (e) {}
-        }
-        function showSuccessCard(data) {
-            if (document.getElementById('exp-card-ok').style.display === 'block') return;
-            document.getElementById('exp-ok-info').textContent =
-                `任务：${data.task_desc || ''}（${data.completed}/${data.total} 步全部完成）`;
-            document.getElementById('exp-ok-note').value = '';
-            document.getElementById('exp-card-ok').style.display = 'block';
-        }
-        function dismissOkExp() {
-            okDismissed = true;
-            document.getElementById('exp-card-ok').style.display = 'none';
-            fetch('/api/save_success_experience', {method:'POST',
-                headers:{'Content-Type':'application/json'},body:JSON.stringify({note:''})}).catch(()=>{});
-        }
-        async function submitSuccessExp() {
-            const note = document.getElementById('exp-ok-note').value.trim();
-            const btn = document.getElementById('btn-ok-submit');
-            btn.disabled = true; btn.textContent = '提交中…';
-            try {
-                const r = await fetch('/api/save_success_experience', {method:'POST',
-                    headers:{'Content-Type':'application/json'},body:JSON.stringify({note})});
-                const res = await r.json();
-                if (res.success && res.skill) {
-                    btn.textContent = `已存入 ${res.skill}.md`;
-                    setTimeout(() => { document.getElementById('exp-card-ok').style.display='none';
-                        okDismissed=false; btn.disabled=false; btn.textContent='提交经验'; }, 1500);
-                    return;
-                }
-            } catch(e) {}
-            document.getElementById('exp-card-ok').style.display = 'none';
-            okDismissed = false; btn.disabled = false; btn.textContent = '提交经验';
-        }
-
-        // 每 3 秒轮询
-        setInterval(pollFailurePending, 3000);
-        setInterval(pollSuccessPending, 3000);
+        // 经验教训改由机器人任务后自行总结,前端不再手动录入(已移除失败/成功经验弹窗)。
 
         // 配置校验 - 自动检测
         async function validateConfig() {
@@ -455,75 +374,39 @@
         loadTools();
         setInterval(loadTools, 10000);
 
-        // 场景状态
-        let sceneData = {};
-        async function loadScene() {
+        // 物体状态 (belief): 机器人记忆里每个物体在哪 {obj:{location}}。任务结束会打快照。
+        async function loadBelief(snapshotLabel) {
+            const tableEl = document.getElementById('belief-table');
+            const jsonEl = document.getElementById('belief-json');
             try {
-                const resp = await fetch('/api/scene_state');
+                const resp = await fetch('/api/belief');
                 const data = await resp.json();
-                if (!data.success) {
-                    document.getElementById('scene-grid').innerHTML = `<div style="color:#ef4444;font-size:13px">${data.message}</div>`;
-                    return;
+                const objs = data.objects || {};
+                const names = Object.keys(objs).sort();
+                if (!names.length) {
+                    tableEl.innerHTML = '<div style="color:#64748b;font-size:13px">暂无物体记忆（belief 为空）</div>';
+                    jsonEl.textContent = '{}';
+                } else {
+                    tableEl.innerHTML = names.map(n => {
+                        const loc = (objs[n] && objs[n].location) || 'unknown';
+                        const color = loc === 'robot_hand' ? '#f59e0b'
+                                    : (loc === 'unknown' ? '#64748b' : '#22c55e');
+                        return `<div class="obj-row"><span class="obj-name">${n}</span>` +
+                               `<span style="color:${color};font-family:monospace">${loc}</span></div>`;
+                    }).join('');
+                    const pretty = {};
+                    for (const n of names) pretty[n] = { location: (objs[n] || {}).location || 'unknown' };
+                    jsonEl.textContent = JSON.stringify(pretty, null, 2);
                 }
-                sceneData = data.data;
-                const grid = document.getElementById('scene-grid');
-                const locSelect = document.getElementById('scene-location');
-                const locations = [];
-
-                grid.innerHTML = Object.entries(sceneData).filter(([k]) => k !== 'robot').map(([name, info]) => {
-                    const desc = info.description || '';
-                    const type = info.type || '';
-                    const coords = info.position ? `(${info.position.join(', ')})` : '';
-                    const contains = (info.contains || []).length > 0
-                        ? info.contains.join(', ')
-                        : '空';
-                    return `<div class="scene-card">
-                        <div><span class="scene-name">${name}</span><span class="scene-type">${type}</span></div>
-                        ${desc ? '<div class="scene-desc">' + desc + '</div>' : ''}
-                        <div class="scene-contains">contains: ${contains}</div>
-                        ${coords ? '<div class="scene-coords">' + coords + '</div>' : ''}
-                    </div>`;
-                }).join('');
-
-                // 更新下拉框
-                for (const [name, info] of Object.entries(sceneData)) {
-                    if (name === 'robot') continue;
-                    const desc = info.description || name;
-                    locations.push(`<option value="${name}">${desc} (${name})</option>`);
-                }
-                locSelect.innerHTML = '<option value="">选择位置</option>' + locations.join('');
+                const stamp = snapshotLabel ? '📌 ' + snapshotLabel + ' · ' : '';
+                document.getElementById('belief-updated').textContent =
+                    stamp + '更新于 ' + new Date().toLocaleTimeString();
             } catch (e) {
-                document.getElementById('scene-grid').innerHTML = `<div style="color:#ef4444;font-size:13px">加载失败: ${e.message}</div>`;
+                tableEl.innerHTML = `<div style="color:#ef4444;font-size:13px">加载失败: ${e.message}</div>`;
             }
         }
-        loadScene();
-        setInterval(loadScene, 10000);
-
-        // 手动更新场景
-        async function updateScene() {
-            const location = document.getElementById('scene-location').value;
-            const action = document.getElementById('scene-action').value;
-            const object = document.getElementById('scene-object').value.trim();
-            if (!location || !object) {
-                showMsg('scene-msg', false, '请选择位置并输入物体名称');
-                return;
-            }
-            try {
-                const resp = await fetch('/api/update_scene', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({location, action, object})
-                });
-                const data = await resp.json();
-                showMsg('scene-msg', data.success, data.message || data.error);
-                if (data.success) {
-                    document.getElementById('scene-object').value = '';
-                    loadScene();
-                }
-            } catch (e) {
-                showMsg('scene-msg', false, '请求失败: ' + e.message);
-            }
-        }
+        loadBelief();
+        setInterval(loadBelief, 5000);
 
         // 机器人实时坐标
         async function loadRobotStatus() {
@@ -638,6 +521,72 @@
                 } catch (e) {}
             }, 1000);
         }
+
+        // ── 四宫格相机时间线回放(实时渲染已移除,只回放任务每步做完时截的帧) ──
+        let tlFrames = [], tlPlayTimer = null;
+
+        function stopPlay() {
+            if (tlPlayTimer) { clearInterval(tlPlayTimer); tlPlayTimer = null; }
+            const b = document.getElementById('btn-play'); if (b) b.textContent = '⏵ 播放';
+        }
+
+        async function loadTimeline(showLast = false) {
+            const empty = document.getElementById('timeline-empty');
+            try {
+                const resp = await fetch('/api/timeline');
+                const data = await resp.json();
+                if (!data.exists || !(data.frames || []).length) {
+                    empty.textContent = '暂无时间线。在上方发布一个任务,结束后这里会显示该任务的四宫格回放。';
+                    document.getElementById('timeline-controls').style.display = 'none';
+                    return;
+                }
+                tlFrames = data.frames;
+                empty.textContent = '';
+                document.getElementById('timeline-controls').style.display = 'block';
+                const slider = document.getElementById('timeline-slider');
+                slider.max = tlFrames.length - 1;
+                // MuJoCo:won===true 才标"落点已验证";won===false 是非持续模式默认值,不当失败
+                const wonTag = data.won === true ? ' · <span style="color:#4ade80">✓落点已验证</span>' : '';
+                document.getElementById('quad-meta').innerHTML =
+                    `任务: <b>${data.task || '?'}</b>${wonTag}` +
+                    `<br><span style="font-size:11px">采集于 ${data.created || ''} · 宫格: ${(data.cameras || []).join(' / ')}</span>`;
+                // 任务进行中自动刷新看最新帧(像直播);手动点刷新看第一帧
+                showFrame(showLast ? tlFrames.length - 1 : 0);
+            } catch (e) {
+                empty.textContent = '加载时间线失败: ' + e.message;
+            }
+        }
+
+        function showFrame(i) {
+            if (!tlFrames.length) return;
+            i = Math.max(0, Math.min(tlFrames.length - 1, parseInt(i)));
+            const f = tlFrames[i];
+            document.getElementById('quad-img').src = '/task_timeline/' + f.file + '?t=' + Date.now();
+            document.getElementById('timeline-slider').value = i;
+            document.getElementById('frame-label').textContent =
+                `时间点 ${i + 1}/${tlFrames.length} · ${f.label} · t=${f.t}s`;
+        }
+
+        function stepFrame(d) {
+            stopPlay();
+            showFrame(parseInt(document.getElementById('timeline-slider').value) + d);
+        }
+
+        function playTimeline() {
+            const btn = document.getElementById('btn-play');
+            if (tlPlayTimer) { stopPlay(); return; }
+            if (!tlFrames.length) return;
+            btn.textContent = '⏸ 暂停';
+            let i = parseInt(document.getElementById('timeline-slider').value);
+            if (i >= tlFrames.length - 1) i = -1;
+            tlPlayTimer = setInterval(() => {
+                i++;
+                if (i >= tlFrames.length) { stopPlay(); return; }
+                showFrame(i);
+            }, 900);
+        }
+
+        loadTimeline();
     </script>
 </body>
 </html>

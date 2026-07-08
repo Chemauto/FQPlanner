@@ -13,6 +13,7 @@ from .config import BackendConfig, load_robot_api_config
 
 STATE_ENDPOINTS = {
     "scene": ("GET", "/scene"),
+    "scene_state": ("GET", "/scene_state"),  # slaver 的 belief/搜索需要;robocasa 后端有,motrixsim 后端暂返 503
     "objects": ("GET", "/objects"),
     "fixtures": ("GET", "/fixtures"),
     "robot_state": ("GET", "/scene"),

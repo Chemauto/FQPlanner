@@ -6,7 +6,7 @@ Web 管理界面，用于任务发布、配置管理、场景查看和视频录�
 
 ```bash
 conda activate FQPlanner
-cd <project-root>
+cd /home/fangqi/WorkXCJ/FQPlanner
 python deploy/run.py
 ```
 
@@ -31,9 +31,9 @@ Web 控制台作为代理，转发请求到后端服务：
 |----------|--------|------|
 | `/publish_task` | Master:5000 | 任务发布 |
 | `/api/task_status` | Master:5000 | 任务状态 |
-| `/api/record/start` | robot_api active_backend | 开始录制 |
-| `/api/record/stop` | robot_api active_backend | 停止录制 |
-| `/api/record/status` | robot_api active_backend | 录制状态 |
+| `/api/record/start` | 仿真后端:5001 | 开始录制 |
+| `/api/record/stop` | 仿真后端:5001 | 停止录制 |
+| `/api/sim/step_and_capture` | 仿真后端:5001 | 步进+截图 |
 | `/api/auto_tools` | Redis | 工具列表 |
 | `/api/scene_state` | Redis | 场景状态 |
 
@@ -52,9 +52,9 @@ deploy/
 |------|------|------|
 | Redis | 6379 | 场景状态存储 |
 | Master | 5000 | 任务规划 |
-| robot_api active_backend | 由 `robot_api/config.yaml` 决定 | 仿真后端（可选） |
+| RoboCasa | 5001 | 仿真后端（可选） |
 
 ## 注意事项
 
-- 录制功能需要当前 `active_backend` 仿真服务器运行
+- 录制功能需要 RoboCasa 仿真服务器运行
 - 刷新画面会推进仿真一步，可能影响正在进行的任务

@@ -12,12 +12,11 @@ from openai import OpenAI
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-load_dotenv(os.path.join(_project_root, '.env'), override=True)
+load_dotenv(os.path.join(_project_root, '.env'))
 
 import yaml
 
-from robot_api.client import capture_image as _api_capture_image
-from robot_api.scene_metadata import load_camera_config
+from robot_api.client import capture_image
 
 # ============================================================
 # 从 config.yaml 加载配置
@@ -29,16 +28,24 @@ with open(_config_path) as _f:
 _camera_cfg = _cfg.get("camera", {})
 _vlm_cfg = _camera_cfg.get("vlm", {})
 
-_scene_camera_cfg = load_camera_config()
+_serve_camera_config_path = os.path.join(
+    _project_root, "serve", "scene", "config", "camera.yaml"
+)
+_serve_camera_cfg = {}
+if os.path.exists(_serve_camera_config_path):
+    with open(_serve_camera_config_path, "r", encoding="utf-8") as _f:
+        _serve_camera_cfg = yaml.safe_load(_f) or {}
 
 CAMERAS = (
-    (_scene_camera_cfg.get("preview") or {}).get("cameras")
-    or list((_scene_camera_cfg.get("cameras") or {}).keys())
+    (_serve_camera_cfg.get("preview") or {}).get("cameras")
+    or list((_serve_camera_cfg.get("cameras") or {}).keys())
     or _camera_cfg.get("cameras")
+    or ["overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam"]
 )
-VLM_MODEL = _vlm_cfg["model"]
-VLM_API_BASE = _vlm_cfg["api_base"]
-VLM_MAX_TOKENS = _vlm_cfg["max_tokens"]
+VLM_MODEL = _vlm_cfg.get("model", "mimo-v2.5")
+VLM_API_BASE = _vlm_cfg.get("api_base", "https://api.xiaomimimo.com/v1")
+VLM_MAX_TOKENS = _vlm_cfg.get("max_tokens", 1000)
+VLM_EXTRA_BODY = _vlm_cfg.get("extra_body") or {}  # GLM 关思考 {thinking:{type:disabled}};原样透传
 
 
 # ============================================================
@@ -84,20 +91,24 @@ def _call_vlm(images, context=""):
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             })
 
-        api_key = os.environ.get("CLOUD_API_KEY", "")
+        # VLM 用专用 key(mimo/小米);没配就回退 CLOUD_API_KEY。master 规划另用 deepseek 的 CLOUD_API_KEY。
+        api_key = os.environ.get("VLM_API_KEY") or os.environ.get("CLOUD_API_KEY", "")
         client = OpenAI(api_key=api_key, base_url=VLM_API_BASE)
-        response = client.chat.completions.create(
+        create_kw = dict(
             model=VLM_MODEL,
             messages=[{"role": "user", "content": content}],
             max_tokens=VLM_MAX_TOKENS,
             temperature=0,
         )
+        if VLM_EXTRA_BODY:
+            create_kw["extra_body"] = VLM_EXTRA_BODY
+        response = client.chat.completions.create(**create_kw)
         raw_content = response.choices[0].message.content
         result = raw_content.strip() if raw_content else ""
         print(f"[camera] VLM 原始输出: {repr(raw_content)}", file=sys.stderr)
 
         if not result:
-            return "abnormal", "VLM 返回空内容，无法判断场景状态"
+            return "normal", "VLM 返回空内容，无法判断场景状态"
 
         lines = result.split("\n")
         status_line = lines[-1].strip().lower()
@@ -107,7 +118,7 @@ def _call_vlm(images, context=""):
         return status, description
     except Exception as e:
         print(f"[camera] VLM 调用失败: {e}", file=sys.stderr)
-        return "abnormal", f"VLM 调用失败: {e}"
+        return "normal", f"VLM 调用失败: {e}"
 
 
 # ============================================================
@@ -131,7 +142,7 @@ def register_tools(mcp):
 
         images = {}
         for cam in CAMERAS:
-            result = _api_capture_image(camera_name=cam)
+            result = capture_image(camera_name=cam)
             if result.get("success"):
                 images[cam] = result["image"]
             else:

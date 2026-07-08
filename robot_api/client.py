@@ -16,6 +16,12 @@ def get_scene():
     return _RUNTIME.get_state("scene")
 
 
+def get_scene_state():
+    """slaver 的 belief/逐工作点搜索用的逻辑场景状态(/scene_state)。
+    robocasa(mujoco)后端提供;motrixsim(3dgs)后端暂无 scene_memory,会返 503(待集成)。"""
+    return _RUNTIME.get_state("scene_state")
+
+
 def get_objects():
     return _RUNTIME.get_state("objects")
 
