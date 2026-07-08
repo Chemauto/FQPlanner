@@ -85,12 +85,8 @@ class RobotRuntime:
         if action == "navigate_to":
             nav_backend = self.config.navigation_backend()
             if nav_backend is not None:
-                result = self._http(
-                    nav_backend,
-                    "POST",
-                    ACTION_ENDPOINTS[action],
-                    self._action_payload(action, args),
-                )
+                endpoint, payload = self._nav_call(nav_backend, args)
+                result = self._http(nav_backend, "POST", endpoint, payload)
                 result["_backend"] = nav_backend.name
                 result["_required"] = nav_backend.required
                 return self._merge([result])
@@ -183,6 +179,17 @@ class RobotRuntime:
         if yaw_value is not None:
             payload["target_yaw"] = yaw_value
         return payload
+
+    def _nav_call(self, backend, args):
+        """底盘导航端点按后端选:serve_3dgs(motrixsim)底盘导航是 /move_to(取 target=[x,y],同学确认),
+        robocasa 等用 /nav。这样不用给 serve_3dgs 另写 /nav 端点。坐标目标才重路由;名称目标(ALFWorld
+        等符号后端)仍走 /nav 透传。/move_to 只接位置、不控 yaw(如需朝向后续用 /move_duration 补)。"""
+        std = self._navigation_payload(args["target"], args.get("yaw"))
+        name = (backend.name or "").lower()
+        is_move_to = "3dgs" in name or "motrix" in name
+        if is_move_to and "x" in std:
+            return "/move_to", {"target": [std["x"], std["y"]]}
+        return ACTION_ENDPOINTS["navigate_to"], std
 
     def _real(self, action: str, args: dict[str, Any]):
         if action == "grasp_object":
