@@ -1,25 +1,31 @@
 {
   "waypoints": [
     {
-      "name": "nav_017",
+      "name": "nav_002",
       "pos": [
-        4.325,
+        1.325,
         -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
-        "apple"
+        "counter",
+        "ketchup",
+        "plate",
+        "sponge"
       ]
     },
     {
-      "name": "nav_022",
+      "name": "nav_012",
       "pos": [
-        5.325,
+        3.325,
         -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
-        "bowl"
+        "bowl",
+        "bread",
+        "cheese",
+        "stove"
       ]
     },
     {
@@ -28,51 +34,42 @@
         4.725,
         -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -180.0,
       "serves": [
-        "cup"
+        "apple",
+        "cup",
+        "pot"
       ]
     },
     {
-      "name": "nav_011",
+      "name": "nav_022",
       "pos": [
-        3.125,
+        5.325,
         -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": 180.0,
       "serves": [
         "mug"
       ]
     },
     {
-      "name": "nav_015",
+      "name": "nav_033",
       "pos": [
-        3.925,
-        -1.125
+        3.125,
+        -1.325
       ],
       "yaw_deg": 90.0,
       "serves": [
-        "pot"
+        "sink"
       ]
     },
     {
-      "name": "nav_105",
-      "pos": [
-        4.925,
-        -2.925
-      ],
-      "yaw_deg": -180.0,
-      "serves": [
-        "sponge"
-      ]
-    },
-    {
-      "name": "nav_000",
+      "name": "nav_004",
       "pos": [
         1.725,
-        -0.925
+        -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
         "counter"
       ]
@@ -83,7 +80,7 @@
         3.725,
         -1.125
       ],
-      "yaw_deg": 90.0,
+      "yaw_deg": -90.0,
       "serves": [
         "stove"
       ]
@@ -94,7 +91,7 @@
         3.125,
         -1.525
       ],
-      "yaw_deg": -90.0,
+      "yaw_deg": 90.0,
       "serves": [
         "sink"
       ]

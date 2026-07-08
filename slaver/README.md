@@ -48,7 +48,8 @@ python slaver/run.py
 - **robot.path** — 本地目录名或远程 URL
 - **robot.name** — 机器人名称（如 FQrobot）
 - **tool.matching** — 工具匹配配置（max_tools、min_similarity）
-- **robot_api/config.yaml** — 统一机器人后端路由开关，`active_backend` 决定当前仿真器或真实后端
+- **robot_api/config.yaml** — 统一机器人后端路由开关，控制 MuJoCo/Isaac Sim/Gazebo/real 是否接收状态或动作
+- **robocasa.server_url** — 旧 MuJoCo 地址键名，保留用于兼容
 
 ## 工作流程
 
@@ -125,4 +126,4 @@ def register_tools(mcp):
 
 - FQPlanner conda 环境
 - Redis 服务
-- 机器人后端服务（由 `robot_api/config.yaml` 的 `active_backend` 决定）
+- 机器人后端服务（当前为 XLeRobot MuJoCo：serve/main.py）

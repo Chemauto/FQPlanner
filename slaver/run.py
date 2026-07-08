@@ -127,8 +127,18 @@ class RobotManager:
     @staticmethod
     def _match_tool_by_keyword(task: str) -> str:
         """根据子任务动词关键词匹配工具，返回工具名或 None。
-        导航类子任务里经常会出现“为抓取/放置做准备”，这时动词目标仍然是导航。
+        导航类子任务里经常会出现"为抓取/放置做准备"，这时动词目标仍然是导航。
         """
+        # ALFWorld 操作子任务：格式为 执行raw_action: <命令> （精确匹配，避免误伤搜索子任务）
+        if '执行raw_action:' in task:
+            return "raw_action"
+
+        # ALFWorld 搜索抓取子任务：格式为 "搜索并抓取 X"。必须在"抓取"规则之前匹配，
+        # 否则会被误判成 grasp_object。映射到 search_and_grasp 后 filtered_tools 只剩它一个，
+        # slaver LLM 拿不到 raw_action，从根上杜绝"把 search_and_grasp 语法塞进 raw_action"。
+        if '搜索' in task:
+            return "search_and_grasp"
+
         navigation_keywords = ["导航", "前往", "走到", "移动到", "到达", "靠近"]
         if any(kw in task for kw in navigation_keywords):
             return "navigate_to_target"
@@ -158,8 +168,20 @@ class RobotManager:
         # 优先用关键词匹配工具，匹配不到再走语义匹配
         matched_tool_name = self._match_tool_by_keyword(task)
         if matched_tool_name:
-            filtered_tools = [tool for tool in self.tools
-                           if tool.get("function", {}).get("name") == matched_tool_name]
+            # Compound tasks (e.g. "导航到X并清洗Y") need both navigate_to_target AND raw_action.
+            # If the task has a conjunction word "并" after a navigation keyword, include both tools
+            # so the agent can execute navigation then the subsequent raw action in one loop.
+            is_compound_nav = (
+                matched_tool_name == "navigate_to_target"
+                and "并" in task
+            )
+            if is_compound_nav:
+                include_names = {"navigate_to_target", "raw_action"}
+                filtered_tools = [tool for tool in self.tools
+                                   if tool.get("function", {}).get("name") in include_names]
+            else:
+                filtered_tools = [tool for tool in self.tools
+                               if tool.get("function", {}).get("name") == matched_tool_name]
             if not filtered_tools:
                 filtered_tools = self.tools  # 工具名不存在，回退全部
         else:
@@ -171,6 +193,16 @@ class RobotManager:
             else:
                 filtered_tools = self.tools
 
+        # ALFWorld search tasks need more steps (navigate to each receptacle + check/take)
+        try:
+            from robot_api.config import load_robot_api_config
+            _is_alf = any(
+                b.name == "alfworld" and b.enabled and b.required
+                for b in load_robot_api_config().backends
+            )
+        except Exception:
+            _is_alf = False
+
         agent = ToolCallingAgent(
             tools=filtered_tools,
             verbosity_level=2,
@@ -180,6 +212,7 @@ class RobotManager:
             robot_name=self.robot_name,
             collaborator=self.collaborator,
             tool_executor=self.session.call_tool,
+            max_steps=30 if _is_alf else 20,
         )
 
         result = await agent.run(task)

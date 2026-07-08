@@ -6,35 +6,22 @@
 
 后端开关在 [`config.yaml`](config.yaml) 中配置。
 
-- `active_backend`: 当前唯一接收状态查询和动作指令的 HTTP 后端。
 - `enabled`: 是否启用该后端。
 - `provide_state`: 是否接收状态查询。
 - `accept_action`: 是否接收动作指令。
 - `required`: 该后端失败时是否让整体调用失败。
 
-`enabled` 表示后端已注册可用，不表示当前选中。仿真器二选一时只改：
+默认后端是 MuJoCo，对应启动入口：
 
-```yaml
-active_backend: "mujoco_3dgs"  # 或 "mujoco"
+```text
+serve/main.py
 ```
 
-当前支持两个 HTTP 仿真后端：
+当前 MuJoCo 后端实现位置：
 
 ```text
 serve/service/server.py
-serve_3dgs/service/server.py
-```
-
-`mujoco_3dgs` 启动入口：
-
-```bash
-python serve_3dgs/main.py
-```
-
-`mujoco` 启动入口：
-
-```bash
-python serve/main.py
+serve/backend/mujoco_backend.py
 ```
 
 ## 公开接口

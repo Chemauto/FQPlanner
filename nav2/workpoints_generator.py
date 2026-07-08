@@ -92,71 +92,47 @@ def load_free_points(path):
     return data['points']
 
 
-def _target_groups(targets, merge_target_distance):
-    """把相互接近的目标合并成组，使用传递闭包。"""
-    names = list(targets.keys())
-    parent = {name: name for name in names}
-
-    def find(name):
-        while parent[name] != name:
-            parent[name] = parent[parent[name]]
-            name = parent[name]
-        return name
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    if merge_target_distance > 0:
-        for i, a in enumerate(names):
-            apos = np.array(targets[a])
-            for b in names[i + 1:]:
-                bpos = np.array(targets[b])
-                if np.linalg.norm(apos - bpos) <= merge_target_distance:
-                    union(a, b)
-
-    groups = {}
-    for name in names:
-        groups.setdefault(find(name), []).append(name)
-    return [sorted(group) for group in groups.values()]
-
-
-def _select_best_point_for_group(free_points, targets, group, max_reach, min_dist):
-    candidates = []
+def find_covering_waypoints(free_points, targets, max_reach, min_dist):
+    """贪心算法：选最少的工作点覆盖所有目标物体"""
+    coverage = {}
     for p in free_points:
         pp = np.array([p['x'], p['y']])
-        distances = [float(np.linalg.norm(pp - np.array(targets[name]))) for name in group]
-        if all(min_dist <= dist <= max_reach for dist in distances):
-            candidates.append((float(np.mean(distances)), max(distances), p))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: (item[0], item[1], item[2]['name']))
-    return candidates[0][2]
+        covered = set()
+        for name, pos in targets.items():
+            dist = np.linalg.norm(pp - np.array(pos))
+            if min_dist <= dist <= max_reach:
+                covered.add(name)
+        if covered:
+            coverage[p['name']] = {
+                'point': p,
+                'covers': covered,
+            }
 
-
-def find_covering_waypoints(free_points, targets, max_reach, min_dist, merge_target_distance=0.0):
-    """为每个目标选最近工作点；相近目标合并后选平均距离最小工作点。"""
+    uncovered = set(targets.keys())
     selected = []
-    uncovered = []
 
-    for group in _target_groups(targets, merge_target_distance):
-        p = _select_best_point_for_group(free_points, targets, group, max_reach, min_dist)
-        if p is None:
-            uncovered.extend(group)
-            continue
+    while uncovered:
+        best_name = None
+        best_covers = set()
 
-        target_xy = np.mean([np.array(targets[name]) for name in group], axis=0).tolist()
+        for pname, info in coverage.items():
+            new_covers = info['covers'] & uncovered
+            if len(new_covers) > len(best_covers):
+                best_covers = new_covers
+                best_name = pname
+
+        if best_name is None:
+            print(f"[警告] 以下目标无法被任何工作点覆盖: {uncovered}")
+            break
+
+        p = coverage[best_name]['point']
         selected.append({
-            'name': p['name'],
+            'name': best_name,
             'point': p,
-            'serves': group,
-            'target_xy': target_xy,
+            'serves': sorted(list(best_covers)),
         })
-        print(f"选择工作点 {p['name']} @ [{p['x']}, {p['y']}], 覆盖: {group}")
-
-    if uncovered:
-        print(f"[警告] 以下目标无法被任何工作点覆盖: {set(uncovered)}")
+        uncovered -= best_covers
+        print(f"选择工作点 {best_name} @ [{p['x']}, {p['y']}], 覆盖: {sorted(best_covers)}")
 
     return selected
 
@@ -188,8 +164,9 @@ def pick_primary_target(serves, targets):
 def compute_yaw(from_xy, to_xy):
     dx = to_xy[0] - from_xy[0]
     dy = to_xy[1] - from_xy[1]
-    # 工作点朝向使用公开的 base_link/map 坐标系，直接让 base_link 正面朝向目标。
-    return math.degrees(math.atan2(dy, dx))
+    # 机器人模型的任务正面与 MuJoCo body +X 方向相差 180°。
+    # 工作点朝向需要让任务正面对准目标，因此在目标方向上反转 180°。
+    return math.degrees(math.atan2(dy, dx)) + 180.0
 
 
 def add_fixture_waypoints(selected, free_points, targets, fixture_names, max_reach, min_dist):
@@ -237,13 +214,9 @@ def build_waypoints(selected, targets):
         p = item['point']
         serves = item['serves']
 
-        # 取目标组中心朝向，snap 到 90°
+        # 取最主要目标的朝向（家具优先），snap 到 90°
         primary = pick_primary_target(serves, targets)
-        target_xy = item.get('target_xy')
-        if target_xy is not None:
-            raw_yaw = compute_yaw([p['x'], p['y']], target_xy)
-            yaw_deg = snap_to_90(raw_yaw)
-        elif primary:
+        if primary:
             raw_yaw = compute_yaw([p['x'], p['y']], targets[primary])
             yaw_deg = snap_to_90(raw_yaw)
         else:
@@ -348,7 +321,6 @@ if __name__ == "__main__":
     output_yaml = os.path.join(CONFIG_DIR, wp_cfg.get("output_path", "../serve/scene/config/waypoints.yaml"))
     max_reach = wp_cfg.get("max_reach", 1.0)
     min_dist = wp_cfg.get("min_dist", 0.3)
-    merge_target_distance = wp_cfg.get("merge_target_distance", 0.0)
     must_cover = wp_cfg.get("must_cover", ["counter", "island", "stove", "sink"])
     fixtures_map = wp_cfg.get("fixtures", {})
 
@@ -365,13 +337,7 @@ if __name__ == "__main__":
     print(f"共 {len(free_points)} 个可通行点")
 
     print("\n计算最优工作点覆盖...")
-    selected = find_covering_waypoints(
-        free_points,
-        targets,
-        max_reach,
-        min_dist,
-        merge_target_distance=merge_target_distance,
-    )
+    selected = find_covering_waypoints(free_points, targets, max_reach, min_dist)
     selected = add_fixture_waypoints(selected, free_points, targets, must_cover, max_reach, min_dist)
 
     print("\n保存工作点...")

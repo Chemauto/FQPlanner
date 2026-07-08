@@ -20,6 +20,9 @@ STATE_ENDPOINTS = {
     "arm_status": ("GET", "/status"),
     "map_data": ("GET", "/map_data"),
     "image": ("POST", "/screenshot"),
+    "success": ("GET", "/success"),
+    "scene_state": ("GET", "/scene_state"),
+    "reset": ("POST", "/reset"),
 }
 
 ACTION_ENDPOINTS = {
@@ -43,19 +46,11 @@ class RobotRuntime:
 
     def set_backend_url(self, url: str) -> None:
         updated = []
-        active_backend = self.config.active_backend
         for backend in self.config.backends:
-            if (
-                backend.name == active_backend
-                or (active_backend is None and backend.name in ("mujoco", "mujoco_3dgs"))
-            ):
+            if backend.name == "mujoco":
                 backend = BackendConfig(**{**backend.__dict__, "url": str(url).rstrip("/")})
             updated.append(backend)
-        self.config = type(self.config)(
-            backends=updated,
-            active_backend=active_backend,
-            navigation=self.config.navigation,
-        )
+        self.config = type(self.config)(backends=updated)
 
     def get_state(self, name: str, params: dict[str, Any] | None = None):
         if name not in STATE_ENDPOINTS:
@@ -81,19 +76,6 @@ class RobotRuntime:
     def execute(self, action: str, args: dict[str, Any]):
         if action not in ACTION_ENDPOINTS:
             return {"success": False, "result": f"未知动作接口: {action}"}
-        if action == "navigate_to":
-            nav_backend = self.config.navigation_backend()
-            if nav_backend is not None:
-                result = self._http(
-                    nav_backend,
-                    "POST",
-                    ACTION_ENDPOINTS[action],
-                    self._action_payload(action, args),
-                )
-                result["_backend"] = nav_backend.name
-                result["_required"] = nav_backend.required
-                return self._merge([result])
-
         results = []
         for backend in self.config.action_backends():
             result = (
@@ -138,13 +120,10 @@ class RobotRuntime:
 
     def _action_payload(self, action: str, args: dict[str, Any]):
         if action == "grasp_object":
-            payload = {
+            return {
                 "obj_name": args["object_name"],
                 "snap_threshold": 0.15,
             }
-            if args.get("mode"):
-                payload["mode"] = args["mode"]
-            return payload
         if action == "place_object":
             return {
                 "obj_name": args["object_name"],
@@ -253,19 +232,27 @@ class RobotRuntime:
         required_failed = [
             r for r in handled if r.get("_required") and r.get("success") is False
         ]
-        first_success = next((r for r in handled if r.get("success") is not False), handled[0])
         if required_failed:
             return {
                 "success": False,
                 "result": "；".join(r.get("result", "动作失败") for r in required_failed),
                 "backends": summary,
             }
-        response = {
-            key: value
-            for key, value in first_success.items()
-            if key not in {"_backend", "_required"}
-        }
-        response["success"] = True
-        response.setdefault("result", "动作完成")
-        response["backends"] = summary
-        return response
+
+        # 选代表后端:优先第一个真正成功的;若都失败,用第一个(要如实反映失败)。
+        rep = next((r for r in handled if r.get("success") is not False), None)
+        real_success = rep is not None
+        if rep is None:
+            rep = handled[0]
+
+        # 透传代表后端的完整结果(pos/yaw/result 等都保留),而不是只回 success/result 三件套。
+        # 关键修复:以前这里对非必需后端一律 success=True,把 serve 端真实的失败
+        # (nav 没到位 reached=False、grasp 够不到、place 未持有/底盘没到)全抹成成功 →
+        # "导航被卡住却报成功放置成功"。现在 success 如实反映代表后端的成功与否。
+        merged = {k: v for k, v in rep.items()
+                  if k not in ("_backend", "_required", "skipped")}
+        merged["success"] = bool(real_success)
+        if not real_success and not merged.get("result"):
+            merged["result"] = "所有后端均未成功"
+        merged["backends"] = summary
+        return merged

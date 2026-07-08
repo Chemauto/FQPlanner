@@ -1,26 +1,12 @@
-active_backend: "mujoco_3dgs"
-
-# Robot selection: "xlerobot" (default) or "BlueThink"
-robot: "xlerobot"
-
 backends:
   mujoco:
     enabled: 1
     provide_state: 1
     accept_action: 1
-    required: 1
+    required: 0
     url: "http://127.0.0.1:5001"
-    timeout: 120
+    timeout: 300  # MuJoCo nav 单步慢、发现机制串多个 nav,给 HTTP 客户端留足等待余量
     launch_hint: "serve/main.py"
-
-  mujoco_3dgs:
-    enabled: 1
-    provide_state: 1
-    accept_action: 1
-    required: 1
-    url: "http://127.0.0.1:5002"
-    timeout: 120
-    launch_hint: "serve_3dgs/main.py"
 
   isaacsim:
     enabled: 0
@@ -44,21 +30,14 @@ backends:
     accept_action: 0
     required: 0
 
-navigation:
-  enabled: 1
-  backend: "nav2"
-  url: "http://127.0.0.1:5102"
-  timeout: 120
-
-# Policy inference services (standalone processes)
-policy_services:
-  act:
-    enabled: 1
-    url: "http://127.0.0.1:5003"
-    # launch_hint: "services/act_server.py --policy-path <checkpoint> --port 5003"
-  diffusion_policy:
+  # 后端开关:跑 ALFWorld bench → alfworld.enabled=1 + mujoco.enabled=0(当前)
+  #          跑 MuJoCo  仿真  → mujoco.enabled=1  + alfworld.enabled=0
+  # slaver 工具按"第一个 enabled"路由,所以两者只能开一个。
+  alfworld:
     enabled: 0
-    url: "http://127.0.0.1:5004"
-  pi0:
-    enabled: 0
-    url: "http://127.0.0.1:5005"
+    provide_state: 1
+    accept_action: 1
+    required: 1
+    url: "http://127.0.0.1:5301"
+    timeout: 120
+    launch_hint: "serve_alfworld/main.py"

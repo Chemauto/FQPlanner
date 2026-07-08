@@ -40,8 +40,8 @@ def get_map_data(params: dict | None = None, timeout=None):
     return _RUNTIME.get_state("map_data", params or {})
 
 
-def grasp_object(object_name: str, mode: str = "ik"):
-    return _RUNTIME.execute("grasp_object", {"object_name": object_name, "mode": mode})
+def grasp_object(object_name: str):
+    return _RUNTIME.execute("grasp_object", {"object_name": object_name})
 
 
 def place_object(object_name: str, target):
@@ -83,6 +83,23 @@ def is_object_grasped(object_name: str) -> bool:
         if isinstance(item, dict):
             return bool(item.get("grasped", False))
     return False
+
+
+def check_success() -> dict:
+    """Query the backend for ground-truth task success (ALFWorld: won signal).
+    Returns {"won": True/False} or {"won": None} if backend doesn't support it.
+    """
+    return _RUNTIME.get_state("success")
+
+
+def get_scene_state() -> dict:
+    """Get the current symbolic scene state (ALFWorld snapshot or MuJoCo belief)."""
+    return _RUNTIME.get_state("scene_state")
+
+
+def reset_env() -> dict:
+    """Reset the simulation environment (ALFWorld: start a new episode, clear step counter)."""
+    return _RUNTIME.get_state("reset")
 
 
 def set_backend_url(url: str) -> None:

@@ -32,33 +32,11 @@ class BackendConfig:
 
 
 @dataclass(frozen=True)
-class PolicyServiceConfig:
-    name: str
-    enabled: bool
-    url: str = ""
-    raw: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
 class RobotApiConfig:
     backends: list[BackendConfig]
-    active_backend: str | None = None
-    navigation: BackendConfig | None = None
-    policy_services: list[PolicyServiceConfig] | None = None
-
-    def _active(self) -> BackendConfig | None:
-        if not self.active_backend:
-            return None
-        for backend in self.backends:
-            if backend.name == self.active_backend:
-                return backend
-        return None
 
     @property
     def server_url(self) -> str:
-        active = self._active()
-        if active is not None and active.url:
-            return active.url
         for backend in self.backends:
             if backend.enabled and backend.url:
                 return backend.url
@@ -73,45 +51,16 @@ class RobotApiConfig:
 
     @property
     def backend(self) -> str:
-        active = self._active()
-        if active is not None:
-            return active.name
         for backend in self.backends:
             if backend.enabled:
                 return backend.name
-        return self.active_backend or "mujoco"
+        return "mujoco"
 
     def state_backends(self) -> list[BackendConfig]:
-        active = self._active()
-        if active is not None:
-            return [active] if active.enabled and active.provide_state else []
         return [b for b in self.backends if b.enabled and b.provide_state]
 
     def action_backends(self) -> list[BackendConfig]:
-        active = self._active()
-        if active is not None:
-            return [active] if active.enabled and active.accept_action else []
         return [b for b in self.backends if b.enabled and b.accept_action]
-
-    def navigation_backend(self) -> BackendConfig | None:
-        if self.navigation is not None and self.navigation.enabled:
-            return self.navigation
-        return None
-
-    def policy_service(self, name: str) -> PolicyServiceConfig | None:
-        """Get an enabled policy service by name (e.g. "act")."""
-        if not self.policy_services:
-            return None
-        for svc in self.policy_services:
-            if svc.name == name and svc.enabled:
-                return svc
-        return None
-
-    def active_policy_services(self) -> list[PolicyServiceConfig]:
-        """Return all enabled policy services."""
-        if not self.policy_services:
-            return []
-        return [svc for svc in self.policy_services if svc.enabled]
 
 
 def _as_bool(value, default=False) -> bool:
@@ -194,21 +143,14 @@ def load_robot_api_config() -> RobotApiConfig:
     data = _read_yaml(CONFIG_PATH)
     backends_cfg = data.get("backends") or _default_backends()
 
-    active_backend = str(
-        os.getenv("ROBOT_API_BACKEND")
-        or os.getenv("ROBOT_BACKEND")
-        or data.get("active_backend")
-        or ""
-    ).strip() or None
     env_url = os.getenv("ROBOT_API_URL")
-    env_nav_url = os.getenv("ROBOT_NAV_URL") or os.getenv("NAV2_API_URL")
     env_timeout = os.getenv("ROBOT_API_TIMEOUT")
     backends: list[BackendConfig] = []
 
     for name, raw in backends_cfg.items():
         raw = raw or {}
         url = str(raw.get("url") or "").rstrip("/")
-        if env_url and (active_backend is None or name == active_backend):
+        if name == "mujoco" and env_url:
             url = env_url.rstrip("/")
         timeout = float(env_timeout or raw.get("timeout") or DEFAULT_TIMEOUT)
         backends.append(
@@ -237,41 +179,6 @@ def load_robot_api_config() -> RobotApiConfig:
                     timeout=DEFAULT_TIMEOUT,
                     raw={},
                 )
-            ],
-            active_backend=active_backend,
-            navigation=None,
+            ]
         )
-
-    nav_cfg = data.get("navigation") or {}
-    navigation = None
-    if nav_cfg:
-        nav_url = str(env_nav_url or nav_cfg.get("url") or "").rstrip("/")
-        navigation = BackendConfig(
-            name=str(nav_cfg.get("backend") or "nav2"),
-            enabled=_as_bool(nav_cfg.get("enabled"), default=False),
-            provide_state=False,
-            accept_action=True,
-            required=True,
-            url=nav_url,
-            timeout=float(env_timeout or nav_cfg.get("timeout") or DEFAULT_TIMEOUT),
-            raw=nav_cfg,
-        )
-
-    policy_services = None
-    ps_cfg = data.get("policy_services") or {}
-    if ps_cfg:
-        policy_services = [
-            PolicyServiceConfig(
-                name=str(name),
-                enabled=_as_bool(raw.get("enabled"), default=False),
-                url=str(raw.get("url") or "").rstrip("/"),
-                raw=raw,
-            )
-            for name, raw in ps_cfg.items()
-            if isinstance(raw, dict)
-        ]
-
-    return RobotApiConfig(
-        backends=backends, active_backend=active_backend,
-        navigation=navigation, policy_services=policy_services,
-    )
+    return RobotApiConfig(backends=backends)

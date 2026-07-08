@@ -72,6 +72,12 @@ def task_status():
     return jsonify(master_agent.get_task_status()), 200
 
 
+@app.route("/api/exploration_rate", methods=["GET"])
+def exploration_rate():
+    """当前 exploration_rate;benchmark preflight 用它确认经验没被高探索率忽略。"""
+    return jsonify({"exploration_rate": master_agent._exploration_rate}), 200
+
+
 @app.route("/api/success_pending", methods=["GET"])
 def success_pending():
     """返回是否有等待人工决定的成功经验。"""
