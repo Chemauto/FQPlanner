@@ -93,11 +93,14 @@ class RobotRuntime:
 
         results = []
         for backend in self.config.action_backends():
-            result = (
-                self._real(action, args)
-                if backend.name == "real"
-                else self._http(backend, "POST", ACTION_ENDPOINTS[action], self._action_payload(action, args))
-            )
+            if backend.name == "real":
+                result = self._real(action, args)
+            elif action == "navigate_to":
+                # 导航按后端重路由(同 nav-backend 分支):robocasa→/nav,3dgs→/move_to
+                endpoint, payload = self._nav_call(backend, args)
+                result = self._http(backend, "POST", endpoint, payload)
+            else:
+                result = self._http(backend, "POST", ACTION_ENDPOINTS[action], self._action_payload(action, args))
             result["_backend"] = backend.name
             result["_required"] = backend.required
             results.append(result)

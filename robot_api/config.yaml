@@ -47,7 +47,10 @@ backends:
     required: 0
 
 navigation:
-  enabled: 1
+  # 关掉独立 nav2 服务路由(本地没起 5102 → Connection refused)。关掉后导航回落到当前后端:
+  # robocasa 走 serve 内置 /nav(dev 那套 A*+PD),3dgs 走 serve_3dgs /move_to(见 runtime._nav_call)。
+  # 若同学的 real2sim 要用独立 nav2 规划服务,把 enabled 改回 1、起 5102 服务即可。
+  enabled: 0
   backend: "nav2"
   url: "http://127.0.0.1:5102"
   timeout: 120
