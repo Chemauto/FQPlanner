@@ -182,7 +182,10 @@ class GlobalTaskPlanner:
                 if isinstance(sim_objects, dict) and sim_objects.get("success") is not False:
                     import json as _json
                     for obj_name, obj_data in sim_objects.items():
-                        if obj_name in all_environments_info and isinstance(obj_data, dict):
+                        if isinstance(obj_data, dict) and "pos" in obj_data:
+                            # profile 里没有的物体(如换了 3dgs 场景的 bottle/maojin)也纳入,
+                            # master 才认得【当前后端】实际存在的物体,不用每次改 profile.yaml。
+                            all_environments_info.setdefault(obj_name, {"name": obj_name, "type": "object", "graspable": True})
                             info = _json.loads(all_environments_info[obj_name]) if isinstance(all_environments_info[obj_name], str) else all_environments_info[obj_name]
                             if memory_mode:
                                 # 只取物体名和持有状态(机器人知道自己拿了什么),位置一律来自 belief;
