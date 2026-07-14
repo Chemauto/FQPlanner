@@ -24,6 +24,18 @@ backends:
     timeout: 120
     launch_hint: "serve_3dgs/main.py"
 
+  # 真机:导航建图组(DREAM)适配后端。提供 objects/fixtures/base_status/map_data(读交换
+  # 目录 latest 文件)+ /nav(按对方文件契约写任务/收结果);grasp/place/screenshot 返 501,
+  # 由 VLA 组后端提供(真机 = dream 管状态与导航 + VLA 管操作,双后端并存)。
+  dream:
+    enabled: 0
+    provide_state: 1
+    accept_action: 1
+    required: 0
+    url: "http://127.0.0.1:5006"
+    timeout: 200
+    launch_hint: "serve_dream/main.py"
+
   isaacsim:
     enabled: 0
     provide_state: 0

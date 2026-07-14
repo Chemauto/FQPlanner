@@ -37,6 +37,8 @@ class Nav2GoalBridge(Node):
         self.declare_parameter("proxy_timeout", 5.0)
         self.declare_parameter("success_xy_tolerance", 0.15)
         self.declare_parameter("success_yaw_tolerance_deg", 10.0)
+        # 真机部署设 false:成功校验走 backend /base_status 是仿真专用,真机后面没有仿真后端
+        self.declare_parameter("verify_final_pose", True)
 
         self.backend_url = str(self.get_parameter("backend_url").value).rstrip("/")
         self.http_host = str(self.get_parameter("http_host").value)
@@ -46,6 +48,7 @@ class Nav2GoalBridge(Node):
         self.proxy_timeout = float(self.get_parameter("proxy_timeout").value)
         self.success_xy_tolerance = float(self.get_parameter("success_xy_tolerance").value)
         self.success_yaw_tolerance_deg = float(self.get_parameter("success_yaw_tolerance_deg").value)
+        self.verify_final_pose = bool(self.get_parameter("verify_final_pose").value)
         self.action_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.server = None
         self.server_thread = None
@@ -173,6 +176,9 @@ class Nav2GoalBridge(Node):
             return {"success": False, "result": "Nav2 导航超时"}
         status = int(result.status)
         if status == 4:
+            if not self.verify_final_pose:
+                return {"success": True, "result": "Nav2 导航完成(SUCCEEDED)",
+                        "target": [x, y], "target_yaw_deg": math.degrees(yaw)}
             return self.final_result_from_base_status(x, y, math.degrees(yaw))
         return {"success": False, "result": f"Nav2 导航失败，status={status}"}
 

@@ -1,0 +1,23 @@
+# serve_dream 配置 — DREAM(导航建图组)交付物的通道与导航交接参数
+exchange:
+  # 通道:http = 对方起服务(首选,见对接文档 §2);dir = 本地目录(离线测试/样例)
+  mode: "dir"                        # 联调时改成 "http"
+  # http 模式:
+  #   base_url = 对方数据服务(导出目录跑静态文件服务即可),GET 下面四个文件名
+  #   nav_url  = 对方导航服务(nav2_goal_bridge),POST /nav {x,y,target_yaw} 同步执行
+  base_url: "http://127.0.0.1:8000"
+  nav_url: "http://127.0.0.1:5102"
+  # dir 模式:本地目录;tasks/ 子目录用于文件式导航交接(备用通道)
+  dir: "serve_dream/sample"
+  map_yaml: "map.yaml"
+  scene_graph: "total_scene_graph_latest.json"
+  pose_file: "nav_map_latest.json"   # JSON,含 robot_xyt: [x, y, yaw_rad]
+
+nav:
+  position_tolerance_m: 0.35
+  yaw_tolerance_deg: 25.0
+  result_timeout_sec: 180
+  result_poll_interval_sec: 1.0
+
+server:
+  port: 5006
