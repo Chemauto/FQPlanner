@@ -237,8 +237,8 @@ def _vlm_observe() -> set:
         cfg_path = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'config.yaml'))
         with open(cfg_path, encoding='utf-8') as f:
             vcfg = ((yaml.safe_load(f) or {}).get('camera') or {}).get('vlm') or {}
-        model = vcfg.get('model', 'mimo-v2.5')
-        api_base = vcfg.get('api_base', 'https://api.xiaomimimo.com/v1')
+        model = vcfg.get('model', 'qwen-vl-max')
+        api_base = vcfg.get('api_base', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1')
         max_tokens = int(vcfg.get('max_tokens', 800))
         extra_body = vcfg.get('extra_body') or {}   # GLM 关思考 {thinking:{type:disabled}};原样透传
         key = os.environ.get('VLM_API_KEY') or os.environ.get('CLOUD_API_KEY', '')

@@ -42,8 +42,8 @@ CAMERAS = (
     or _camera_cfg.get("cameras")
     or ["overhead_cam", "head_cam", "right_arm_cam", "left_arm_cam"]
 )
-VLM_MODEL = _vlm_cfg.get("model", "mimo-v2.5")
-VLM_API_BASE = _vlm_cfg.get("api_base", "https://api.xiaomimimo.com/v1")
+VLM_MODEL = _vlm_cfg.get("model", "qwen-vl-max")
+VLM_API_BASE = _vlm_cfg.get("api_base", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
 VLM_MAX_TOKENS = _vlm_cfg.get("max_tokens", 1000)
 VLM_EXTRA_BODY = _vlm_cfg.get("extra_body") or {}  # GLM 关思考 {thinking:{type:disabled}};原样透传
 
@@ -91,7 +91,7 @@ def _call_vlm(images, context=""):
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             })
 
-        # VLM 用专用 key(mimo/小米);没配就回退 CLOUD_API_KEY。master 规划另用 deepseek 的 CLOUD_API_KEY。
+        # VLM 用专用 key(阿里百炼 Qwen-VL-Max);没配就回退 CLOUD_API_KEY。master 规划另用 deepseek 的 CLOUD_API_KEY。
         api_key = os.environ.get("VLM_API_KEY") or os.environ.get("CLOUD_API_KEY", "")
         client = OpenAI(api_key=api_key, base_url=VLM_API_BASE)
         create_kw = dict(
