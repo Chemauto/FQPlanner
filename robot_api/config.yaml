@@ -1,6 +1,6 @@
 # 本地 Mac 测试用 robocasa(mujoco@5001,CPU 可跑,含完整学习);
 # 联调 3dgs 时改回 "mujoco_3dgs" 并把该后端 url 指到 GPU 机器 IP:5002
-active_backend: "mujoco"
+active_backend: "mujoco"  # 本地默认;跑桌面 demo 改 "desk",真机 "dream",3dgs "mujoco_3dgs"
 
 # Robot selection: "xlerobot" (default) or "BlueThink"
 robot: "xlerobot"
@@ -24,11 +24,21 @@ backends:
     timeout: 120
     launch_hint: "serve_3dgs/main.py"
 
+  # 定点桌面 mock 世界(大脑闭环开发,零仿真依赖,含失败注入;serve_desk/main.py)
+  desk:
+    enabled: 1
+    provide_state: 1
+    accept_action: 1
+    required: 1   # 必须 1:required:0 会让 _merge 吞掉执行失败,大脑看不见 VLA 报错(接真 VLA 同理)
+    url: "http://127.0.0.1:5008"
+    timeout: 30
+    launch_hint: "serve_desk/main.py"
+
   # 真机:导航建图组(DREAM)适配后端。提供 objects/fixtures/base_status/map_data(读交换
   # 目录 latest 文件)+ /nav(按对方文件契约写任务/收结果);grasp/place/screenshot 返 501,
   # 由 VLA 组后端提供(真机 = dream 管状态与导航 + VLA 管操作,双后端并存)。
   dream:
-    enabled: 0
+    enabled: 1
     provide_state: 1
     accept_action: 1
     required: 0

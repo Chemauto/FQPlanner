@@ -185,3 +185,13 @@ cython_debug/
 .claude
 .codex
 serve/videos/dump.rdb
+.DS_Store
+dump.rdb
+MUJOCO_LOG.TXT
+__pycache__/
+master/sop/last_plan.json
+master/sop/last_trace.json
+deploy/task_timeline/
+master/sop/photos/
+master/sop/last_*.json
+master/sop/demo_sop_v2.yaml
