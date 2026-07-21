@@ -32,16 +32,20 @@ waypoints:
   max_reach: 0.9          # 当前仿真任务使用的有效工作距离 (米)
   min_dist: 0.10             # 最小安全距离再加上安全保障 (米)
   merge_target_distance: 0.20 # 目标之间小于该距离时共用一个平均最优工作点 (米)
-  must_cover:               # 必须覆盖的家具
-    - counter
-    - island
-    - stove
-    - sink
-  fixtures:                 # 家具名映射 (简名 → 仿真 fixture key)
-    counter: "counter_1_main_group"
-    island: "island_island_group"
-    stove: "stovetop_main_group"
-    sink: "sink_island_group"
+  # 办公室场景(建图组 total_scene_graph 的 fixture object_id):
+  must_cover:
+    - table
+    - fridge
+  fixtures:
+    table: "table_1"
+    fridge: "fridge_1"
+  # 厨房 robocasa 仿真(切回仿真时:注释掉上面 4 行,取消注释下面):
+  # must_cover: [counter, island, stove, sink]
+  # fixtures:
+  #   counter: "counter_1_main_group"
+  #   island: "island_island_group"
+  #   stove: "stovetop_main_group"
+  #   sink: "sink_island_group"
 
 # 路径规划参数 (serve/tools/path_planner.py)
 path_planner:

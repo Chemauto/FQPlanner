@@ -278,7 +278,12 @@ def generate_visualization(free_points_path, waypoints, targets, output_path):
         fp_data = json.load(f)
     map_file = fp_data.get("map", "maps/kitchen_map.yaml")
     if not os.path.isabs(map_file):
-        map_file = os.path.join(CONFIG_DIR, map_file)
+        # free_points.json 里的 map 路径可能相对 nav2/、项目根或运行目录,取第一个存在的
+        for _base in (CONFIG_DIR, PROJECT_ROOT, os.getcwd()):
+            _cand = os.path.join(_base, map_file)
+            if os.path.isfile(_cand):
+                map_file = _cand
+                break
 
     image_name, resolution, origin = read_map_yaml(map_file)
     map_dir = Path(map_file).resolve().parent
