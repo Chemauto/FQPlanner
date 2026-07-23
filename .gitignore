@@ -195,3 +195,4 @@ deploy/task_timeline/
 master/sop/photos/
 master/sop/last_*.json
 master/sop/demo_sop_v2.yaml
+master/memory/location_memory.json
