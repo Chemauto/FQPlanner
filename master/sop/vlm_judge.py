@@ -23,7 +23,8 @@ _ROOT = os.path.dirname(os.path.dirname(_HERE))
 _CACHE = "/tmp/vlm_judge_cache"
 sys.path.insert(0, _HERE)
 
-ACT_LABEL = {"clean": "清理(垃圾)", "organize": "整理归位", "keep": "保留·禁动"}
+ACT_LABEL = {"clean": "清理(垃圾)", "organize": "整理归位",
+             "skip": "已就位·跳过", "keep": "保留·禁动"}
 
 
 def _vlm_cfg():
@@ -86,29 +87,27 @@ def judge(current_dir, standard_dir, sop):
     prompt = f"""你是机器人桌面整理的「判断大脑」。给你两张俯拍办公桌照片:
 第一张【当前图】= 需要整理的乱桌;第二张【标准图】= 整理好的目标状态。以及整理规则 SOP。
 
-任务:识别【当前图】桌面上每个可操作的小物体,对比【标准图】判断动作。
+【判断方法 —— 用物体间的空间关系对比,不用精确坐标】:
+先描述每个可操作小物体相对【其他物体】和【环境参照(桌子边缘的黑线、盆栽等固定物)】的空间关系
+(例:"三罐可乐排成一排、在盆栽右侧""牛奶盒散落在右侧""纸巾团散落在桌面中间")。
+再对比【当前图】与【标准图】里同一物体的空间关系,按【关系差异】决定动作:
+- skip(已就位):关系基本一致(位置和排列都没明显变化) → 不用动
+- organize(整理归位):关系明显变化(散落→排整齐、挪了位置) → 需归位
+- clean(清理):当前图有、标准图里【消失】了 → 垃圾(纸巾团/废纸/空瓶/压扁空盒)
+- keep(保留):个人物品/工具/环境参照物,关系没变、也不属整理类别 → 不动
 
-【判断优先级 —— 以标准图为准,这比任何文字规则都重要】:
-- 标准图里【存在且摆整齐】的物体 → organize 整理归位(哪怕是盒子/饮料,只要标准图保留了它,就不是垃圾)
-- 当前图有、标准图里【消失】的物体 → clean 清理(垃圾)
-- 两图【同位置基本没变】的 → keep 保留
+【最重要的一条】判断"要不要整理"看【关系变没变】,不是看"是不是标准物":
+- 可乐若两图里都是"排成一排在盆栽右侧",关系没变 → skip,【绝不】判 organize
+- 牛奶盒若"散落 → 排成一排",关系变了 → organize
 
-三类含义:
-- clean:垃圾,标准图里不会出现(纸巾团 / 零食包装 / 空瓶 / 压扁的空盒)
-- organize:标准图里摆整齐的饮料和物品(可乐 / 牛奶盒 / 笔筒 等,完整的盒子/罐子属于此类)
-- keep:盆栽、个人物品、标准图里位置没变的工具
-
-只判桌面上的小物体;忽略机器人设备、机械臂夹爪、桌子、插线板、线缆、显示器。
-
-【计数规则,重要】同类物体必须合并成【恰好一项】,count = 当前图里该类的总数(如可乐 3 罐 → 一项 count=3)。
-即使某几个散落、或数量比标准图多,只要它属于标准图里保留的类别(牛奶盒/可乐/笔筒),就【整体 organize 整理】,
-【绝不】把散落的或多出的那几个单独拆出来判成 clean 垃圾。补货数量的事不在这里判,这里只判类别动作。
+只判桌面小物体;忽略机器人设备、机械臂、桌子、插线板、线缆、显示器。
+同类物体合并成【恰好一项】,count = 当前图该类总数;散落/多出的不单独拆判成垃圾。
 
 【SOP】
 {_sop_summary(sop)}
 
 严格只输出 JSON 数组,不要任何其他文字 / 解释 / markdown 代码块标记:
-[{{"object":"中文物体名","count":数量,"action":"clean|organize|keep","reason":"一句依据"}}]"""
+[{{"object":"中文名","count":数量,"current_rel":"当前关系(简短≤12字)","goal_rel":"标准关系(简短≤12字)","action":"clean|organize|skip|keep","reason":"简短"}}]"""
 
     cfg = _vlm_cfg()
     content = [
@@ -124,7 +123,7 @@ def judge(current_dir, standard_dir, sop):
     body = json.dumps({
         "model": cfg.get("model", "qwen-vl-max"),
         "messages": [{"role": "user", "content": content}],
-        "max_tokens": max(int(cfg.get("max_tokens", 400)), 800),
+        "max_tokens": 2000,
     }).encode()
     api_base = cfg.get("api_base", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
 
@@ -158,15 +157,16 @@ def main():
     if not result:
         print("VLM 判断失败:", err)
         return
-    print("=" * 66)
-    print("VLM 判断结果(qwen-vl-max · 对比 current/standard + SOP)")
-    print("=" * 66)
-    print(f"{'物体':14}{'数量':6}{'判断':14}{'依据'}")
-    print("-" * 66)
+    print("=" * 78)
+    print("VLM 关系对比判断(qwen-vl-max · 空间关系差异,不用坐标)")
+    print("=" * 78)
+    print(f"{'物体':10}{'判断':12}{'当前关系 → 标准关系(关系变了才动)'}")
+    print("-" * 78)
     for it in result:
         cnt = f"×{it.get('count')}" if it.get("count") else ""
-        print(f"{it.get('object',''):14}{cnt:6}{ACT_LABEL.get(it.get('action'),it.get('action','')):14}{it.get('reason','')}")
-    print("-" * 66)
+        rel = f"{it.get('current_rel','?')} → {it.get('goal_rel','?')}"
+        print(f"{(it.get('object','')+cnt):10}{ACT_LABEL.get(it.get('action'),it.get('action','')):12}{rel}")
+    print("-" * 78)
     c = Counter(it.get("action") for it in result)
     print("汇总: " + "   ".join(f"{ACT_LABEL.get(a,a)}×{n}" for a, n in c.items()))
     out = os.path.join(_HERE, "last_vlm_judge.json")

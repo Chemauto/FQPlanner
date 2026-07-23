@@ -59,8 +59,8 @@ def needed_skills_from_vlm(sop):
     skills, no_skill, keeps = set(), [], []
     for it in result:
         act = it.get("action")
-        if act == "keep":
-            keeps.append(it.get("object")); continue
+        if act in ("keep", "skip"):   # skip=关系没变已就位;keep=个人物品:都不生成技能
+            keeps.append(f"{it.get('object')}({'已就位' if act == 'skip' else '保留'})"); continue
         sk = CATEGORY_SKILL.get(_obj_category(it.get("object", "")))
         (skills.add(sk) if sk else no_skill.append((it.get("object"), act)))
     ordered = [s for s in SKILL_ORDER if s in skills]
@@ -154,10 +154,12 @@ def main():
     print("\n" + "=" * 64)
     objects, zones = observe()
     all_ok = True
-    for s in SKILL_ORDER:
+    for s in needed:   # 只验实际执行的技能;skip/keep 的大脑已判已就位,不纳入终局
         ok, detail = verify_skill(s, objects, zones)
         all_ok &= ok
         print(f"终局 · {SKILLS[s]['label']}: {'✓' if ok else '✗ ' + detail}")
+    if not needed:
+        print("终局 · 无需执行的技能(全部已就位/保留)")
     prot_ok = True
     for k, p0 in protected.items():
         p1 = objects[k]["pos"]
