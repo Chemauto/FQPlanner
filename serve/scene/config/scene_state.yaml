@@ -1,4 +1,4 @@
-last_updated: '2026-07-08 22:00:21'
+last_updated: '2026-07-08 22:20:45'
 locations:
   nav_002:
     fixture: counter
@@ -13,8 +13,7 @@ locations:
     - ketchup
   nav_012:
     fixture: stove
-    objects:
-    - bowl
+    objects: []
   nav_014:
     fixture: stove
     objects: []
@@ -33,7 +32,8 @@ locations:
     objects: []
   nav_055:
     fixture: sink
-    objects: []
+    objects:
+    - bowl
   robot_hand:
     fixture: null
     objects: []
