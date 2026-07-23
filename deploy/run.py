@@ -360,6 +360,17 @@ def belief():
         return jsonify({"objects": {}, "error": str(e)}), 500
 
 
+@app.route("/api/sop", methods=["GET"])
+def api_sop():
+    """当前 SOP(master/sop/demo_sop.yaml)。前端最底部展示,生成新 SOP 时在此基础上 update。"""
+    p = PROJECT_ROOT / "master" / "sop" / "demo_sop.yaml"
+    try:
+        with open(p, encoding="utf-8") as f:
+            return jsonify({"success": True, "sop": yaml.safe_load(f)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/update_scene", methods=["POST"])
 def update_scene():
     """手动更新场景（外部变化）"""

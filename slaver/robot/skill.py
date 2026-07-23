@@ -15,6 +15,7 @@ from module.camera import register_tools as register_camera_tools
 from module.example import register_tools as register_example_tools
 from module.raw import register_tools as register_raw_tools
 from module.search import register_tools as register_search_tools
+from module.tidy import register_tools as register_tidy_tools
 
 mcp = FastMCP("robots")
 
@@ -37,6 +38,7 @@ def register_all_modules():
     register_camera_tools(mcp)
     register_raw_tools(mcp)
     register_search_tools(mcp)
+    register_tidy_tools(mcp)
     # register_example_tools(mcp)
 
     print("[skill.py] ✓ 所有模块注册完成", file=sys.stderr)

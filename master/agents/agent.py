@@ -56,6 +56,7 @@ class TaskQueue:
                 "robot_name": task.get("robot_name"),
                 "subtask": task.get("subtask"),
                 "done": False,
+                "inserted": True,   # 失败重规划插入到队尾的子任务(前端标"↻ 失败重插")
             })
 
     def remove_pending_tasks(self, subtask_descriptions: list):
@@ -317,6 +318,35 @@ class GlobalAgent:
         except (TypeError, KeyError):
             return False
 
+    def _is_desk_tidy_task(self, task) -> bool:
+        """demo「整理桌面」任务识别 → 走关系判断规划分支(不经通用 planner)。"""
+        t = task if isinstance(task, str) else (task[0] if task else "")
+        return any(k in t for k in ("整理桌面", "桌面整理", "清洁会议室", "整理会议室", "收拾桌"))
+
+    def _plan_desk_tidy(self, task) -> Dict:
+        """demo 规划:vlm_judge 关系判断(当前图 vs 标准图,关系变了才动) → 技能 subtask_list。
+        复用 master/sop 关系对比闭环。返回 {reasoning_explanation, subtask_list}。"""
+        from sop.classify import load_sop
+        from sop.run_loop import needed_skills_from_vlm, SKILLS
+        sop = load_sop()
+        needed, no_skill, keeps, vlm_result = needed_skills_from_vlm(sop)
+        judged = "; ".join(
+            f"{it.get('object')}[{it.get('current_rel', '')}→{it.get('goal_rel', '')}]:{it.get('action')}"
+            for it in vlm_result)
+        reasoning = (
+            f"读 SOP + 对比桌面当前图/标准图,按物体空间关系判断(关系变了才动): {judged}。"
+            f" → 需执行: {[SKILLS[s]['label'].split('(')[0] for s in needed]};"
+            f" 已就位/保留跳过: {keeps}。"
+            + (f" 判断需处理但无对应技能(需人): {no_skill}。" if no_skill else ""))
+        subtask_list = [
+            {"robot_name": "FQrobot",
+             "subtask": SKILLS[s]["label"].split("(")[0].strip(),
+             "subtask_order": i + 1}
+            for i, s in enumerate(needed)]
+        self.logger.info(f"[demo] 关系判断 → {len(subtask_list)} 子任务: "
+                         f"{[st['subtask'] for st in subtask_list]}")
+        return {"reasoning_explanation": reasoning, "subtask_list": subtask_list}
+
     def publish_global_task(self, task: str, refresh: bool, task_id: str) -> Dict:
         """Publish a global task to all Agents"""
         self.logger.info(f"Publishing global task: {task}")
@@ -324,21 +354,27 @@ class GlobalAgent:
         # 每条新顶层任务独立规划，清空历史避免旧任务计划干扰 LLM
         self.conversation_history = []
 
-        experiences = self._load_experiences(task=task)
-        response = self.planner.forward(task, self.conversation_history, experiences)
-        self.logger.info(f"Raw response from planner: {response}")
-        reasoning_and_subtasks = self._extract_json(response)
-
-        attempt = 0
-        while (not self.reasoning_and_subtasks_is_right(reasoning_and_subtasks)) and (
-            attempt < self.config["model"]["model_retry_planning"]
-        ):
-            self.logger.warning(
-                f"Attempt {attempt + 1} to extract JSON failed. Retrying..."
-            )
-            response = self.planner.forward(task, history=None, experiences=experiences)
+        if self._is_desk_tidy_task(task):
+            # demo「整理桌面」:关系判断→技能规划,不经通用 planner(ALFWorld 骨架)
+            reasoning_and_subtasks = self._plan_desk_tidy(task)
+            response = json.dumps(reasoning_and_subtasks, ensure_ascii=False)
+            self.logger.info(f"[demo] 桌面整理规划: {reasoning_and_subtasks}")
+        else:
+            experiences = self._load_experiences(task=task)
+            response = self.planner.forward(task, self.conversation_history, experiences)
+            self.logger.info(f"Raw response from planner: {response}")
             reasoning_and_subtasks = self._extract_json(response)
-            attempt += 1
+
+            attempt = 0
+            while (not self.reasoning_and_subtasks_is_right(reasoning_and_subtasks)) and (
+                attempt < self.config["model"]["model_retry_planning"]
+            ):
+                self.logger.warning(
+                    f"Attempt {attempt + 1} to extract JSON failed. Retrying..."
+                )
+                response = self.planner.forward(task, history=None, experiences=experiences)
+                reasoning_and_subtasks = self._extract_json(response)
+                attempt += 1
 
         self.logger.info(f"Received reasoning and subtasks:\n{reasoning_and_subtasks}")
         if not reasoning_and_subtasks or not isinstance(reasoning_and_subtasks, dict):
@@ -366,6 +402,7 @@ class GlobalAgent:
         self.current_task_queue = task_queue
         self.current_task_id = task_id
         self.current_task_desc = task if isinstance(task, str) else (task[0] if task else "")
+        self.current_reasoning = reasoning_and_subtasks.get("reasoning_explanation", "")
 
         # 使旧 dispatch thread 失效，并重置共享状态
         self._dispatch_token += 1
@@ -508,6 +545,16 @@ class GlobalAgent:
             is_camera_task = "拍照" in current["subtask"]
             if self._last_subtask_status in ("failure", "exception", "timeout") and not is_camera_task:
                 task_had_failure = True
+                # demo「整理桌面」:失败技能直接重插到队尾重做(不走相机诊断/LLM 重规划);
+                # 用 inserted 判断避免无限重插——重插的那次再失败,就不再重插了。
+                if self._is_desk_tidy_task(task):
+                    if not current.get("inserted"):
+                        task_queue.append_tasks([{
+                            "robot_name": current["robot_name"],
+                            "subtask": current["subtask"],
+                        }])
+                        self.logger.info(f"[demo] 子任务失败 → 重插队尾重做: {current['subtask']}")
+                    continue
                 self.logger.info(f"[Camera] 子任务状态={self._last_subtask_status}，拍照诊断...")
                 if self.config.get('camera', {}).get('enabled', True):
                     self._send_camera_task(
@@ -651,6 +698,7 @@ class GlobalAgent:
                 "subtask": t["subtask"],
                 "done": t["done"],
                 "status": t.get("status"),  # None | "success" | "failure" | "exception" | "timeout"
+                "inserted": t.get("inserted", False),
             })
 
         failed = any(
@@ -661,6 +709,7 @@ class GlobalAgent:
             "active": True,
             "task_id": self.current_task_id,
             "task": self.current_task_desc,
+            "reasoning": getattr(self, "current_reasoning", ""),
             "all_done": q.all_done(),
             "failed": failed,
             "total": len(tasks),

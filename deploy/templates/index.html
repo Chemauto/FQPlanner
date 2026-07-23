@@ -161,6 +161,15 @@
             <div id="belief-table"></div>
             <pre id="belief-json" style="margin-top:10px;padding:12px;background:#0f172a;border-radius:8px;font-size:12px;color:#a78bfa;overflow-x:auto;white-space:pre-wrap"></pre>
         </div>
+
+        <!-- current SOP(最底部,生成新 SOP 时在此基础上 update) -->
+        <div class="card">
+            <h2>当前 SOP
+                <span style="font-size:12px;color:#64748b;font-weight:normal">桌面整理规则(事后反思生成新版时在此基础上 update)</span>
+                <button class="btn btn-outline btn-sm" style="font-size:11px;padding:3px 8px;float:right" onclick="loadSop()">刷新</button>
+            </h2>
+            <div id="sop-content" style="font-size:13px;color:#cbd5e1;line-height:1.7"></div>
+        </div>
     </div>
 
     <script>
@@ -175,6 +184,28 @@
         }
         checkStatus();
         setInterval(checkStatus, 5000);
+
+        // 当前 SOP(最底部卡片) —— 事后反思生成新版时在此基础上 update
+        async function loadSop() {
+            const el = document.getElementById('sop-content');
+            try {
+                const d = await (await fetch('/api/sop')).json();
+                if (!d.success) { el.textContent = 'SOP 加载失败: ' + (d.error || ''); return; }
+                const s = d.sop || {};
+                const sec = (title, items) => items && items.length
+                    ? `<div style="margin-bottom:10px"><b style="color:#a78bfa">${title}</b>`
+                      + `<ul style="margin:4px 0 0 18px;padding:0">`
+                      + items.map(i => `<li>${i}</li>`).join('') + '</ul></div>'
+                    : '';
+                el.innerHTML =
+                    sec('桌面最终状态', (s.standard_layout || []).map(x => `${x.category}: ${x.count ?? x.state ?? ''} — ${x.rule || ''}`))
+                  + sec('必须清理的垃圾', (s.trash || []).map(x => `${x.type} → ${x.action}`))
+                  + sec('必须保持原位', (s.keep_in_place || []).map(x => `${x.type}: ${x.rule}`))
+                  + sec('饮料补货', (s.restock || []).map(x => `${x.item}: 标准 ${x.min} 个,不足去${x.source}补`))
+                  + sec('经验规则(大脑优化生成)', s.learned_rules || []);
+            } catch (e) { el.textContent = 'SOP 加载失败: ' + e; }
+        }
+        loadSop();
 
         function showMsg(id, ok, text) {
             const el = document.getElementById(id);
@@ -252,9 +283,17 @@
             </div>
             <div class="task-bar"><div class="${barCls}" style="width:${pct}%"></div></div>`;
 
+            if (data.reasoning) {
+                html += `<div style="margin:10px 0;padding:10px 12px;background:#0f172a;border-radius:8px;font-size:12px;color:#a5b4fc;line-height:1.6">`
+                      + `<b style="color:#818cf8">🧠 Master 思考:</b> ${data.reasoning}</div>`;
+            }
+
             for (const t of data.subtask_list) {
                 const failed = t.done && t.status && t.status !== 'success';
                 const cls = t.done ? (failed ? 'done fail' : 'done ok') : '';
+                const insertedTag = t.inserted
+                    ? ' <span style="font-size:10px;color:#fbbf24;border:1px solid #fbbf24;border-radius:4px;padding:1px 5px">↻ 失败重插</span>'
+                    : '';
                 let checkStyle = 'border-color:#475569;';
                 let checkIcon = '';
                 if (t.done) {
@@ -268,7 +307,7 @@
                 }
                 html += `<div class="subtask-item ${cls}">
                     <div class="check" style="${checkStyle}">${checkIcon}</div>
-                    <span class="subtask-text">${t.subtask}</span>
+                    <span class="subtask-text">${t.subtask}${insertedTag}</span>
                     <span class="subtask-robot">${t.robot_name}</span>
                 </div>`;
             }
