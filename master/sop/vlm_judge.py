@@ -32,17 +32,43 @@ def _vlm_cfg():
     return (cfg.get("camera") or {}).get("vlm") or {}
 
 
-def _api_key():
-    for k in ("VLM_API_KEY", "CLOUD_API_KEY"):
+def _api_key(names=("VLM_API_KEY", "CLOUD_API_KEY")):
+    for k in names:
         if os.environ.get(k):
             return os.environ[k]
     env = os.path.join(_ROOT, ".env")
     if os.path.isfile(env):
-        for line in open(env, encoding="utf-8"):
-            m = re.match(r"\s*VLM_API_KEY\s*=\s*(\S+)", line)
-            if m:
-                return m.group(1).strip().strip('"').strip("'")
+        lines = open(env, encoding="utf-8").readlines()
+        for k in names:                       # 按 names 优先级(先 VLM_API_KEY,别被 CLOUD_API_KEY 抢)
+            for line in lines:
+                mo = re.match(rf"\s*{k}\s*=\s*(\S+)", line)
+                if mo:
+                    return mo.group(1).strip().strip('"').strip("'")
     return None
+
+
+def _endpoint_cfg():
+    """默认 qwen-vl-max(dashscope,现有 VLM_API_KEY)。
+    换任意 OpenAI 兼容后端(别的 Qwen / Kimi / GLM / OpenAI…),设这几个环境变量即可,A/B 只需一行:
+      export VLM_API_BASE=<厂商 base_url,一般到 /v1>
+      export VLM_MODEL=<模型 id>
+      export VLM_API_KEY=<该厂商的 key>       # 覆盖 .env;测同家(dashscope)别的模型时不用改
+      export VLM_IMG_DETAIL=high              # 可选:高清读图,救小物体细节(部分厂商支持)
+      export VLM_TEMPERATURE=0                # 可选:默认已是 0
+    例:Kimi   VLM_API_BASE=https://api.moonshot.cn/v1        VLM_MODEL=<kimi 视觉模型>
+        GLM    VLM_API_BASE=https://open.bigmodel.cn/api/paas/v4  VLM_MODEL=<glm 视觉模型>
+        大 Qwen VLM_API_BASE=<dashscope 同址>  VLM_MODEL=qwen2.5-vl-72b-instruct(key 不用换)"""
+    base, model = os.environ.get("VLM_API_BASE"), os.environ.get("VLM_MODEL")
+    if base and model:
+        return {"provider": "custom", "api_base": base, "model": model,
+                "key_names": ("VLM_API_KEY", "CLOUD_API_KEY"),
+                "detail": os.environ.get("VLM_IMG_DETAIL") or None}
+    cfg = _vlm_cfg()
+    return {"provider": "qwen",
+            "api_base": cfg.get("api_base", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+            "model": cfg.get("model", "qwen-vl-max"),
+            "key_names": ("VLM_API_KEY", "CLOUD_API_KEY"),
+            "detail": None}
 
 
 def _to_jpg_b64(path):
@@ -75,14 +101,15 @@ def _sop_summary(sop):
             f"- 标准摆放物(organize 整理归位): {std}\n- 饮料补货: {restock}")
 
 
-def judge(current_dir, standard_dir, sop):
-    cur = _first_image(current_dir)
+def judge(current_dir, standard_dir, sop, current_img=None):
+    cur = current_img or _first_image(current_dir)
     std = _first_image(standard_dir)
     if not cur:
         return None, f"current 目录无照片: {current_dir}"
-    key = _api_key()
+    ep = _endpoint_cfg()
+    key = _api_key(ep["key_names"])
     if not key:
-        return None, "无 VLM_API_KEY"
+        return None, f"无 API key(需环境变量 {' 或 '.join(ep['key_names'])})"
 
     prompt = f"""你是机器人桌面整理的「判断大脑」。给你两张俯拍办公桌照片:
 第一张【当前图】= 需要整理的乱桌;第二张【标准图】= 整理好的目标状态。以及整理规则 SOP。
@@ -93,12 +120,20 @@ def judge(current_dir, standard_dir, sop):
 再对比【当前图】与【标准图】里同一物体的空间关系,按【关系差异】决定动作:
 - skip(已就位):关系基本一致(位置和排列都没明显变化) → 不用动
 - organize(整理归位):关系明显变化(散落→排整齐、挪了位置) → 需归位
-- clean(清理):当前图有、标准图里【消失】了 → 垃圾(纸巾团/废纸/空瓶/压扁空盒)
-- keep(保留):个人物品/工具/环境参照物,关系没变、也不属整理类别 → 不动
+- clean(清理):散落在桌面上的垃圾 → 纸巾团/废纸/餐巾纸、食品/零食包装、空瓶空罐、已开封饮料(拉环开/吸管插入)、压扁空盒。
+  【看状态,不只看类别】垃圾若【已经在垃圾桶/黑色垃圾盒里】= 已处理好 → skip,【别再判 clean】;只有【散落在桌面上、还没进桶】的才 clean。
+- keep(保留):个人物品(手机/耳机/AirPods/眼镜/U盘/数据线等,见 SOP【保留】列表)、工具、环境参照物 → 不动。
+  【个人物品即使散落在桌上,也绝不判 clean 或 organize,一律 keep】。
+  【特别注意:桌上【成对出现、带小柄的白色小物体】极可能是耳机(AirPods)= 个人物品 → keep,【绝不当垃圾清理】;它和揉皱的纸巾团是两回事,别混。】
+
+【饮料 vs 饮料垃圾 —— 看有没有开封,不看摆放】:
+- 可乐【易拉环已拉开】、牛奶盒【吸管已插进盒口】= 已开封 = 垃圾(clean)。
+- 未开封的整罐可乐 / 整盒牛奶(吸管还封在盒身包装上、没插进盒口)= 饮料,按摆放判 organize/skip,【不是】垃圾。
 
 【最重要的一条】判断"要不要整理"看【关系变没变】,不是看"是不是标准物":
 - 可乐若两图里都是"排成一排在盆栽右侧",关系没变 → skip,【绝不】判 organize
 - 牛奶盒若"散落 → 排成一排",关系变了 → organize
+- 笔【竖插在笔筒里】= 已就位 skip;笔【横搁在筒口上、或散落在桌面】= 没归位 → organize
 
 只判桌面小物体;忽略机器人设备、机械臂、桌子、插线板、线缆、显示器。
 同类物体合并成【恰好一项】,count = 当前图该类总数;散落/多出的不单独拆判成垃圾。
@@ -109,38 +144,51 @@ def judge(current_dir, standard_dir, sop):
 严格只输出 JSON 数组,不要任何其他文字 / 解释 / markdown 代码块标记:
 [{{"object":"中文名","count":数量,"current_rel":"当前关系(简短≤12字)","goal_rel":"标准关系(简短≤12字)","action":"clean|organize|skip|keep","reason":"简短"}}]"""
 
-    cfg = _vlm_cfg()
+    def _img(path):
+        u = {"url": f"data:image/jpeg;base64,{_to_jpg_b64(path)}"}
+        if ep.get("detail"):
+            u["detail"] = ep["detail"]
+        return {"type": "image_url", "image_url": u}
+
     content = [
         {"type": "text", "text": prompt},
         {"type": "text", "text": "\n【当前图】(乱桌):"},
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{_to_jpg_b64(cur)}"}},
+        _img(cur),
     ]
     if std:
-        content += [
-            {"type": "text", "text": "【标准图】(目标):"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{_to_jpg_b64(std)}"}},
-        ]
+        content += [{"type": "text", "text": "【标准图】(目标):"}, _img(std)]
     body = json.dumps({
-        "model": cfg.get("model", "qwen-vl-max"),
+        "model": ep["model"],
         "messages": [{"role": "user", "content": content}],
         "max_tokens": 2000,
+        "temperature": float(os.environ.get("VLM_TEMPERATURE", 0)),  # 默认 0:去掉采样抖动
     }).encode()
-    api_base = cfg.get("api_base", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
 
     import urllib.request
     req = urllib.request.Request(
-        api_base.rstrip("/") + "/chat/completions", data=body, method="POST",
+        ep["api_base"].rstrip("/") + "/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
     try:
-        with urllib.request.urlopen(req, timeout=90) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             raw = json.loads(r.read())["choices"][0]["message"]["content"]
     except Exception as exc:
-        return None, f"qwen-vl-max 调用失败: {exc}"
+        return None, f"{ep['model']} 调用失败: {exc}"
 
     m = re.search(r"\[.*\]", raw, re.S)
+    text = m.group(0) if m else raw
     try:
-        return json.loads(m.group(0) if m else raw), None
+        return json.loads(text), None
     except Exception as exc:
+        # 降级: 逐个抠出扁平对象 {...}(schema 无嵌套),容忍 qwen 在对象间插入的
+        # 多余引号/逗号等垃圾字符;能救回几个算几个。
+        objs = []
+        for o in re.findall(r"\{[^{}]*\}", text):
+            try:
+                objs.append(json.loads(o))
+            except Exception:
+                pass
+        if objs:
+            return objs, None
         return None, f"JSON 解析失败: {exc}; 原文前 200 字: {raw[:200]}"
 
 
