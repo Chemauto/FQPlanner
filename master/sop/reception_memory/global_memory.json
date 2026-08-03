@@ -1,0 +1,32 @@
+{
+  "success_rules": [
+    "接触密集阶段(pick/place)交给 VLA,非接触(walk/staging/release)用确定性原语",
+    "补货前先统计现有再算缺口,避免多取或少取",
+    "一个一个补,每罐补完重新数,数够即停(不预设次数)",
+    "执行模块报成功但计数不符时，先重新观测目标位置，再决定是否补放或调整位置。",
+    "放置动作完成后，用视觉确认罐体与相邻罐体对齐且无遮挡，再进入下一罐。",
+    "若连续两次放置后计数仍不符，停止补货并上报“放置位置疑似偏移”，不继续尝试。"
+  ],
+  "failure_models": [
+    {
+      "name": "empty_grasp",
+      "detect": "pick 后重新观测手上没物(is_object_grasped=False)",
+      "recover": "重新定位 + 重新摆位再抓"
+    },
+    {
+      "name": "false_success",
+      "detect": "place 自报成功但重数目标区没增加",
+      "recover": "重取重放,不采信自报"
+    },
+    {
+      "name": "walk_blocked",
+      "detect": "walk 后位姿没到目标房间(办公椅挡路)",
+      "recover": "重试或绕行,超上限停下上报"
+    },
+    {
+      "name": "pose_bad",
+      "detect": "到位但间隔/朝向不合格",
+      "recover": "原地重摆(不重取)"
+    }
+  ]
+}

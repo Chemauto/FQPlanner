@@ -1,0 +1,20 @@
+{
+  "task": "会议接待饮料补货",
+  "success": true,
+  "strategy": "先扫描数缺口,再【一个一个】补:walk→pick→walk→place,每步重新观测确认,补完重新数直到够",
+  "avoid": [
+    "不复用示范时的具体数量/坐标,按现场人数和现有量重新算",
+    "不采信执行模块自报,每步重新观测确认(pick/walk/place)"
+  ],
+  "recovery_decisions": {
+    "grasp_fail": "原地重试 pick(不重走)",
+    "walk_blocked": "重试或绕行,超上限停下上报",
+    "place_miss": "可乐已脱手→重取重放;若只是间隔/朝向不良→原地重摆(不重取)"
+  },
+  "verified_this_run": [],
+  "failure_modes": [
+    "grasp_fail",
+    "place_miss",
+    "walk_blocked"
+  ]
+}

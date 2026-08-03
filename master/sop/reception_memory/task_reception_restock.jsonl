@@ -1,0 +1,9 @@
+{"action": "turn_on_lights", "room": "会议室"}
+{"action": "scan", "room": "会议室", "observe": ["可乐数", "办公椅"]}
+{"action": "scan", "room": "茶水间", "observe": ["可乐库存"]}
+{"action": "compute_gap", "need": "headcount × per_person", "have": "会议室现有可乐"}
+{"action": "walk", "to": "茶水间"}
+{"action": "pick", "target": "可乐", "at": "茶水间", "verify": "手上有可乐(empty-grasp 检测)"}
+{"action": "walk", "to": "会议室"}
+{"action": "place", "target": "可乐", "to": "会议室", "verify": "桌上 +1(false-success 检测)"}
+{"action": "recount", "room": "会议室", "loop_until": "gap == 0"}

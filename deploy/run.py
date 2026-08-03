@@ -371,6 +371,49 @@ def api_sop():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/reception")
+def reception_page():
+    """G1 会议接待补货闭环展示页(复用桌面配色)。"""
+    return render_template("reception.html")
+
+
+@app.route("/api/reception/run", methods=["POST"])
+def api_reception_run():
+    """跑一次接待补货闭环(reception_loop),返回结构化 trace(含每步 verify + 反思)。"""
+    import subprocess
+    body = request.get_json(force=True, silent=True) or {}
+    scenario = body.get("scenario", "normal")
+    if scenario not in ("normal", "grasp_fail", "walk_blocked", "place_miss", "label_wrong"):
+        scenario = "normal"
+    headcount = int(body.get("headcount", 4))
+    sop_dir = PROJECT_ROOT / "master" / "sop"
+    cmd = [sys.executable, str(sop_dir / "reception_loop.py"),
+           "--scenario", scenario, "--headcount", str(headcount)]
+    if not body.get("reflect", True):
+        cmd.append("--no-reflect")
+    try:
+        proc = subprocess.run(cmd, cwd=str(sop_dir), capture_output=True,
+                              text=True, timeout=160)
+        trace = json.loads((sop_dir / "last_reception_trace.json").read_text(encoding="utf-8"))
+        return jsonify({"success": True, "trace": trace, "stdout": proc.stdout[-4000:]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/reception/sop", methods=["GET"])
+def api_reception_sop():
+    """接待 SOP(优先 v2,展示反思沉淀后的版本)。"""
+    sop_dir = PROJECT_ROOT / "master" / "sop"
+    v2 = sop_dir / "reception_sop_v2.yaml"
+    p = v2 if v2.exists() else sop_dir / "reception_sop.yaml"
+    try:
+        with open(p, encoding="utf-8") as f:
+            return jsonify({"success": True, "sop": yaml.safe_load(f),
+                            "version": "v2" if p == v2 else "v1"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/update_scene", methods=["POST"])
 def update_scene():
     """手动更新场景（外部变化）"""
