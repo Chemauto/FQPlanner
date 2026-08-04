@@ -89,10 +89,12 @@ def main():
             f'  <geom type="mesh" mesh="{name}" group="3" '
             f'contype="1" conaffinity="1" rgba="0 1 0 0"/>')
 
+    # ⚠️ MotrixSim 的 <include> 是文本片段插入,文件要【裸列表】(无 <mujocoinclude> 根;
+    #    见 nav_scene_1/mjcf/object/sugar_collision.xml —— 直接一堆 <geom>,没有根标签)。
     (out / "office_collision_assets.xml").write_text(
-        "<mujocoinclude>\n" + "\n".join(asset_lines) + "\n</mujocoinclude>\n", encoding="utf-8")
+        "\n".join(asset_lines) + "\n", encoding="utf-8")
     (out / "office_collision.xml").write_text(
-        "<mujocoinclude>\n" + "\n".join(geom_lines) + "\n</mujocoinclude>\n", encoding="utf-8")
+        "\n".join(geom_lines) + "\n", encoding="utf-8")
     print(f"写出 office_collision_assets.xml + office_collision.xml({len(parts)} 块)", flush=True)
     if len(parts) > 200:
         print("⚠ 凸块偏多(>200),物理会慢;可调大 --threshold", flush=True)
