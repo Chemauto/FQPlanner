@@ -37,8 +37,9 @@ def main():
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    print(f"载入 {args.obj} ...", flush=True)
-    m = trimesh.load(args.obj, force="mesh")
+    print(f"载入 {args.obj}(大 mesh 读盘也要一会儿)...", flush=True)
+    # process=False:跳过顶点合并/修复,970万顶点的 mesh 加载快 10 倍+、省内存(默认那步会卡几分钟/swap)
+    m = trimesh.load(args.obj, force="mesh", process=False)
     print(f"  原始: {len(m.vertices)} 顶点 / {len(m.faces)} 面", flush=True)
 
     if len(m.faces) > args.max_faces:
