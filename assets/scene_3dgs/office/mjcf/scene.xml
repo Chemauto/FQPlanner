@@ -3,8 +3,8 @@
   <compiler meshdir="../meshes" texturedir="../meshes/"/>
   <asset>
     <mesh name="office" file="pgsr_office.obj"/>
-    <!-- 凸分解碰撞块的 <mesh> 注册,由 gen_collision.py 生成。先跑 gen_collision 再起服务。 -->
-    <include file="office_collision_assets.xml"/>
+    <!-- 凸分解碰撞块的 <mesh> 注册,由 gen_collision.py 生成在 meshes/。include 走 XML 目录,要写 ../meshes/。 -->
+    <include file="../meshes/office_collision_assets.xml"/>
   </asset>
   <default>
     <default class="obj_visual">
@@ -19,7 +19,7 @@
     <body name="mesh" pos="0 0 0" euler="0 0 0">
       <inertial pos="0 0 0" mass="0.001" diaginertia="2e-05 2e-05 2e-05"/>
       <geom rgba="0.6 0.6 0.6 1" mesh="office" class="obj_visual"/>   <!-- 可视,只看不碰 -->
-      <include file="office_collision.xml"/>                          <!-- 碰撞,gen_collision 生成 -->
+      <include file="../meshes/office_collision.xml"/>                <!-- 碰撞,gen_collision 生成在 meshes/ -->
     </body>
     <geom name="ground" type="plane" size="50 50 0.1" rgba="0.5 0.5 0.5 1"
           group="2" contype="1" conaffinity="1"/>
