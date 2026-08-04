@@ -2,15 +2,14 @@
 """把 pgsr_office.obj 凸分解成碰撞几何(MuJoCo/MotrixSim 的 mesh 碰撞必须是凸的;大非凸场景直接
 当碰撞会被取凸包 → 屋子变一坨实心、机器人进不去)。
 
-⚠️ PGSR 重建 mesh 顶点极多(office 近千万顶点),coacd 直接分解会卡死/跑几小时 → **先简化到
-~max_faces 再分解**(碰撞用不着精细)。简化用 trimesh 的 quadric decimation,需要:
-  pip install fast-simplification
+⚠️ PGSR 重建 mesh 顶点极多(office 近千万顶点):
+  - trimesh 的纯 Python OBJ 解析器读这么大的 obj **极慢(几十分钟)** → 用 open3d(C++)读+简化;
+  - 碰撞用不着精细 → 先简化到 ~max_faces 再 coacd 凸分解。
+装依赖:pip install coacd open3d          (open3d 装不上就只装 trimesh+fast-simplification,会退 numpy 解析,慢些)
 
-生成(都写到 meshes/ 下,scene.xml 的两个 <include> 引用):
-  coll_*.obj / office_collision_assets.xml(<mesh> 注册) / office_collision.xml(<geom> 碰撞)
+生成(meshes/ 下,scene.xml 两个 <include> 引用):coll_*.obj / office_collision_assets.xml / office_collision.xml
 
 用法(repo 根):
-  pip install coacd trimesh fast-simplification
   python assets/scene_3dgs/office/gen_collision.py
   python assets/scene_3dgs/office/gen_collision.py --max-faces 40000 --threshold 0.12   # 更快更粗
 """
@@ -21,6 +20,43 @@ from pathlib import Path
 import numpy as np
 import trimesh
 import coacd
+
+
+def load_vf(obj_path, max_faces):
+    """加载 obj 的顶点/面并简化。open3d(C++,快)优先;无则 numpy 手动解析(比 trimesh loader 快)。
+    返回 (V[n,3] float, F[m,3] int)。"""
+    # ---- 优先 open3d(读大 obj + 简化都是 C++)----
+    try:
+        import open3d as o3d
+        print("  open3d 读取(C++,快)...", flush=True)
+        me = o3d.io.read_triangle_mesh(obj_path)
+        nf = len(me.triangles)
+        print(f"  原始: {len(me.vertices)} 顶点 / {nf} 面", flush=True)
+        if nf > max_faces:
+            print(f"  open3d 简化到 ~{max_faces}...", flush=True)
+            me = me.simplify_quadric_decimation(max_faces)
+            print(f"  简化后: {len(me.triangles)} 面", flush=True)
+        return np.asarray(me.vertices), np.asarray(me.triangles, dtype=np.int64)
+    except Exception as e:
+        print(f"  (open3d 不可用:{e} → 退 numpy 解析)", flush=True)
+
+    # ---- 退路:numpy 手动解析 v/f(跳过 trimesh 慢 loader)----
+    V, F = [], []
+    with open(obj_path) as fh:
+        for ln in fh:
+            if ln[:2] == "v ":
+                V.append(ln.split()[1:4])
+            elif ln[:2] == "f ":
+                F.append([p.split("/")[0] for p in ln.split()[1:4]])
+    V = np.asarray(V, dtype=np.float64)
+    F = np.asarray(F, dtype=np.int64) - 1        # obj 面索引是 1-based
+    print(f"  解析: {len(V)} 顶点 / {len(F)} 面", flush=True)
+    if len(F) > max_faces:
+        print(f"  简化到 ~{max_faces}(需 fast-simplification)...", flush=True)
+        m = trimesh.Trimesh(V, F, process=False).simplify_quadric_decimation(max_faces)
+        V, F = np.asarray(m.vertices), np.asarray(m.faces, dtype=np.int64)
+        print(f"  简化后: {len(F)} 面", flush=True)
+    return V, F
 
 
 def main():
@@ -37,22 +73,11 @@ def main():
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    print(f"载入 {args.obj}(大 mesh 读盘也要一会儿)...", flush=True)
-    # process=False:跳过顶点合并/修复,970万顶点的 mesh 加载快 10 倍+、省内存(默认那步会卡几分钟/swap)
-    m = trimesh.load(args.obj, force="mesh", process=False)
-    print(f"  原始: {len(m.vertices)} 顶点 / {len(m.faces)} 面", flush=True)
+    print(f"载入 {args.obj} ...", flush=True)
+    V, F = load_vf(args.obj, args.max_faces)
 
-    if len(m.faces) > args.max_faces:
-        print(f"  面数过高 → 先简化到 ~{args.max_faces}(否则 coacd 极慢)...", flush=True)
-        try:
-            m = m.simplify_quadric_decimation(args.max_faces)
-        except Exception as e:
-            raise SystemExit(
-                f"简化失败({e})。请先 `pip install fast-simplification` 再重跑。")
-        print(f"  简化后: {len(m.faces)} 面", flush=True)
-
-    print(f"凸分解中(threshold={args.threshold},这一步可能要几分钟,别急)...", flush=True)
-    parts = coacd.run_coacd(coacd.Mesh(m.vertices, m.faces), threshold=args.threshold)
+    print(f"凸分解中(threshold={args.threshold},这一步可能要几分钟)...", flush=True)
+    parts = coacd.run_coacd(coacd.Mesh(V, F), threshold=args.threshold)
     print(f"  → {len(parts)} 个凸块", flush=True)
 
     asset_lines, geom_lines = [], []
