@@ -94,6 +94,7 @@ class GlobalAgent:
         self.current_task_queue: Optional[TaskQueue] = None
         self.current_task_id: Optional[str] = None
         self.current_task_desc: Optional[str] = None
+        self._reception_running = False           # 接待 skill 是否在跑(get_task_status 的 all_done 用)
         self._last_subtask_status = None  # Slaver 返回的子任务状态
         self._last_subtask_result = None  # Slaver 返回的子任务结果（含 VLM 描述）
         self._memory_dir = os.path.join(os.path.dirname(__file__), '..', 'memory')
@@ -347,12 +348,68 @@ class GlobalAgent:
                          f"{[st['subtask'] for st in subtask_list]}")
         return {"reasoning_explanation": reasoning, "subtask_list": subtask_list}
 
+    def _is_reception_task(self, task) -> bool:
+        """会议接待任务识别 → 走接待 skill(自带 SOP+经验的复合技能),不经通用 planner。"""
+        from sop.reception_skill import is_reception_task
+        return is_reception_task(task)
+
+    def _run_reception_skill(self, task, task_id, refresh) -> Dict:
+        """接待 skill:master 不拆子任务,整体调用它自跑补货闭环(每步重新确认、失败按现状恢复、
+        事后反思)。on_step 把每个子任务动态 append 进 current_task_queue → 前端 task_status
+        复用显示(🧠思考 + 子任务✓)。补几罐运行时才知道,所以队列空起、边跑边填。"""
+        import threading
+        import uuid as _uuid
+        from sop.reception_skill import run_reception_skill, RECEPTION_SKILL, skill_card
+
+        task_id = task_id or str(_uuid.uuid4()).replace("-", "")
+        card = skill_card()
+        reasoning = (
+            f"识别到接待任务 → 调用【接待 skill】(自带 SOP {card.get('sop_version', '')} + "
+            f"{len(card.get('learned_rules', []))} 条经验规则,内部自跑补货循环、每步重新观测确认、"
+            f"失败按现状恢复)。流程:{RECEPTION_SKILL['description']}")
+
+        # 空队列,子任务由 skill 运行时动态 append(补几罐运行时才知道)
+        self.current_task_queue = TaskQueue([])
+        self.current_task_id = task_id
+        self.current_task_desc = task if isinstance(task, str) else (task[0] if task else "开始接待")
+        self.current_reasoning = reasoning
+        self._reception_running = True
+        self._pending_failure = None
+        self._pending_success = None
+        self.logger.info(f"[reception] 走接待 skill: {self.current_task_desc}")
+
+        def _on_step(no, phase, detail, status):
+            q = self.current_task_queue
+            if q is None:
+                return
+            q.tasks.append({
+                "order": no, "robot_name": RECEPTION_SKILL["robot_name"],
+                "subtask": phase, "done": True, "status": status,
+                "result": detail, "inserted": False,
+            })
+            self.logger.info(f"[reception] 子任务{no} {status}: {phase} — {detail}")
+
+        def _worker():
+            try:
+                run_reception_skill(task=self.current_task_desc, on_step=_on_step)
+            except Exception as exc:
+                self.logger.error(f"[reception] skill 执行异常: {exc}")
+            finally:
+                self._reception_running = False
+
+        threading.Thread(target=_worker, daemon=True, name="reception_skill").start()
+        return {"reasoning_explanation": reasoning, "subtask_list": []}
+
     def publish_global_task(self, task: str, refresh: bool, task_id: str) -> Dict:
         """Publish a global task to all Agents"""
         self.logger.info(f"Publishing global task: {task}")
 
         # 每条新顶层任务独立规划，清空历史避免旧任务计划干扰 LLM
         self.conversation_history = []
+
+        if self._is_reception_task(task):
+            # 会议接待:走接待 skill(自带 SOP+经验,内部自跑补货闭环),不经通用 planner
+            return self._run_reception_skill(task, task_id, refresh)
 
         if self._is_desk_tidy_task(task):
             # demo「整理桌面」:关系判断→技能规划,不经通用 planner(ALFWorld 骨架)
@@ -705,12 +762,13 @@ class GlobalAgent:
             t["done"] and t.get("status") in ("failure", "exception", "timeout")
             for t in tasks
         )
+        reception_running = getattr(self, "_reception_running", False)
         result = {
             "active": True,
             "task_id": self.current_task_id,
             "task": self.current_task_desc,
             "reasoning": getattr(self, "current_reasoning", ""),
-            "all_done": q.all_done(),
+            "all_done": q.all_done() and not reception_running,
             "failed": failed,
             "total": len(tasks),
             "completed": len([t for t in tasks if t["done"]]),

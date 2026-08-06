@@ -8,6 +8,10 @@
        可乐、人在哪个房间)决定从哪步恢复,而不是盲目重跑整轮 → 重新计数更新缺口
    → 复核前后状态 → 语音播报 → 生成新版 SOP → trace 存档(事后反思的输入)。
 
+闭环抽成 run_reception(..., on_step=回调):既能 CLI 直接跑,也能被 reception_skill 当作
+【一个 skill】整体调用(master 识别到接待任务就调它,不劳 LLM 拆子任务)。on_step 在每个子任务
+边界回调 → master 用它往 task_status 写(前端复用 master/slaver 输出区显示 🧠思考 + 子任务✓)。
+
 pick / walk / place 拆成独立技能调用(见 reception_skills),大脑在每步之间插确认/纠正 —— 这是
 「大脑杠杆」的着力点(给弱 VLA 套 critic 闭环)。执行/观测两个 backend:
   mock(进程内世界,验证逻辑) | robot_api(真实执行/观测总闸,"接入 VLA/导航"切这个,大脑零改)。
@@ -134,6 +138,169 @@ def _restock_one_round(round_no, simple=False):
     return False, attempts
 
 
+def run_reception(scenario="normal", backend="mock", headcount=4, meeting_cola=1,
+                  tea_cola=10, single=False, simple_place=False, reflect=True,
+                  on_step=None):
+    """接待补货闭环(可被 reception_skill / CLI 调用)。返回 trace(dict)。
+
+    on_step(no, phase, detail, status):【子任务级】进度回调,供 master 写 task_status。
+      no=1..8 阶段号;phase 子任务名;detail 结果说明;status="success"/"failure"(这步结果)。
+      每个子任务边界(开灯/扫描/数缺口/补第N罐/复核/播报/反思)回调一次;补货每补一罐一条。
+    """
+    def _emit(no, phase, detail, status="success"):
+        if on_step:
+            try:
+                on_step(no, phase, detail, status)
+            except Exception:
+                pass
+
+    sk.set_backend(backend)
+    if single:                            # 单次补货 = 需求 1 罐、会议室现有 0 → 补一轮
+        headcount, meeting_cola = 1, 0
+    simple_place = simple_place or single
+
+    # 世界初始化 + 故障注入(仅 mock 用;robot_api 下 world 不被读)
+    reset_world(headcount=headcount, meeting_cola=meeting_cola, tea_cola=tea_cola)
+    if backend == "mock" and scenario != "normal":
+        inject_fault(scenario)
+
+    sop = _load_sop()
+    per_person = (sop.get("beverage_restock") or {}).get("per_person", 1)
+    room = "会议室"
+
+    flow = "取放一轮" if single else "补货循环"
+    print("=" * 66)
+    print(f"大脑闭环 · G1 会议接待{'· 单次补货' if single else ''}"
+          f"(触发→开灯→扫描→数缺口→{flow}→复核→播报)")
+    print(f"backend:{backend}" + (f" · 场景:{scenario}" if backend == "mock" else ""))
+    print("=" * 66)
+
+    trace = {"task": "G1 会议接待补货", "scenario": scenario, "backend": backend,
+             "single": single, "started_at": datetime.now().isoformat(),
+             "steps": {}, "rounds": []}
+
+    # ① 触发(demo 硬编码;真机接飞书日程/语音,含会议室+时间+人数)
+    hc = w_headcount()
+    print(f"① 触发:会议室「阳光厅」10:00 会议,参会 {hc} 人")
+    trace["trigger"] = {"room": room, "headcount": hc, "per_person": per_person}
+    _emit(1, "触发", f"会议室「阳光厅」· 参会 {hc} 人")
+
+    # ② 开灯 + 确认
+    print("② 开灯:")
+    r = sk.turn_on_lights(room); ok, det = _v_light(room)
+    trace["steps"]["light"] = _rec(f"开灯@{room}", r, ok, det)
+    _emit(2, "开灯", det, "success" if ok else "failure")
+
+    # ③ 扫描会议室 + 茶水间(观测源:VLA看图/世界模型场景图)
+    print("③ 扫描:")
+    m = sk.scan(room); t = sk.scan("茶水间")
+    have0, stock, blocked = m["cola"], t["cola"], m["chairs_blocking"]
+    print(f"       会议室:可乐 {have0} 罐,办公椅挡路 {'是' if blocked else '否'}")
+    print(f"       茶水间:可乐库存 {stock} 罐")
+    trace["scan_before"] = {"meeting_cola": have0, "tea_stock": stock, "chairs_blocking": blocked}
+    _emit(3, "扫描会议室+茶水间",
+          f"会议室可乐 {have0} 罐 · 茶水间库存 {stock} 罐" + (" · 办公椅挡路" if blocked else ""))
+
+    # ④ 数饮料 vs 人数 → 算缺口
+    need = hc * per_person
+    gap = need - have0
+    print(f"④ 数缺口:需求 {need} 罐({hc}人 × {per_person})− 现有 {have0} = 缺口 {max(gap, 0)} 罐")
+    trace["gap"] = {"need": need, "have": have0, "gap": max(gap, 0)}
+    _emit(4, "数缺口", f"需求 {need} 罐 − 现有 {have0} = 缺口 {max(gap, 0)} 罐")
+
+    # ⑤ 补货:一个一个补,每轮 walk→pick→walk→place + 每步确认,补完重新数
+    print("⑤ " + ("单次取放(walk→pick→walk→place,每步确认):" if single
+                 else "补货循环(一个一个补,每步重新确认):"))
+    aborted, placed = False, 0
+    while gap > 0:
+        stock = sk.scan("茶水间")["cola"]
+        if stock <= 0:
+            print(f"     ✗ 茶水间可乐不足(已补 {placed} 罐,还缺 {gap})→ 停下上报")
+            _emit(5, f"补第 {placed + 1} 罐可乐", f"茶水间可乐不足(已补 {placed} 罐)", "failure")
+            aborted = True
+            break
+        print(f"   ── 第 {placed + 1} 罐(还缺 {gap},茶水间余 {stock})──")
+        ok, attempts = _restock_one_round(placed + 1, simple_place)
+        trace["rounds"].append({"round": placed + 1, "ok": ok, "attempts": attempts})
+        if not ok:
+            print(f"     ✗ 本轮补货失败 → 停下上报(已补 {placed} 罐)")
+            _emit(5, f"补第 {placed + 1} 罐可乐", "重试仍失败,停下上报", "failure")
+            aborted = True
+            break
+        placed += 1
+        have_now = sk.obs_count_cola(room)      # 重新计数
+        gap = need - have_now
+        print(f"       重新数:会议室 {have_now} 罐 → 还缺 {max(gap, 0)}")
+        retried = len(attempts) > 1
+        _emit(5, f"补第 {placed} 罐可乐",
+              f"会议室 {have_now} 罐,还缺 {max(gap, 0)}" + ("(失败后按现状恢复,重试成功)" if retried else ""),
+              "success")
+
+    # ⑥ 复核前后状态(单次只看数量;完整 demo 再查灯 + 全局摆放)
+    print("⑥ 复核:")
+    have_final = sk.obs_count_cola(room)
+    light_ok = sk.obs_light_on(room)
+    satisfied = have_final >= need
+    bad_slots = [s for s in sk.obs_all_slots(room)
+                 if not (s.get("spaced") and s.get("label_aligned"))]
+    layout_ok = not bad_slots
+    print(f"       会议室可乐 {have0}→{have_final},满足 {hc} 人需求:{'✓' if satisfied else '✗'}")
+    if not single:
+        print(f"       灯光:{'亮 ✓' if light_ok else '未亮 ✗'}")
+        print(f"       全局摆放(间隔/朝向):{'✓ 全部合格' if layout_ok else f'✗ {len(bad_slots)} 罐不合格(需复摆)'}")
+    verdict = satisfied and not aborted
+    if not single:
+        verdict = verdict and light_ok and layout_ok
+    trace["final_check"] = {"have_before": have0, "have_after": have_final, "need": need,
+                            "satisfied": satisfied, "light_ok": light_ok,
+                            "layout_ok": layout_ok, "bad_slots": len(bad_slots),
+                            "aborted": aborted, "verdict": verdict}
+    _emit(6, "复核",
+          f"会议室可乐 {have0}→{have_final}"
+          + ("" if single else f" · 灯{'✓' if light_ok else '✗'} · 摆放{'✓' if layout_ok else '✗'}"),
+          "success" if verdict else "failure")
+
+    # ⑦ 语音播报
+    print("⑦ 播报:")
+    if verdict:
+        report = (f"{room}已放置可乐 {have_final} 罐。" if single
+                  else f"{room}已布置就绪,可乐 {have_final} 罐,满足 {hc} 位参会者,灯光已开。")
+    else:
+        reasons = []
+        if not satisfied:  reasons.append(f"可乐 {have_final}/{need}")
+        if not layout_ok and not single:  reasons.append(f"{len(bad_slots)} 罐摆放不合格")
+        if not light_ok and not single:   reasons.append("灯未开")
+        if aborted:        reasons.append("补货中途中止")
+        report = f"{room}尚未就绪({'、'.join(reasons)}),已停下并上报,请人工协助。"
+    sk.speak(report)
+    trace["report"] = report
+    _emit(7, "语音播报", report, "success")
+
+    print("\n" + "=" * 66)
+    print(f"任务{'完成 ✅' if verdict else '未完成 ❌(失败项已记录进 trace,供事后反思)'}\n")
+
+    # ⑧ 生成新版 SOP(事后反思:读本次 trace 提炼经验规则 → reception_sop_v2.yaml)
+    if reflect:
+        try:
+            from reflect import reflect_reception
+            findings, new_rules, source, sop_out = reflect_reception(trace)
+            trace["reflection"] = {
+                "findings": findings, "new_rules": new_rules, "source": source,
+                "sop_v2": os.path.relpath(sop_out, _ROOT) if sop_out else None}
+            nr = f"新增 {len(new_rules)} 条经验规则" if new_rules else "无新增规则"
+            _emit(8, "事后反思 → 新SOP", f"{source}:{nr}", "success")
+        except Exception as exc:
+            print(f"⑧ 事后反思跳过: {exc}")
+            trace["reflection"] = {"error": str(exc)}
+            _emit(8, "事后反思", f"跳过({exc})", "failure")
+
+    # trace 落盘(含反思;deploy 展示 + 下次反思输入)
+    out = os.path.join(_HERE, "last_reception_trace.json")
+    json.dump(trace, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    print(f"[trace → {os.path.relpath(out, _ROOT)}]")
+    return trace
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="normal",
@@ -152,132 +319,15 @@ def main():
     ap.add_argument("--no-reflect", action="store_true", help="跳过 ⑧ 事后反思(不联网 deepseek)")
     args = ap.parse_args()
 
-    sk.set_backend(args.backend)
-    if args.single:                       # 单次补货 = 需求 1 罐、会议室现有 0 → 补一轮
-        args.headcount, args.meeting_cola = 1, 0
-    simple_place = args.simple_place or args.single
+    def _cli_step(no, phase, detail, status):
+        mark = "✓" if status == "success" else ("✗" if status == "failure" else "·")
+        print(f"   └[子任务{no}] {mark} {phase} — {detail}")
 
-    # 世界初始化 + 故障注入(仅 mock 用;robot_api 下 world 不被读)
-    reset_world(headcount=args.headcount, meeting_cola=args.meeting_cola, tea_cola=args.tea_cola)
-    if args.backend == "mock" and args.scenario != "normal":
-        inject_fault(args.scenario)
-
-    sop = _load_sop()
-    per_person = (sop.get("beverage_restock") or {}).get("per_person", 1)
-    room = "会议室"
-
-    flow = "取放一轮" if args.single else "补货循环"
-    print("=" * 66)
-    print(f"大脑闭环 · G1 会议接待{'· 单次补货' if args.single else ''}"
-          f"(触发→开灯→扫描→数缺口→{flow}→复核→播报)")
-    print(f"backend:{args.backend}" + (f" · 场景:{args.scenario}" if args.backend == "mock" else ""))
-    print("=" * 66)
-
-    trace = {"task": "G1 会议接待补货", "scenario": args.scenario, "backend": args.backend,
-             "single": args.single, "started_at": datetime.now().isoformat(),
-             "steps": {}, "rounds": []}
-
-    # ① 触发(demo 硬编码;真机接飞书日程/语音,含会议室+时间+人数)
-    headcount = w_headcount()
-    print(f"① 触发:会议室「阳光厅」10:00 会议,参会 {headcount} 人")
-    trace["trigger"] = {"room": room, "headcount": headcount, "per_person": per_person}
-
-    # ② 开灯 + 确认
-    print("② 开灯:")
-    r = sk.turn_on_lights(room); ok, det = _v_light(room)
-    trace["steps"]["light"] = _rec(f"开灯@{room}", r, ok, det)
-
-    # ③ 扫描会议室 + 茶水间(观测源:VLA看图/世界模型场景图)
-    print("③ 扫描:")
-    m = sk.scan(room); t = sk.scan("茶水间")
-    have0, stock, blocked = m["cola"], t["cola"], m["chairs_blocking"]
-    print(f"       会议室:可乐 {have0} 罐,办公椅挡路 {'是' if blocked else '否'}")
-    print(f"       茶水间:可乐库存 {stock} 罐")
-    trace["scan_before"] = {"meeting_cola": have0, "tea_stock": stock, "chairs_blocking": blocked}
-
-    # ④ 数饮料 vs 人数 → 算缺口
-    need = headcount * per_person
-    gap = need - have0
-    print(f"④ 数缺口:需求 {need} 罐({headcount}人 × {per_person})− 现有 {have0} = 缺口 {max(gap, 0)} 罐")
-    trace["gap"] = {"need": need, "have": have0, "gap": max(gap, 0)}
-
-    # ⑤ 补货:一个一个补,每轮 walk→pick→walk→place + 每步确认,补完重新数
-    print("⑤ " + ("单次取放(walk→pick→walk→place,每步确认):" if args.single
-                 else "补货循环(一个一个补,每步重新确认):"))
-    aborted, placed = False, 0
-    while gap > 0:
-        stock = sk.scan("茶水间")["cola"]
-        if stock <= 0:
-            print(f"     ✗ 茶水间可乐不足(已补 {placed} 罐,还缺 {gap})→ 停下上报")
-            aborted = True
-            break
-        print(f"   ── 第 {placed + 1} 罐(还缺 {gap},茶水间余 {stock})──")
-        ok, attempts = _restock_one_round(placed + 1, simple_place)
-        trace["rounds"].append({"round": placed + 1, "ok": ok, "attempts": attempts})
-        if not ok:
-            print(f"     ✗ 本轮补货失败 → 停下上报(已补 {placed} 罐)")
-            aborted = True
-            break
-        placed += 1
-        have_now = sk.obs_count_cola(room)      # 重新计数
-        gap = need - have_now
-        print(f"       重新数:会议室 {have_now} 罐 → 还缺 {max(gap, 0)}")
-
-    # ⑥ 复核前后状态(单次只看数量;完整 demo 再查灯 + 全局摆放)
-    print("⑥ 复核:")
-    have_final = sk.obs_count_cola(room)
-    light_ok = sk.obs_light_on(room)
-    satisfied = have_final >= need
-    bad_slots = [s for s in sk.obs_all_slots(room)
-                 if not (s.get("spaced") and s.get("label_aligned"))]
-    layout_ok = not bad_slots
-    print(f"       会议室可乐 {have0}→{have_final},满足 {headcount} 人需求:{'✓' if satisfied else '✗'}")
-    if not args.single:
-        print(f"       灯光:{'亮 ✓' if light_ok else '未亮 ✗'}")
-        print(f"       全局摆放(间隔/朝向):{'✓ 全部合格' if layout_ok else f'✗ {len(bad_slots)} 罐不合格(需复摆)'}")
-    verdict = satisfied and not aborted
-    if not args.single:
-        verdict = verdict and light_ok and layout_ok
-    trace["final_check"] = {"have_before": have0, "have_after": have_final, "need": need,
-                            "satisfied": satisfied, "light_ok": light_ok,
-                            "layout_ok": layout_ok, "bad_slots": len(bad_slots),
-                            "aborted": aborted, "verdict": verdict}
-
-    # ⑦ 语音播报
-    print("⑦ 播报:")
-    if verdict:
-        report = (f"{room}已放置可乐 {have_final} 罐。" if args.single
-                  else f"{room}已布置就绪,可乐 {have_final} 罐,满足 {headcount} 位参会者,灯光已开。")
-    else:
-        reasons = []
-        if not satisfied:  reasons.append(f"可乐 {have_final}/{need}")
-        if not layout_ok and not args.single:  reasons.append(f"{len(bad_slots)} 罐摆放不合格")
-        if not light_ok and not args.single:   reasons.append("灯未开")
-        if aborted:        reasons.append("补货中途中止")
-        report = f"{room}尚未就绪({'、'.join(reasons)}),已停下并上报,请人工协助。"
-    sk.speak(report)
-    trace["report"] = report
-
-    print("\n" + "=" * 66)
-    print(f"任务{'完成 ✅' if verdict else '未完成 ❌(失败项已记录进 trace,供事后反思)'}\n")
-
-    # ⑧ 生成新版 SOP(事后反思:读本次 trace 提炼经验规则 → reception_sop_v2.yaml)
-    if not args.no_reflect:
-        try:
-            from reflect import reflect_reception
-            findings, new_rules, source, sop_out = reflect_reception(trace)
-            trace["reflection"] = {
-                "findings": findings, "new_rules": new_rules, "source": source,
-                "sop_v2": os.path.relpath(sop_out, _ROOT) if sop_out else None}
-        except Exception as exc:
-            print(f"⑧ 事后反思跳过: {exc}")
-            trace["reflection"] = {"error": str(exc)}
-
-    # trace 落盘(含反思;deploy 展示 + 下次反思输入)
-    out = os.path.join(_HERE, "last_reception_trace.json")
-    json.dump(trace, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    print(f"[trace → {os.path.relpath(out, _ROOT)}]")
-    return 0 if verdict else 1
+    trace = run_reception(
+        scenario=args.scenario, backend=args.backend, headcount=args.headcount,
+        meeting_cola=args.meeting_cola, tea_cola=args.tea_cola, single=args.single,
+        simple_place=args.simple_place, reflect=not args.no_reflect, on_step=_cli_step)
+    return 0 if trace.get("final_check", {}).get("verdict") else 1
 
 
 if __name__ == "__main__":

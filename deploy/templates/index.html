@@ -133,6 +133,7 @@
             <div class="result" id="task-result"></div>
             <div class="task-progress" id="task-progress"></div>
             <div class="btn-row" style="margin-top:10px">
+                <button class="btn btn-sm" style="background:#0ea5e9;color:#fff" onclick="startReception()">🤝 开始接待</button>
                 <button class="btn btn-outline btn-sm" onclick="refreshTaskStatus()">刷新任务进度</button>
             </div>
         </div>
@@ -243,6 +244,11 @@
             btn.disabled = false;
             btn.textContent = '发送';
             document.getElementById('task').value = '';
+        }
+        // 会议接待:一键触发(填"开始接待"→ master 命中接待 skill → 复用 task_status 显示 🧠+子任务✓)
+        function startReception() {
+            document.getElementById('task').value = '开始接待';
+            sendTask();
         }
         document.getElementById('task').addEventListener('keydown', e => { if (e.key === 'Enter') sendTask(); });
 
