@@ -199,3 +199,6 @@ master/memory/location_memory.json
 master/sop/*.mp4
 master/sop/demo_actions.json
 master/sop/reception_status.json
+master/sop/uploads/
+master/sop/demo_teach_status.json
+master/sop/demo_teach_result.json

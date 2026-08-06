@@ -83,7 +83,7 @@ def _norm(s):
     return re.sub(r"[，,、。.\s（）()：:]", "", str(s))
 
 
-def _llm_learn(actions, existing):
+def _llm_learn(actions, existing, context):
     key = reflect._api_key()
     if not key:
         return None, "无 CLOUD_API_KEY"
@@ -92,7 +92,7 @@ def _llm_learn(actions, existing):
         + (f" [{s['object']}]" if s.get("object") else "")
         for s in actions)
     known = "\n".join(f"- {r}" for r in existing) or "(无)"
-    prompt = _PROMPT.format(context=_CONTEXT, actions=acts, existing=known)
+    prompt = _PROMPT.format(context=context, actions=acts, existing=known)
     req = urllib.request.Request(
         "https://api.deepseek.com/chat/completions",
         data=json.dumps({"model": "deepseek-chat",
@@ -146,8 +146,9 @@ def save_demonstration(task_specific, raw, name="reception_restock"):
     return out
 
 
-def learn_from_demo(demo, write=True):
-    """人类示范动作序列 → 只给大脑、分两层提炼(反幻觉):Task Specific / Global。"""
+def learn_from_demo(demo, write=True, context=None):
+    """人类示范动作序列 → 只给大脑、分两层提炼(反幻觉):Task Specific / Global。
+    context: 任务背景(前端可传,换任务不改代码);None 用默认接待背景 _CONTEXT。"""
     actions = demo.get("segments", [])
     existing = _existing_rules()
     exist_norm = [_norm(r) for r in existing]
@@ -161,7 +162,7 @@ def learn_from_demo(demo, write=True):
         obj = f" [{s['object']}]" if s.get("object") else ""
         print(f"  · {s.get('start_time','?')}~{s.get('end_time','?')}s {s['action']}{obj}")
 
-    result, err = _llm_learn(actions, existing)
+    result, err = _llm_learn(actions, existing, context or _CONTEXT)
     source = "LLM(deepseek)"
     if not result:
         result, source = _template_learn(actions), f"模板档(LLM 不可用: {err})"

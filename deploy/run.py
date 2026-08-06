@@ -371,6 +371,105 @@ def api_sop():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ===== 人类示范学习(/teach):上传视频 → 动作拆解 + 分层提炼 → 落盘(demo 准备第4步)=====
+
+def _sop_dir():
+    return PROJECT_ROOT / "master" / "sop"
+
+
+@app.route("/teach")
+def teach_page():
+    """人类示范学习页:上传示范视频 → 展示动作拆解 + 三层提炼 → 确认落盘。换任务只改页面上的任务描述。"""
+    return render_template("teach.html")
+
+
+@app.route("/api/demo/parse", methods=["POST"])
+def api_demo_parse():
+    """接上传视频 + 任务描述 → 后台跑 video_to_actions + learn_from_demo(dry-run) → 进度/结果写文件。"""
+    import threading
+    sop_dir = _sop_dir()
+    f = request.files.get("video")
+    if not f:
+        return jsonify({"success": False, "error": "没收到视频文件"}), 400
+    task = (request.form.get("task") or "会议接待补货").strip()
+    up_dir = sop_dir / "uploads"
+    up_dir.mkdir(exist_ok=True)
+    vpath = up_dir / f"demo_{datetime.now():%Y%m%d_%H%M%S}_{f.filename}"
+    f.save(str(vpath))
+    status_path = sop_dir / "demo_teach_status.json"
+    result_path = sop_dir / "demo_teach_result.json"
+    if result_path.exists():
+        result_path.unlink()
+
+    def _st(phase, detail="", done=False, **kw):
+        status_path.write_text(json.dumps(
+            {"running": not done, "done": done, "phase": phase, "detail": detail, "task": task, **kw},
+            ensure_ascii=False), encoding="utf-8")
+    _st("已上传", f.filename)
+
+    def _worker():
+        import sys as _sys
+        if str(sop_dir) not in _sys.path:
+            _sys.path.insert(0, str(sop_dir))
+        try:
+            _st("抽帧 + VLM 解析动作", "qwen3-vl-plus 看视频…")
+            import video_to_actions as v2a
+            demo = v2a.video_to_actions(str(vpath), hint=task)
+            _st("提炼分层", "deepseek 分 Task Specific / Global…")
+            import learn_from_demo as lfd
+            ts, gl = lfd.learn_from_demo(demo, write=False, context=task)
+            result_path.write_text(json.dumps(
+                {"video": vpath.name, "task": task,
+                 "task_summary": demo.get("task_summary", ""),
+                 "segments": demo.get("segments", []),
+                 "task_specific": ts, "global_rules": gl},
+                ensure_ascii=False), encoding="utf-8")
+            _st("完成", "", done=True)
+        except Exception as exc:
+            _st("出错", str(exc), done=True, error=True)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"success": True, "started": True, "video": vpath.name, "task": task})
+
+
+@app.route("/api/demo/status", methods=["GET"])
+def api_demo_status():
+    """解析进度(上传→抽帧+VLM→提炼→完成)。前端轮询。"""
+    p = _sop_dir() / "demo_teach_status.json"
+    if not p.exists():
+        return jsonify({"running": False, "done": False, "phase": "空闲"})
+    return jsonify(json.loads(p.read_text(encoding="utf-8")))
+
+
+@app.route("/api/demo/result", methods=["GET"])
+def api_demo_result():
+    """解析结果:动作序列 + 分层提炼(Task Specific / Global)。前端在 status.done 后拉。"""
+    p = _sop_dir() / "demo_teach_result.json"
+    if not p.exists():
+        return jsonify({"success": False, "error": "尚无结果"}), 404
+    return jsonify({"success": True, **json.loads(p.read_text(encoding="utf-8"))})
+
+
+@app.route("/api/demo/save", methods=["POST"])
+def api_demo_save():
+    """确认落盘:把上次解析的动作序列真写进 Task Specific 记忆 + Global/SOP。"""
+    import sys as _sys
+    sop_dir = _sop_dir()
+    if str(sop_dir) not in _sys.path:
+        _sys.path.insert(0, str(sop_dir))
+    rp = sop_dir / "demo_teach_result.json"
+    if not rp.exists():
+        return jsonify({"success": False, "error": "没有可落盘的结果"}), 404
+    r = json.loads(rp.read_text(encoding="utf-8"))
+    try:
+        import learn_from_demo as lfd
+        demo = {"task_summary": r.get("task_summary", ""), "segments": r.get("segments", [])}
+        ts, gl = lfd.learn_from_demo(demo, write=True, context=r.get("task"))
+        return jsonify({"success": True, "task_specific": ts, "global_rules": gl})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route("/reception")
 def reception_page():
     """G1 会议接待补货闭环展示页(复用桌面配色)。"""
