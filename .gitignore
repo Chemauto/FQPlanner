@@ -196,3 +196,6 @@ master/sop/photos/
 master/sop/last_*.json
 master/sop/demo_sop_v2.yaml
 master/memory/location_memory.json
+master/sop/*.mp4
+master/sop/demo_actions.json
+master/sop/reception_status.json

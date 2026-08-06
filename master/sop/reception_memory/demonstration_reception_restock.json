@@ -1,0 +1,90 @@
+{
+  "source": "人类示范视频(video_to_actions 动作解析)",
+  "learned_at": "2026-08-06",
+  "task_summary": "人从茶水间冰箱取出两罐可乐，搬运至会议室桌面并间隔摆放。",
+  "task_specific": [
+    "可乐在茶水间冰箱内，需打开冰箱门取出",
+    "第一罐可乐从茶水间搬运至会议室，放置在会议桌上",
+    "第二罐可乐取出前，因他人取物而等待，之后再次打开冰箱门取出",
+    "第二罐可乐搬运至会议室后，放置在会议桌上并调整间距"
+  ],
+  "raw_segments": [
+    {
+      "start_time": 0.0,
+      "end_time": 5.0,
+      "action": "走向茶水间冰箱",
+      "object": "冰箱",
+      "confidence": 0.95
+    },
+    {
+      "start_time": 5.0,
+      "end_time": 10.0,
+      "action": "打开冰箱门",
+      "object": "冰箱",
+      "confidence": 0.98
+    },
+    {
+      "start_time": 10.0,
+      "end_time": 15.5,
+      "action": "取出第一罐可乐",
+      "object": "可乐罐",
+      "confidence": 0.97
+    },
+    {
+      "start_time": 15.5,
+      "end_time": 20.5,
+      "action": "关闭冰箱门",
+      "object": "冰箱",
+      "confidence": 0.96
+    },
+    {
+      "start_time": 20.5,
+      "end_time": 41.5,
+      "action": "搬运可乐至会议室",
+      "object": "可乐罐",
+      "confidence": 0.94
+    },
+    {
+      "start_time": 41.5,
+      "end_time": 46.0,
+      "action": "放置第一罐可乐",
+      "object": "会议桌",
+      "confidence": 0.98
+    },
+    {
+      "start_time": 46.0,
+      "end_time": 72.0,
+      "action": "返回茶水间",
+      "object": "走廊/茶水间",
+      "confidence": 0.92
+    },
+    {
+      "start_time": 72.0,
+      "end_time": 83.0,
+      "action": "等待他人取物后再次开冰箱",
+      "object": "冰箱",
+      "confidence": 0.85
+    },
+    {
+      "start_time": 83.0,
+      "end_time": 88.0,
+      "action": "取出第二罐可乐",
+      "object": "可乐罐",
+      "confidence": 0.97
+    },
+    {
+      "start_time": 88.0,
+      "end_time": 114.0,
+      "action": "搬运第二罐可乐至会议室",
+      "object": "可乐罐",
+      "confidence": 0.93
+    },
+    {
+      "start_time": 114.0,
+      "end_time": 119.6,
+      "action": "放置第二罐可乐并调整间距",
+      "object": "会议桌",
+      "confidence": 0.96
+    }
+  ]
+}
