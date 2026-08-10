@@ -50,6 +50,40 @@ def _load_sop():
         return {}
 
 
+# ---------- 任务完成确认 & 上报(SOP §6 completion + task_state.success/failure_conditions)----------
+
+def _notify_feishu(card):
+    """上报飞书(预留):设了 FEISHU_WEBHOOK 环境变量才发;③飞书触发接入后完善卡片格式。现在发纯文本。"""
+    url = os.environ.get("FEISHU_WEBHOOK")
+    if not url:
+        return
+    try:
+        import urllib.request
+        text = f"[G1 接待] {'✅ 完成' if card['verdict'] else '❌ 未完成'} · {card['spoken']}"
+        req = urllib.request.Request(
+            url, data=json.dumps({"msg_type": "text", "content": {"text": text}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as exc:
+        print(f"       (飞书上报失败,跳过:{exc})")
+
+
+def _report_out(card):
+    """结构化上报:控制台逐条 + 落 last_reception_report.json(前端可读)+ 飞书(预留)。"""
+    print(f"       📋 完成确认报告 [{'✅ 完成' if card['verdict'] else '❌ 未完成'}]")
+    for c in card["checks"]:
+        print(f"          {'✓' if c['pass'] else '✗'} {c['name']}:{c['detail']}")
+    if card["anomalies"]:
+        print(f"          ⚠ 异常:{'; '.join(card['anomalies'])}")
+    print(f"          → {card['advice']}")
+    try:
+        out = os.path.join(_HERE, "last_reception_report.json")
+        json.dump(card, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    _notify_feishu(card)
+
+
 # ---------- 状态确认(重新观测,不采信技能自报;观测源 mock/robot_api 由 reception_skills.obs_* 统一)----------
 
 def _v_light(room):
@@ -275,6 +309,26 @@ def run_reception(scenario="normal", backend="mock", headcount=4, meeting_cola=1
     sk.speak(report)
     trace["report"] = report
     _emit(7, "语音播报", report, "success")
+
+    # 完成确认报告(逐条对照 success_conditions)+ 结构化上报
+    checks = [{"name": "饮料满足人数", "pass": satisfied,
+               "detail": f"会议室可乐 {have_final}/{need} 罐"}]
+    if not single:
+        checks.append({"name": "会议室灯已开", "pass": light_ok,
+                       "detail": "灯亮" if light_ok else "灯未亮"})
+        checks.append({"name": "摆放合格(间隔/朝向)", "pass": layout_ok,
+                       "detail": "全部合格" if layout_ok else f"{len(bad_slots)} 罐不合格"})
+    checks.append({"name": "未中途中止", "pass": not aborted,
+                   "detail": "正常完成" if not aborted else "补货中途停下上报"})
+    anomalies = [f"{c['name']}({c['detail']})" for c in checks if not c["pass"]]
+    advice = ("任务完成,无需人工干预。" if verdict
+              else "任务未就绪,需人工协助:" + "、".join(anomalies))
+    report_card = {"task": "会议接待补货", "room": room, "headcount": hc,
+                   "verdict": verdict, "checks": checks, "anomalies": anomalies,
+                   "advice": advice, "spoken": report,
+                   "reported_at": datetime.now().isoformat()}
+    trace["report_card"] = report_card
+    _report_out(report_card)
 
     print("\n" + "=" * 66)
     print(f"任务{'完成 ✅' if verdict else '未完成 ❌(失败项已记录进 trace,供事后反思)'}\n")

@@ -146,6 +146,15 @@ def save_demonstration(task_specific, raw, name="reception_restock"):
     return out
 
 
+def persist(task_specific, global_rules, demo, name="reception_restock"):
+    """把【已确认的】提炼结果【直接】落盘(不重新提炼):Task Specific → 记忆;Global → global_memory + SOP。
+    给前端「确认落盘」用——所见即所得,落的就是页面展示、你确认的那份,不再调 LLM 重算(避免二次提炼漂移)。"""
+    import reception_memory as mem
+    save_demonstration(task_specific, demo, name)
+    mem.update_global_memory(new_rules=global_rules, seed=True)
+    _append_learned_rules(global_rules)
+
+
 def learn_from_demo(demo, write=True, context=None):
     """人类示范动作序列 → 只给大脑、分两层提炼(反幻觉):Task Specific / Global。
     context: 任务背景(前端可传,换任务不改代码);None 用默认接待背景 _CONTEXT。"""

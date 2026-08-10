@@ -202,3 +202,4 @@ master/sop/reception_status.json
 master/sop/uploads/
 master/sop/demo_teach_status.json
 master/sop/demo_teach_result.json
+master/sop/last_reception_report.json

@@ -130,12 +130,22 @@ function renderTrace(t) {
   card(`<h3>⑤ 补货循环 · 一个一个补,每步重新观测确认</h3>
     <div class="bar"><i style="width:${(t.rounds||[]).length/Math.max(g.need,1)*100}%"></i></div>${rounds}`);
 
-  // ⑥⑦ 复核 + 播报
-  card(`<h3>⑥ 复核 & ⑦ 播报</h3>
-    <div class="kv">${bdg(fc.satisfied)} 会议室可乐 ${fc.have_before}→${fc.have_after},满足 ${fc.need} 人需求</div>
-    <div class="kv">${bdg(fc.light_ok)} 灯光已开</div>
-    <div class="kv">${bdg(fc.layout_ok)} 全局摆放(逐罐间隔/朝向)${fc.layout_ok?'全部合格':' — '+fc.bad_slots+' 罐不合格(需复摆)'}</div>
-    <div class="verdict ${fc.verdict?'ok':'no'}">${fc.verdict?'任务完成 ✅':'任务未完成 ❌ — 已停下上报'}</div>
+  // ⑥ 完成确认 & ⑦ 上报(结构化 report card;旧 trace 无 report_card 则回退 final_check)
+  const rc = t.report_card || {};
+  const rcVerdict = rc.verdict != null ? rc.verdict : fc.verdict;
+  let rcBody;
+  if (rc.checks) {
+    rcBody = rc.checks.map(c => `<div class="kv">${bdg(c.pass)} ${esc(c.name)}:${esc(c.detail)}</div>`).join('')
+      + ((rc.anomalies && rc.anomalies.length) ? `<div class="kv r">⚠ 异常:${esc(rc.anomalies.join('；'))}</div>` : '')
+      + `<div class="kv m">→ ${esc(rc.advice)}</div>`;
+  } else {
+    rcBody = `<div class="kv">${bdg(fc.satisfied)} 会议室可乐 ${fc.have_before}→${fc.have_after},满足 ${fc.need} 人需求</div>`
+      + `<div class="kv">${bdg(fc.light_ok)} 灯光已开</div>`
+      + `<div class="kv">${bdg(fc.layout_ok)} 全局摆放 ${fc.layout_ok?'全部合格':fc.bad_slots+' 罐不合格'}</div>`;
+  }
+  card(`<h3>⑥ 完成确认 & ⑦ 上报</h3>
+    ${rcBody}
+    <div class="verdict ${rcVerdict?'ok':'no'}">${rcVerdict?'任务完成 ✅':'任务未完成 ❌'}</div>
     <div class="spk">🔊 ${esc(t.report)}</div>`);
 
   // ⑧ 反思

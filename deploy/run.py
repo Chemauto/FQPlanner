@@ -452,7 +452,7 @@ def api_demo_result():
 
 @app.route("/api/demo/save", methods=["POST"])
 def api_demo_save():
-    """确认落盘:把上次解析的动作序列真写进 Task Specific 记忆 + Global/SOP。"""
+    """确认落盘:把【页面展示、你确认的那份】结果直接写盘(所见即所得,不重新提炼)。"""
     import sys as _sys
     sop_dir = _sop_dir()
     if str(sop_dir) not in _sys.path:
@@ -464,7 +464,8 @@ def api_demo_save():
     try:
         import learn_from_demo as lfd
         demo = {"task_summary": r.get("task_summary", ""), "segments": r.get("segments", [])}
-        ts, gl = lfd.learn_from_demo(demo, write=True, context=r.get("task"))
+        ts, gl = r.get("task_specific", []), r.get("global_rules", [])
+        lfd.persist(ts, gl, demo)      # 直接落盘解析时那份(所见即所得),不再调 LLM 重算
         return jsonify({"success": True, "task_specific": ts, "global_rules": gl})
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -495,6 +496,18 @@ def api_reception_run():
                               text=True, timeout=160)
         trace = json.loads((sop_dir / "last_reception_trace.json").read_text(encoding="utf-8"))
         return jsonify({"success": True, "trace": trace, "stdout": proc.stdout[-4000:]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/reception/report", methods=["GET"])
+def api_reception_report():
+    """接待完成确认报告(reception_loop 生成的 report_card)。主控台在接待 done 后拉它展示。"""
+    p = _sop_dir() / "last_reception_report.json"
+    if not p.exists():
+        return jsonify({"success": False, "error": "尚无报告"}), 404
+    try:
+        return jsonify({"success": True, "report": json.loads(p.read_text(encoding="utf-8"))})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

@@ -75,6 +75,13 @@
         .obj-name { color: #38bdf8; }
         .obj-pos { color: #94a3b8; }
         .obj-grasped { color: #f59e0b; font-size: 11px; }
+        .report-card { margin-top: 14px; }
+        .rc-head { font-size: 14px; font-weight: 600; margin-bottom: 8px; padding: 6px 10px; border-radius: 6px; }
+        .rc-head.ok { background: #052e16; color: #4ade80; } .rc-head.no { background: #2a1215; color: #f87171; }
+        .rc-check { font-size: 13px; color: #cbd5e1; padding: 3px 0 3px 6px; }
+        .rc-check .ok { color: #22c55e; } .rc-check .no { color: #ef4444; }
+        .rc-anom { font-size: 13px; color: #fbbf24; padding: 5px 0 3px 6px; }
+        .rc-advice { font-size: 13px; color: #94a3b8; padding: 6px 0 0 6px; }
     </style>
 </head>
 <body>
@@ -132,6 +139,7 @@
             </div>
             <div class="result" id="task-result"></div>
             <div class="task-progress" id="task-progress"></div>
+            <div class="report-card" id="report-card"></div>
             <div class="btn-row" style="margin-top:10px">
                 <button class="btn btn-sm" style="background:#0ea5e9;color:#fff" onclick="startReception()">🤝 开始接待</button>
                 <button class="btn btn-outline btn-sm" onclick="refreshTaskStatus()">刷新任务进度</button>
@@ -326,9 +334,10 @@
                 const resp = await fetch('/api/task_status');
                 const data = await resp.json();
                 renderTaskProgress(data);
-                // 任务从「进行中」→「完成」的那一刻,给 belief 打一次快照(用户要的"任务结束标记当前状态")
+                // 任务从「进行中」→「完成」的那一刻:belief 快照 + 拉接待完成确认报告
                 if (data.active && data.all_done && !_prevAllDone) {
                     loadBelief('任务结束');
+                    loadReceptionReport();
                 }
                 _prevAllDone = !!(data.active && data.all_done);
                 if (data.active && !data.all_done) {
@@ -340,6 +349,23 @@
             } catch (e) {
                 document.getElementById('task-progress').innerHTML = '<div class="no-task">查询失败</div>';
             }
+        }
+
+        // 接待完成确认报告(reception_loop 生成的 report_card):接待结束时拉来展示
+        async function loadReceptionReport() {
+            const el = document.getElementById('report-card');
+            const _e = s => (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+            try {
+                const d = await (await fetch('/api/reception/report')).json();
+                if (!d.success || !d.report) { el.innerHTML = ''; return; }
+                const r = d.report;
+                const checks = (r.checks||[]).map(c =>
+                    `<div class="rc-check"><span class="${c.pass?'ok':'no'}">${c.pass?'✓':'✗'}</span> ${_e(c.name)}：${_e(c.detail)}</div>`).join('');
+                const anom = (r.anomalies&&r.anomalies.length)
+                    ? `<div class="rc-anom">⚠ 异常：${_e(r.anomalies.join('；'))}</div>` : '';
+                el.innerHTML = `<div class="rc-head ${r.verdict?'ok':'no'}">📋 完成确认报告 · ${r.verdict?'✅ 完成':'❌ 未完成'}</div>`
+                    + checks + anom + `<div class="rc-advice">→ ${_e(r.advice)}</div>`;
+            } catch (e) { el.innerHTML = ''; }
         }
 
         function startTaskPolling() {
