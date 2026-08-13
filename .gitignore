@@ -203,3 +203,6 @@ master/sop/uploads/
 master/sop/demo_teach_status.json
 master/sop/demo_teach_result.json
 master/sop/last_reception_report.json
+
+# PBD 客户端二进制包不入库(单独发/放 release)
+*.whl
