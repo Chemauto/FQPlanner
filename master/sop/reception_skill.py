@@ -68,6 +68,20 @@ def run_reception_skill(task="开始接待", on_step=None, backend="mock",
     if _HERE not in sys.path:
         sys.path.insert(0, _HERE)
     from reception_loop import run_reception
+
+    # retrieve Task Specific Memory(上次人类示范学到的【具体实例/特情】)→ re-ground 到本次接待。
+    # 内容全部来自 demonstration_*.json、不写死:换示范视频→learn_from_demo 写新文件→这里自动读到新的。
+    # 现在先"读出来 + 上报展示"把链路接通(mock 下体现为一条参考经验);真机时可进一步喂给找物/导航 re-ground。
+    try:
+        from learn_from_demo import retrieve_demonstration
+        dm = retrieve_demonstration()
+        if dm["task_specific"] and on_step:
+            ref = " / ".join(dm["task_specific"][:3])
+            tag = f"({dm['learned_at']}) " if dm.get("learned_at") else ""
+            on_step(0, "📖 参考人类示范经验", f"{tag}{ref}", "success")
+    except Exception:
+        pass
+
     return run_reception(scenario=scenario, backend=backend, headcount=headcount,
                          reflect=reflect, on_step=on_step, **kw)
 

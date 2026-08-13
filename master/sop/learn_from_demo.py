@@ -146,6 +146,22 @@ def save_demonstration(task_specific, raw, name="reception_restock"):
     return out
 
 
+def retrieve_demonstration(name="reception_restock"):
+    """读回 Task Specific Memory(save_demonstration 落的那份),部署接待时 re-ground 到本次。
+    读的是【文件内容】、不写死任何位置/特情——换示范视频 → learn_from_demo 写新的
+    demonstration_{name}.json → 这里自动读到新的,无需改代码。文件不存在返回空(不影响接待)。"""
+    path = os.path.join(MEM_DIR, f"demonstration_{name}.json")
+    if not os.path.exists(path):
+        return {"task_specific": [], "task_summary": "", "learned_at": ""}
+    try:
+        rec = json.load(open(path, encoding="utf-8"))
+        return {"task_specific": rec.get("task_specific", []) or [],
+                "task_summary": rec.get("task_summary", ""),
+                "learned_at": rec.get("learned_at", "")}
+    except Exception:
+        return {"task_specific": [], "task_summary": "", "learned_at": ""}
+
+
 def persist(task_specific, global_rules, demo, name="reception_restock"):
     """把【已确认的】提炼结果【直接】落盘(不重新提炼):Task Specific → 记忆;Global → global_memory + SOP。
     给前端「确认落盘」用——所见即所得,落的就是页面展示、你确认的那份,不再调 LLM 重算(避免二次提炼漂移)。"""

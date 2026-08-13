@@ -361,6 +361,13 @@ class GlobalAgent:
         import uuid as _uuid
         from sop.reception_skill import run_reception_skill, RECEPTION_SKILL, skill_card
 
+        # A. 忽略重复触发:上一次接待还没跑完,就忽略新的"开始接待"
+        # (防连发、防两个后台线程同时改同一个虚拟世界打架)。等它跑完 _reception_running 复位后,再说才会开新的。
+        if self._reception_running:
+            msg = "已有一次接待正在进行,忽略这次重复触发(等它跑完,再说“开始接待”才会开新的一次)"
+            self.logger.info(f"[reception] 忽略重复触发(上一次接待未结束): {self.current_task_desc}")
+            return {"reasoning_explanation": msg, "subtask_list": [], "ignored": True}
+
         task_id = task_id or str(_uuid.uuid4()).replace("-", "")
         card = skill_card()
         reasoning = (
